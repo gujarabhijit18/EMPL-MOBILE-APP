@@ -1,0 +1,296 @@
+/* ============================================
+   🎨 Next-Level App Styles
+   Modern CSS with Design System Integration
+   ============================================ */
+
+/* CSS Custom Properties - Aligned with Design System */
+:root {
+  --app-container-max-width: 1280px;
+  --app-container-padding: clamp(1rem, 4vw, 2rem);
+  --app-transition-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --app-shadow-glow: 0 0 2em;
+  --app-logo-size: clamp(4em, 8vw, 6em);
+}
+
+/* ============================================
+   📦 Root Container
+   ============================================ */
+#root {
+  /* Layout */
+  max-width: var(--app-container-max-width);
+  margin-inline: auto;
+  padding: var(--app-container-padding);
+  
+  /* Typography */
+  text-align: center;
+  
+  /* Modern Layout */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  
+  /* Smooth Scrolling */
+  scroll-behavior: smooth;
+  
+  /* Performance */
+  contain: layout style paint;
+}
+
+/* ============================================
+   🎯 Logo Styles
+   ============================================ */
+.logo {
+  /* Sizing */
+  height: var(--app-logo-size);
+  width: auto;
+  padding: 1.5em;
+  
+  /* Performance Optimization */
+  will-change: filter, transform;
+  
+  /* Smooth Transitions */
+  transition: 
+    filter 300ms var(--app-transition-smooth),
+    transform 300ms var(--app-transition-smooth);
+  
+  /* Accessibility */
+  display: inline-block;
+  
+  /* Prevent Layout Shift */
+  aspect-ratio: 1;
+}
+
+/* Logo Hover Effects */
+.logo:hover {
+  filter: drop-shadow(0 0 2em hsl(221 83% 53% / 0.6));
+  transform: scale(1.05);
+}
+
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em hsl(199 89% 48% / 0.6));
+  transform: scale(1.05) rotate(5deg);
+}
+
+/* Logo Focus States (Accessibility) */
+.logo:focus-visible {
+  outline: 2px solid hsl(221 83% 53%);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+/* ============================================
+   🌀 Animations
+   ============================================ */
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes logo-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+  
+  .logo:not(:hover) {
+    animation: logo-pulse 3s ease-in-out infinite;
+  }
+  
+  .card {
+    animation: fade-in-up 0.6s var(--app-transition-smooth);
+  }
+}
+
+/* Respect User Preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   🃏 Card Component
+   ============================================ */
+.card {
+  /* Spacing */
+  padding: clamp(1.5em, 4vw, 2em);
+  
+  /* Modern Styling */
+  background: hsl(var(--card));
+  border-radius: var(--radius, 0.75rem);
+  border: 1px solid hsl(var(--border));
+  
+  /* Shadows */
+  box-shadow: 
+    var(--shadow-sm, 0 1px 2px 0 rgb(0 0 0 / 0.05)),
+    0 0 0 0 transparent;
+  
+  /* Transitions */
+  transition: 
+    transform 200ms var(--app-transition-smooth),
+    box-shadow 200ms var(--app-transition-smooth),
+    border-color 200ms var(--app-transition-smooth);
+  
+  /* Layout */
+  width: 100%;
+  max-width: 100%;
+  
+  /* Performance */
+  contain: layout style;
+}
+
+/* Card Hover State */
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    var(--shadow-md, 0 4px 6px -1px rgb(0 0 0 / 0.1)),
+    0 0 0 1px hsl(var(--primary) / 0.1);
+  border-color: hsl(var(--primary) / 0.2);
+}
+
+/* Card Focus State */
+.card:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* ============================================
+   📖 Read the Docs
+   ============================================ */
+.read-the-docs {
+  /* Typography */
+  color: hsl(var(--muted-foreground, 220 9% 46%));
+  font-size: clamp(0.875rem, 2vw, 1rem);
+  line-height: 1.6;
+  
+  /* Transitions */
+  transition: color 200ms var(--app-transition-smooth);
+  
+  /* Accessibility */
+  text-decoration: none;
+}
+
+.read-the-docs:hover {
+  color: hsl(var(--foreground));
+  text-decoration: underline;
+}
+
+.read-the-docs:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============================================
+   📱 Responsive Design
+   ============================================ */
+@media (max-width: 768px) {
+  #root {
+    padding: 1rem;
+  }
+  
+  .logo {
+    padding: 1em;
+  }
+  
+  .card {
+    padding: 1.5em;
+  }
+}
+
+@media (min-width: 1920px) {
+  #root {
+    max-width: 1440px;
+  }
+}
+
+/* ============================================
+   🌙 Dark Mode Support
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+  .logo:hover {
+    filter: drop-shadow(0 0 2em hsl(221 83% 53% / 0.8));
+  }
+  
+  .logo.react:hover {
+    filter: drop-shadow(0 0 2em hsl(199 89% 48% / 0.8));
+  }
+}
+
+/* ============================================
+   🎯 Print Styles
+   ============================================ */
+@media print {
+  #root {
+    max-width: 100%;
+    padding: 0;
+  }
+  
+  .logo {
+    filter: none !important;
+    animation: none !important;
+  }
+  
+  .card {
+    box-shadow: none;
+    border: 1px solid #ccc;
+  }
+}
+
+/* ============================================
+   ⚡ Performance Optimizations
+   ============================================ */
+.logo,
+.card {
+  /* GPU Acceleration */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* ============================================
+   🎨 Utility Classes
+   ============================================ */
+.fade-in {
+  animation: fade-in-up 0.6s var(--app-transition-smooth);
+}
+
+.glow-effect {
+  filter: drop-shadow(0 0 1em currentColor);
+}
+
+.smooth-transition {
+  transition: all 200ms var(--app-transition-smooth);
+}
