@@ -1271,6 +1271,49 @@ class ApiService {
     });
   }
 
+  async shortlistCandidates(candidateIds: number[]): Promise<any[]> {
+    console.log("✅ Shortlisting candidates:", candidateIds);
+    return this.request("/hiring/candidates/shortlist", {
+      method: "POST",
+      body: JSON.stringify({ candidate_ids: candidateIds }),
+    });
+  }
+
+  async rejectCandidate(candidateId: number, reason: string): Promise<any> {
+    console.log("❌ Rejecting candidate:", candidateId, reason);
+    return this.request(`/hiring/candidates/${candidateId}/reject?reason=${encodeURIComponent(reason)}`, {
+      method: "POST",
+    });
+  }
+
+  async selectCandidate(candidateId: number): Promise<any> {
+    console.log("✅ Selecting candidate:", candidateId);
+    return this.request(`/hiring/candidates/${candidateId}/select`, {
+      method: "POST",
+    });
+  }
+
+  async sendOffer(candidateId: number): Promise<any> {
+    console.log("📧 Sending offer to candidate:", candidateId);
+    return this.request(`/hiring/candidates/${candidateId}/send-offer`, {
+      method: "POST",
+    });
+  }
+
+  async hireCandidate(candidateId: number, hiringData: {
+    department: string;
+    designation: string;
+    joining_date: string;
+    salary: number;
+    shift_type: string;
+  }): Promise<string> {
+    console.log("🎉 Hiring candidate:", candidateId, hiringData);
+    return this.request(`/hiring/candidates/${candidateId}/hire`, {
+      method: "POST",
+      body: JSON.stringify(hiringData),
+    });
+  }
+
   // ======================
   // 🔹 Attendance APIs
   // ======================
@@ -1292,12 +1335,25 @@ class ApiService {
     // Remove any whitespace or newlines
     cleanSelfie = cleanSelfie.replace(/\s/g, '');
     
+    // Log current time information
+    const now = new Date();
+    const deviceTime = now.toISOString();
+    const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const deviceOffset = -now.getTimezoneOffset();
+    
     console.log("🔵 checkIn called with:", { 
       userId, 
       gpsLocation, 
       originalLength: selfie.length,
       cleanedLength: cleanSelfie.length,
       hasDataUri: selfie.includes('data:image')
+    });
+    
+    console.log("🕐 Device Time Info:", {
+      deviceTime,
+      deviceTimezone,
+      deviceOffset: `UTC${deviceOffset >= 0 ? '+' : ''}${deviceOffset / 60}`,
+      localTime: now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
     });
     
     const token = await this.getToken();
@@ -1321,7 +1377,8 @@ class ApiService {
       user_id: userId,
       gps_location: locationObject,
       selfie_length: cleanSelfie.length,
-      selfie_preview: cleanSelfie.substring(0, 50) + '...'
+      selfie_preview: cleanSelfie.substring(0, 50) + '...',
+      timestamp: deviceTime,
     });
     
     try {
@@ -1374,7 +1431,13 @@ class ApiService {
     }
   }
 
-  async checkOut(userId: number, gpsLocation: string, selfie: string, workSummary?: string): Promise<{
+  async checkOut(
+    userId: number, 
+    gpsLocation: string, 
+    selfie: string, 
+    workSummary?: string,
+    workReportFile?: { uri: string; name: string; type: string } | null
+  ): Promise<{
     gps_location: string;
     selfie: string;
     attendance_id: number;
@@ -1391,17 +1454,30 @@ class ApiService {
     // Remove any whitespace or newlines
     cleanSelfie = cleanSelfie.replace(/\s/g, '');
     
+    // Log current time information
+    const now = new Date();
+    const deviceTime = now.toISOString();
+    const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const deviceOffset = -now.getTimezoneOffset();
+    
     console.log("🔵 checkOut called with:", { 
       userId, 
       gpsLocation, 
       workSummary,
+      workReportFile: workReportFile?.name || 'none',
       originalLength: selfie.length,
       cleanedLength: cleanSelfie.length,
       hasDataUri: selfie.includes('data:image')
     });
     
+    console.log("🕐 Device Time Info:", {
+      deviceTime,
+      deviceTimezone,
+      deviceOffset: `UTC${deviceOffset >= 0 ? '+' : ''}${deviceOffset / 60}`,
+      localTime: now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+    });
+    
     const token = await this.getToken();
-    const url = `${this.baseURL}/attendance/check-out/json`;  // Use JSON endpoint
     
     // Parse GPS location string to object
     const [lat, lon] = gpsLocation.split(',').map(s => parseFloat(s.trim()));
@@ -1410,20 +1486,81 @@ class ApiService {
       longitude: lon,
     };
     
+    // If work report file is provided, use FormData
+    if (workReportFile) {
+      console.log("📄 Uploading with work report file:", workReportFile.name);
+      
+      const formData = new FormData();
+      formData.append('user_id', userId.toString());
+      formData.append('gps_location', JSON.stringify(locationObject));
+      formData.append('work_summary', workSummary || "Completed daily tasks");
+      
+      // Add selfie as file
+      formData.append('selfie', {
+        uri: `data:image/jpeg;base64,${cleanSelfie}`,
+        type: 'image/jpeg',
+        name: `checkout_selfie_${userId}.jpg`,
+      } as any);
+      
+      // Add work report file
+      formData.append('work_report', {
+        uri: workReportFile.uri,
+        type: workReportFile.type,
+        name: workReportFile.name,
+      } as any);
+      
+      const url = `${this.baseURL}/attendance/check-out`;
+      
+      console.log("📤 Check-out request (FormData):", {
+        url,
+        user_id: userId,
+        work_summary: workSummary,
+        work_report: workReportFile.name,
+      });
+      
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: formData,
+        });
+
+        const data = await response.json().catch(() => ({}));
+        
+        if (!response.ok) {
+          console.error(`❌ Check-out failed:`, { status: response.status, data });
+          throw new Error(data?.detail || `HTTP Error: ${response.status}`);
+        }
+
+        console.log("✅ Check-out successful (with file):", data);
+        return data;
+      } catch (error: any) {
+        console.error("❌ Check-out error:", error);
+        throw error;
+      }
+    }
+    
+    // Use JSON endpoint if no file
+    const url = `${this.baseURL}/attendance/check-out/json`;
+    
     const requestBody = {
       user_id: userId,
       gps_location: locationObject,
       selfie: cleanSelfie,
-      work_summary: workSummary || "Completed daily tasks",  // Required by backend
+      work_summary: workSummary || "Completed daily tasks",
     };
     
-    console.log("📤 Check-out request:", {
+    console.log("📤 Check-out request (JSON):", {
       url,
       user_id: userId,
       gps_location: locationObject,
       work_summary: workSummary,
       selfie_length: cleanSelfie.length,
-      selfie_preview: cleanSelfie.substring(0, 50) + '...'
+      selfie_preview: cleanSelfie.substring(0, 50) + '...',
+      timestamp: deviceTime,
     });
     
     try {
@@ -1486,6 +1623,10 @@ class ApiService {
     check_in: string;
     check_out: string | null;
     total_hours: number;
+    work_summary?: string | null;
+    workSummary?: string | null;
+    work_report?: string | null;
+    workReport?: string | null;
   }>> {
     return this.request(`/attendance/my-attendance/${userId}`);
   }
@@ -1505,6 +1646,10 @@ class ApiService {
     check_out: string | null;
     total_hours: number;
     status: string;
+    work_summary?: string | null;
+    workSummary?: string | null;
+    work_report?: string | null;
+    workReport?: string | null;
   }>> {
     const endpoint = date 
       ? `/attendance/all?date=${date}`
@@ -1640,6 +1785,109 @@ class ApiService {
       console.error("❌ PDF Export Failed:", error);
       throw new Error(error.message || "Failed to export PDF");
     }
+  }
+
+  // ======================
+  // 🔹 Hiring / Vacancy APIs
+  // ======================
+
+  async getJobOpenings(department?: string, status?: string): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (department) params.append('department', department);
+    if (status) params.append('status_filter', status);
+    
+    const queryString = params.toString();
+    const endpoint = `/hiring/vacancies${queryString ? '?' + queryString : ''}`;
+    
+    console.log("📥 Fetching vacancies:", endpoint);
+    try {
+      return await this.request(endpoint);
+    } catch (error: any) {
+      if (error.message.includes("404") || error.message.includes("Not Found")) {
+        console.log("⚠️ No vacancies found (404), returning empty array");
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  async createJobOpening(vacancyData: {
+    title: string;
+    department: string;
+    location?: string;
+    employment_type?: string;
+    experience_required?: string;
+    description?: string;
+    requirements?: string;
+    responsibilities?: string;
+    nice_to_have_skills?: string;
+    salary_range?: string;
+    status?: string;
+    closing_date?: string;
+  }): Promise<any> {
+    console.log("📤 Creating vacancy:", vacancyData);
+    return this.request("/hiring/vacancies", {
+      method: "POST",
+      body: JSON.stringify(vacancyData),
+    });
+  }
+
+  async updateJobOpening(vacancyId: number, vacancyData: any): Promise<any> {
+    console.log("📤 Updating vacancy:", vacancyId, vacancyData);
+    return this.request(`/hiring/vacancies/${vacancyId}`, {
+      method: "PUT",
+      body: JSON.stringify(vacancyData),
+    });
+  }
+
+  async deleteJobOpening(vacancyId: number): Promise<void> {
+    console.log("🗑️ Deleting vacancy:", vacancyId);
+    return this.request(`/hiring/vacancies/${vacancyId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getCandidates(vacancyId?: number, status?: string): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (vacancyId) params.append('vacancy_id', vacancyId.toString());
+    if (status) params.append('status_filter', status);
+    
+    const queryString = params.toString();
+    const endpoint = `/hiring/candidates${queryString ? '?' + queryString : ''}`;
+    
+    console.log("📥 Fetching candidates:", endpoint);
+    try {
+      return await this.request(endpoint);
+    } catch (error: any) {
+      if (error.message.includes("404") || error.message.includes("Not Found")) {
+        console.log("⚠️ No candidates found (404), returning empty array");
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  async createCandidate(candidateData: any): Promise<any> {
+    console.log("📤 Creating candidate:", candidateData);
+    return this.request("/hiring/candidates", {
+      method: "POST",
+      body: JSON.stringify(candidateData),
+    });
+  }
+
+  async updateCandidate(candidateId: number, candidateData: any): Promise<any> {
+    console.log("📤 Updating candidate:", candidateId, candidateData);
+    return this.request(`/hiring/candidates/${candidateId}`, {
+      method: "PUT",
+      body: JSON.stringify(candidateData),
+    });
+  }
+
+  async deleteCandidate(candidateId: number): Promise<void> {
+    console.log("🗑️ Deleting candidate:", candidateId);
+    return this.request(`/hiring/candidates/${candidateId}`, {
+      method: "DELETE",
+    });
   }
 }
 

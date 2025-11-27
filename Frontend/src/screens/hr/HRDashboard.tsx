@@ -1,22 +1,21 @@
+import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe icons
+import { useNavigation } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
+import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
   Alert,
   Animated,
   Easing,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe icons
-import { useNavigation } from "@react-navigation/native";
-import { useAuth } from "../../contexts/AuthContext";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { StatusBar } from 'expo-status-bar';
+import { useAuth } from "../../contexts/AuthContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
-import { LinearGradient } from "expo-linear-gradient";
-import { format } from "date-fns";
 
 interface Stats {
   totalEmployees: number;
@@ -29,14 +28,6 @@ interface Stats {
   openPositions: number;
 }
 
-interface SelfAttendanceRecord {
-  id: string;
-  date: string;
-  checkInTime?: string;
-  checkOutTime?: string;
-  status?: "present" | "late" | "absent";
-}
-
 export default function HRDashboard() {
   const navigation = useNavigation<any>();
   const { logout, user } = useAuth();
@@ -44,7 +35,6 @@ export default function HRDashboard() {
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const dropdownOpacity = React.useRef(new Animated.Value(0)).current;
   const dropdownTranslateY = React.useRef(new Animated.Value(-10)).current;
-  const [attendanceViewMode, setAttendanceViewMode] = useState<'self' | 'employee'>('self');
   const [stats, setStats] = useState<Stats>({
     totalEmployees: 0,
     presentToday: 0,
@@ -55,9 +45,6 @@ export default function HRDashboard() {
     exitingThisMonth: 0,
     openPositions: 0,
   });
-  const [selfAttendanceHistory, setSelfAttendanceHistory] = useState<SelfAttendanceRecord[]>([]);
-  const [currentSelfAttendance, setCurrentSelfAttendance] = useState<SelfAttendanceRecord | null>(null);
-
   useEffect(() => {
     // ✅ Simulate data (offline mode)
     const loadStats = async () => {
@@ -76,42 +63,6 @@ export default function HRDashboard() {
     };
     loadStats();
   }, []);
-
-  useEffect(() => {
-    const today = format(new Date(), "yyyy-MM-dd");
-    const mockSelfData: SelfAttendanceRecord[] = [
-      { id: "1", date: today, checkInTime: "09:12 AM", checkOutTime: "--", status: "present" },
-      { id: "2", date: "2025-11-17", checkInTime: "09:04 AM", checkOutTime: "06:02 PM", status: "present" },
-      { id: "3", date: "2025-11-16", checkInTime: "09:25 AM", checkOutTime: "06:30 PM", status: "late" },
-      { id: "4", date: "2025-11-15", checkInTime: "--", checkOutTime: "--", status: "absent" },
-    ];
-    setSelfAttendanceHistory(mockSelfData);
-    setCurrentSelfAttendance(mockSelfData.find((record) => record.date === today) || null);
-  }, []);
-
-  const formatTime = (time?: string) => {
-    if (!time || time === "--") return "--";
-    return time;
-  };
-
-  const formatDateDisplay = (date: string) => {
-    try {
-      return format(new Date(date), "dd MMM yyyy");
-    } catch {
-      return date;
-    }
-  };
-
-  const getStatusBadgeStyle = (status?: string) => {
-    switch (status) {
-      case "late":
-        return { backgroundColor: "#f97316" };
-      case "absent":
-        return { backgroundColor: "#ef4444" };
-      default:
-        return { backgroundColor: "#10b981" };
-    }
-  };
 
   const recentActivities = [
     { id: "1", type: "leave", user: "Jane Smith", time: "10:30 AM", status: "Pending" },
@@ -329,71 +280,7 @@ export default function HRDashboard() {
           </View>
         </View>
 
-        {/* 🙋‍♀️ HR Self Attendance */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>My Attendance</Text>
-          <View style={styles.selfAttendanceCard}>
-            <View style={styles.selfAttendanceHeader}>
-              <View>
-                <Text style={styles.selfAttendanceTitle}>Today's Status</Text>
-                <Text style={styles.selfAttendanceSubtitle}>Stay on top of your check-ins</Text>
-              </View>
-              <View style={[styles.selfStatusBadge, getStatusBadgeStyle(currentSelfAttendance?.status)]}>
-                <Text style={styles.selfStatusBadgeText}>
-                  {currentSelfAttendance?.status ? currentSelfAttendance.status.replace(/^./, (c) => c.toUpperCase()) : "--"}
-                </Text>
-              </View>
-            </View>
 
-            <View style={styles.selfStatusGrid}>
-              <View style={styles.selfStatusItem}>
-                <Text style={styles.selfStatusLabel}>Check-in</Text>
-                <Text style={styles.selfStatusValue}>{formatTime(currentSelfAttendance?.checkInTime)}</Text>
-              </View>
-              <View style={styles.selfStatusDivider} />
-              <View style={styles.selfStatusItem}>
-                <Text style={styles.selfStatusLabel}>Check-out</Text>
-                <Text style={styles.selfStatusValue}>{formatTime(currentSelfAttendance?.checkOutTime)}</Text>
-              </View>
-              <View style={styles.selfStatusDivider} />
-              <View style={styles.selfStatusItem}>
-                <Text style={styles.selfStatusLabel}>Hours</Text>
-                <Text style={styles.selfStatusValue}>
-                  {currentSelfAttendance?.checkInTime && currentSelfAttendance?.checkOutTime ? "08h 45m" : "--"}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.selfHistoryListHeader}>
-              <Text style={styles.selfHistoryTitle}>Recent History</Text>
-              <Text style={styles.selfHistorySubtitle}>Last 5 days</Text>
-            </View>
-
-            {selfAttendanceHistory.length ? (
-              <View>
-                {selfAttendanceHistory.slice(0, 5).map((item) => (
-                  <View key={item.id} style={styles.selfHistoryRow}>
-                    <View style={styles.selfHistoryDateBlock}>
-                      <Text style={styles.selfHistoryDateText}>{formatDateDisplay(item.date)}</Text>
-                      <Text style={styles.selfHistoryDayText}>{format(new Date(item.date), "EEE")}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.selfHistoryTime}>In: {formatTime(item.checkInTime)}</Text>
-                      <Text style={styles.selfHistoryTime}>Out: {formatTime(item.checkOutTime)}</Text>
-                    </View>
-                    <View style={[styles.selfHistoryStatusBadge, getStatusBadgeStyle(item.status)]}>
-                      <Text style={styles.selfHistoryStatusText}>
-                        {item.status ? item.status.replace(/^./, (c) => c.toUpperCase()) : "--"}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.noHistoryText}>No attendance history available</Text>
-            )}
-          </View>
-        </View>
 
         {/* 🕓 RECENT ACTIVITIES */}
         <View style={styles.section}>
@@ -751,126 +638,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 8,
     color: "#111827",
-  },
-  selfAttendanceCard: {
-    backgroundColor: "white",
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  selfAttendanceHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  selfAttendanceTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  selfAttendanceSubtitle: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 4,
-  },
-  selfStatusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  selfStatusBadgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  selfStatusGrid: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  selfStatusItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-  selfStatusLabel: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginBottom: 4,
-  },
-  selfStatusValue: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  selfStatusDivider: {
-    width: 1,
-    height: 36,
-    backgroundColor: "#e5e7eb",
-  },
-  selfHistoryListHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  selfHistoryTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  selfHistorySubtitle: {
-    fontSize: 12,
-    color: "#9ca3af",
-  },
-  selfHistoryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-    gap: 12,
-  },
-  selfHistoryDateBlock: {
-    width: 90,
-  },
-  selfHistoryDateText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  selfHistoryDayText: {
-    fontSize: 11,
-    color: "#6b7280",
-  },
-  selfHistoryTime: {
-    fontSize: 12,
-    color: "#4b5563",
-  },
-  selfHistoryStatusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  selfHistoryStatusText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  noHistoryText: {
-    fontSize: 13,
-    color: "#9ca3af",
-    textAlign: "center",
-    paddingVertical: 8,
   },
   activityCard: {
     flexDirection: "row",

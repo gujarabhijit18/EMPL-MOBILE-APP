@@ -24,16 +24,26 @@ class LocationData(BaseModel):
 class AttendanceBase(BaseModel):
     gps_location: Optional[Union[Dict[str, Any], str]] = None
     selfie: Optional[str] = None
+    checkInSelfie: Optional[str] = None
+    checkOutSelfie: Optional[str] = None
     location_data: Optional[Union[Dict[str, Any], str]] = None
 
 class AttendanceOut(AttendanceBase):
     attendance_id: int
     user_id: int
+    employee_id: Optional[str] = None
+    name: Optional[str] = None
+    department: Optional[str] = None
     check_in: datetime
     check_out: Optional[datetime] = None
     total_hours: float
     work_summary: Optional[str] = None
+    workSummary: Optional[str] = None
     work_report: Optional[str] = None
+    workReport: Optional[str] = None
+    locationLabel: Optional[str] = None
+    checkInLocationLabel: Optional[str] = None
+    checkOutLocationLabel: Optional[str] = None
 
     class Config:
         from_attributes = True

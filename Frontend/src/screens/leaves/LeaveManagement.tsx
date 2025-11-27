@@ -6,19 +6,19 @@ import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  Image,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Easing,
+    Image,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { Button, Card, Chip } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -119,15 +119,16 @@ export default function LeaveManagement() {
 
   // Role-based permissions
   const userRole = currentUser.role?.toLowerCase() || 'employee';
+  const isAdmin = userRole === "admin";
   const canApproveLeaves = ["admin", "hr", "manager"].includes(userRole);
-  const canApply = true; // All roles can apply for leave
+  const canApply = !isAdmin; // Admin cannot apply for leave, all other roles can
   const canSeeTeamLeaves = ["admin", "hr", "manager"].includes(userRole);
   const isTeamLead = userRole === "team_lead";
   const isEmployee = userRole === "employee";
 
-  // Default to approvals tab if user is admin/hr/manager, otherwise apply tab
+  // Default tab: Admin goes to approvals, others go to apply (My Leaves)
   const [activeTab, setActiveTab] = useState<"apply" | "approvals" | "calendar">(
-    canSeeTeamLeaves ? "approvals" : "apply"
+    isAdmin ? "approvals" : "apply"
   );
 
   // 📡 Fetch my leaves from API
@@ -590,25 +591,28 @@ export default function LeaveManagement() {
 
         {/* 🧭 Tabs */}
         <View style={styles.tabs}>
-          <TouchableOpacity style={[styles.tab, activeTab === "apply" && styles.tabActive]} onPress={() => setActiveTab("apply")}>
-            <Text style={[styles.tabText, activeTab === "apply" && styles.tabTextActive]}>
-              {isTeamLead || isEmployee ? "My Leaves" : "Apply"}
-            </Text>
-          </TouchableOpacity>
+          {/* My Leaves tab - hidden for admin */}
+          {canApply && (
+            <TouchableOpacity style={[styles.tab, activeTab === "apply" && styles.tabActive]} onPress={() => setActiveTab("apply")}>
+              <Text style={[styles.tabText, activeTab === "apply" && styles.tabTextActive]}>
+                My Leaves
+              </Text>
+            </TouchableOpacity>
+          )}
           {canSeeTeamLeaves && (
             <TouchableOpacity style={[styles.tab, activeTab === "approvals" && styles.tabActive]} onPress={() => setActiveTab("approvals")}>
               <Text style={[styles.tabText, activeTab === "approvals" && styles.tabTextActive]}>
-                {userRole === 'admin' ? 'All Leaves' : 'Team Leaves'} {teamLeaves.length > 0 && `(${teamLeaves.length})`}
+                {isAdmin ? 'Approvals' : 'Team Leaves'} {teamLeaves.filter(l => l.status === "Pending").length > 0 && `(${teamLeaves.filter(l => l.status === "Pending").length})`}
               </Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity style={[styles.tab, activeTab === "calendar" && styles.tabActive]} onPress={() => setActiveTab("calendar")}>
-            <Text style={[styles.tabText, activeTab === "calendar" && styles.tabTextActive]}>Calendar</Text>
+            <Text style={[styles.tabText, activeTab === "calendar" && styles.tabTextActive]}>Leave Calendar</Text>
           </TouchableOpacity>
         </View>
 
-        {/* 📝 Apply Leave Tab */}
-        {activeTab === "apply" && (
+        {/* 📝 Apply Leave Tab - Only for non-admin users */}
+        {activeTab === "apply" && canApply && (
           <View>
             <Card style={styles.leaveRequestCard}>
               <Card.Content>

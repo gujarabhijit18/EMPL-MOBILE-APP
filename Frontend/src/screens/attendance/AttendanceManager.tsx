@@ -4,6 +4,7 @@ import { Picker } from "@react-native-picker/picker";
 import { useNavigation } from "@react-navigation/native";
 import { format } from "date-fns";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Location from "expo-location";
 import { StatusBar } from "expo-status-bar";
@@ -35,6 +36,31 @@ import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { API_CONFIG } from "../../config/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
+
+// IST Timezone Helper Functions (inline to avoid module resolution issues)
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // UTC+5:30
+
+const getCurrentISTTime = (): Date => {
+  const now = new Date();
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  return new Date(utcTime + IST_OFFSET_MS);
+};
+
+const formatAttendanceDate = (date: Date): string => {
+  return date.toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
+const getDayOfWeek = (date: Date): string => {
+  return date.toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'long',
+  });
+};
 
 const useLanguage = () => ({
   t: {
@@ -106,6 +132,7 @@ const AttendanceManager: React.FC = () => {
   const [selfAttendanceHistory, setSelfAttendanceHistory] = useState<SelfAttendanceRecord[]>([]);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [todaysWork, setTodaysWork] = useState("");
+  const [workReportFile, setWorkReportFile] = useState<{ uri: string; name: string; type: string } | null>(null);
   const [permission, requestCameraPermission] = useCameraPermissions();
   const cameraRef = useRef<any>(null);
 
@@ -487,12 +514,13 @@ const AttendanceManager: React.FC = () => {
         setSelfAttendanceHistory((prev) => [record, ...prev]);
         Alert.alert("Success", "Checked In Successfully!");
       } else if (currentAttendance) {
-        // Call check-out API with work summary
+        // Call check-out API with work summary and optional work report file
         const response = await apiService.checkOut(
           parseInt(user.id),
           gpsLocationString,
           base64Image,
-          todaysWork || "Completed daily tasks"  // Include work summary
+          todaysWork || "Completed daily tasks",
+          workReportFile  // Include work report file if selected
         );
 
         const formattedTime = format(new Date(), "hh:mm a");
@@ -507,8 +535,9 @@ const AttendanceManager: React.FC = () => {
           prev.map((item) => (item.id === updated.id ? updated : item))
         );
         
-        // Clear work summary
+        // Clear work summary and work report file
         setTodaysWork("");
+        setWorkReportFile(null);
         
         Alert.alert("Success", "Checked Out Successfully!");
       }
@@ -534,7 +563,39 @@ const AttendanceManager: React.FC = () => {
     }
   };
 
+  // Pick work report PDF file
+  const pickWorkReportFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        setWorkReportFile({
+          uri: file.uri,
+          name: file.name,
+          type: file.mimeType || 'application/pdf',
+        });
+        console.log("📄 Work report file selected:", file.name);
+      }
+    } catch (error) {
+      console.error("Error picking document:", error);
+      Alert.alert("Error", "Failed to pick document. Please try again.");
+    }
+  };
+
+  // Clear work report file
+  const clearWorkReportFile = () => {
+    setWorkReportFile(null);
+  };
+
   const confirmCheckOut = () => {
+    if (!todaysWork.trim()) {
+      Alert.alert("Required", "Please provide today's work summary before checking out.");
+      return;
+    }
     setShowCheckoutModal(false);
     openCamera(false);
   };
@@ -773,8 +834,8 @@ const AttendanceManager: React.FC = () => {
                 { opacity: headerOpacity }
               ]}
             >
-              <Text style={styles.headerDateText}>{format(new Date(), "dd MMM yyyy")}</Text>
-              <Text style={styles.headerDayText}>{format(new Date(), "EEEE")}</Text>
+              <Text style={styles.headerDateText}>{formatAttendanceDate(getCurrentISTTime())}</Text>
+              <Text style={styles.headerDayText}>{getDayOfWeek(getCurrentISTTime())}</Text>
             </Animated.View>
           )}
           
@@ -1568,21 +1629,83 @@ const AttendanceManager: React.FC = () => {
       <Modal visible={showCheckoutModal} transparent animationType="slide">
         <View style={styles.checkoutModalOverlay}>
           <View style={styles.checkoutModalContent}>
+            {/* Close Button */}
+            <TouchableOpacity 
+              style={styles.checkoutModalClose}
+              onPress={() => {
+                setShowCheckoutModal(false);
+                setWorkReportFile(null);
+              }}
+            >
+              <Ionicons name="close" size={24} color="#6b7280" />
+            </TouchableOpacity>
+            
             <Text style={styles.checkoutModalTitle}>Confirm Check-out</Text>
+            <Text style={styles.checkoutModalSubtitle}>
+              Please provide today's work summary before checking out. You can optionally upload a work report PDF.
+            </Text>
+            
+            {/* Work Summary Input */}
+            <Text style={styles.checkoutInputLabel}>Today's Work Summary <Text style={{ color: '#ef4444' }}>*</Text></Text>
             <TextInput
-              placeholder="Optional: Work summary..."
+              placeholder="Brief description of today's work..."
               value={todaysWork}
               onChangeText={setTodaysWork}
               style={styles.checkoutTextInput}
               multiline
+              numberOfLines={4}
+              textAlignVertical="top"
             />
+            
+            {/* PDF Upload Section */}
+            <Text style={styles.checkoutInputLabel}>Upload Work Report PDF (Optional)</Text>
+            <TouchableOpacity 
+              style={styles.filePickerButton}
+              onPress={pickWorkReportFile}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="cloud-upload-outline" size={20} color="#2563eb" />
+              <Text style={styles.filePickerText}>
+                {workReportFile ? workReportFile.name : "Browse... No file selected."}
+              </Text>
+            </TouchableOpacity>
+            
+            {/* Selected File Preview */}
+            {workReportFile && (
+              <View style={styles.selectedFileContainer}>
+                <View style={styles.selectedFileInfo}>
+                  <Ionicons name="document-text" size={20} color="#10b981" />
+                  <Text style={styles.selectedFileName} numberOfLines={1}>
+                    {workReportFile.name}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={clearWorkReportFile}>
+                  <Ionicons name="close-circle" size={22} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {/* Action Buttons */}
             <View style={styles.checkoutModalButtons}>
-              <Button mode="outlined" onPress={() => setShowCheckoutModal(false)}>
-                Cancel
-              </Button>
-              <Button mode="contained" onPress={confirmCheckOut} buttonColor="#ef4444">
-                Continue
-              </Button>
+              <TouchableOpacity 
+                style={styles.checkoutCancelButton}
+                onPress={() => {
+                  setShowCheckoutModal(false);
+                  setWorkReportFile(null);
+                }}
+              >
+                <Text style={styles.checkoutCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[
+                  styles.checkoutProceedButton,
+                  !todaysWork.trim() && styles.checkoutProceedButtonDisabled
+                ]}
+                onPress={confirmCheckOut}
+                disabled={!todaysWork.trim()}
+              >
+                <Text style={styles.checkoutProceedText}>Proceed to Check-out</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -2799,32 +2922,122 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  checkoutModalContent: {
-    width: '90%',
-    backgroundColor: 'white',
-    borderRadius: 12,
     padding: 20,
   },
+  checkoutModalContent: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 24,
+    position: 'relative',
+  },
+  checkoutModalClose: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 10,
+  },
   checkoutModalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+    color: '#111827',
+  },
+  checkoutModalSubtitle: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  checkoutInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
   },
   checkoutTextInput: {
+    borderWidth: 2,
+    borderColor: '#2563eb',
+    borderRadius: 10,
+    padding: 14,
+    minHeight: 100,
+    marginBottom: 20,
+    textAlignVertical: 'top',
+    fontSize: 14,
+    color: '#111827',
+    backgroundColor: '#fff',
+  },
+  filePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: '#e5e7eb',
+    borderRadius: 10,
+    padding: 14,
+    backgroundColor: '#f9fafb',
+    gap: 10,
+  },
+  filePickerText: {
+    fontSize: 14,
+    color: '#6b7280',
+    flex: 1,
+  },
+  selectedFileContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ecfdf5',
     borderRadius: 8,
     padding: 12,
-    height: 80,
-    marginBottom: 16,
-    textAlignVertical: 'top',
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+  },
+  selectedFileInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  selectedFileName: {
+    fontSize: 13,
+    color: '#065f46',
+    fontWeight: '500',
+    flex: 1,
   },
   checkoutModalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 12,
+    marginTop: 24,
+  },
+  checkoutCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+  },
+  checkoutCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  checkoutProceedButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#2563eb',
+    alignItems: 'center',
+  },
+  checkoutProceedButtonDisabled: {
+    backgroundColor: '#93c5fd',
+  },
+  checkoutProceedText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
   },
   // Employee Attendance Styles
   employeeAttendanceContainer: {

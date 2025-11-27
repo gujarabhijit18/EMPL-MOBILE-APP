@@ -136,20 +136,25 @@ def _split_location_labels(label: Optional[str]) -> Dict[str, Optional[str]]:
 
 def _load_selfie_data(serialized: Optional[str]) -> Dict[str, Optional[str]]:
     if not serialized:
+        logger.debug("📸 No selfie data to load (None or empty)")
         return {}
 
     if isinstance(serialized, str):
         try:
             data = json.loads(serialized)
             if isinstance(data, dict):
+                logger.debug(f"📸 Loaded selfie data from JSON: {data}")
                 return {
                     "check_in": data.get("check_in"),
                     "check_out": data.get("check_out"),
                 }
         except json.JSONDecodeError:
+            # If it's not JSON, treat it as a simple path (legacy format)
             if serialized.strip():
+                logger.debug(f"📸 Treating as legacy format (single path): {serialized}")
                 return {"check_in": serialized.strip()}
 
+    logger.debug(f"📸 Could not parse selfie data: {serialized}")
     return {}
 
 
@@ -159,15 +164,31 @@ def _dump_selfie_data(
     check_in: Optional[str] = None,
     check_out: Optional[str] = None,
 ) -> Optional[str]:
-    data = _load_selfie_data(existing)
-    if check_in:
+    """
+    Store selfie data as JSON with check_in and check_out keys.
+    
+    Args:
+        existing: Existing selfie JSON string from database
+        check_in: Path to check-in selfie (if updating)
+        check_out: Path to check-out selfie (if updating)
+    
+    Returns:
+        JSON string with selfie paths or None if no data
+    """
+    # Load existing data
+    data = _load_selfie_data(existing) if existing else {}
+    
+    # Update with new values (only if provided)
+    if check_in is not None:
         data["check_in"] = check_in
-    if check_out:
+    if check_out is not None:
         data["check_out"] = check_out
 
-    if not data:
+    # Return None if no data
+    if not data or (not data.get("check_in") and not data.get("check_out")):
         return None
 
+    logger.debug(f"📸 Dumping selfie data: {data}")
     return json.dumps(data)
 
 
@@ -180,7 +201,22 @@ def _make_selfie_url(path: Optional[str]) -> Optional[str]:
     # Normalize path - remove leading slash and convert backslashes to forward slashes
     normalized = path.replace("\\", "/").lstrip("/")
     
-    # Return the URL path (file existence check removed to avoid false negatives)
+    # Ensure path starts with static/ for proper URL routing
+    if not normalized.startswith("static/"):
+        # Check if it's just a filename
+        if "/" not in normalized:
+            normalized = f"static/selfies/{normalized}"
+        else:
+            normalized = f"static/{normalized}"
+    
+    # Log for debugging
+    full_path = os.path.join(os.getcwd(), normalized)
+    if os.path.exists(full_path):
+        logger.debug(f"✅ Selfie file exists: {full_path}")
+    else:
+        logger.warning(f"⚠️ Selfie file not found: {full_path}")
+    
+    # Return the URL path with leading slash
     return f"/{normalized}"
 
 
@@ -212,7 +248,8 @@ def _cleanup_broken_selfie_urls(db: Session) -> None:
                 # Update database if changes were made
                 if updated:
                     attendance.selfie = _dump_selfie_data(
-                        selfie_data.get("check_in"),
+                        attendance.selfie,
+                        check_in=selfie_data.get("check_in"),
                         check_out=selfie_data.get("check_out")
                     )
                     cleaned_count += 1
@@ -378,10 +415,19 @@ def _evaluate_attendance_status(
 
 
 def _prepare_attendance_payload(attendance: Attendance) -> Dict[str, Any]:
-    selfie_data = _load_selfie_data(getattr(attendance, "selfie", None))
+    raw_selfie = getattr(attendance, "selfie", None)
+    logger.debug(f"📸 Raw selfie data from DB: {raw_selfie}")
+    
+    selfie_data = _load_selfie_data(raw_selfie)
+    logger.debug(f"📸 Parsed selfie data: {selfie_data}")
+    
     location_sections = _split_location_labels(getattr(attendance, "gps_location", None))
     check_in_selfie_path = _make_selfie_url(selfie_data.get("check_in"))
     check_out_selfie_path = _make_selfie_url(selfie_data.get("check_out"))
+    
+    logger.debug(f"📸 Check-in selfie URL: {check_in_selfie_path}")
+    logger.debug(f"📸 Check-out selfie URL: {check_out_selfie_path}")
+    
     work_report_url = _make_selfie_url(getattr(attendance, "work_report", None))
     location_label = location_sections.get("check_in") or getattr(attendance, "gps_location", None)
     total_hours_value = getattr(attendance, "total_hours", None)
@@ -623,17 +669,33 @@ def save_selfie(user_id: int, selfie: UploadFile, prefix: str = 'checkin') -> Op
     """Helper function to save selfie file"""
     if not selfie:
         return None
-        
-    UPLOAD_DIR = "static/selfies"
+    
+    # Use India timezone for consistent timestamps
+    india_now = datetime.now(INDIA_TZ)
+    timestamp = india_now.strftime('%Y%m%d%H%M%S')
+    
+    # Ensure upload directory exists with absolute path
+    UPLOAD_DIR = os.path.join(os.getcwd(), "static", "selfies")
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     
-    file_extension = selfie.filename.split('.')[-1] if '.' in selfie.filename else 'jpg'
-    file_name = f"{user_id}_{prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{file_extension}"
+    file_extension = selfie.filename.split('.')[-1] if selfie.filename and '.' in selfie.filename else 'jpg'
+    file_name = f"{user_id}_{prefix}_{timestamp}.{file_extension}"
     file_path = os.path.join(UPLOAD_DIR, file_name)
+    
+    logger.info(f"📁 Saving {prefix} selfie: {file_path}")
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(selfie.file, buffer)
-    return file_path
+    
+    # Verify file was saved
+    if os.path.exists(file_path):
+        file_size = os.path.getsize(file_path)
+        logger.info(f"✅ {prefix.capitalize()} selfie saved: {file_path} ({file_size} bytes)")
+        # Return relative path for database storage
+        return f"static/selfies/{file_name}"
+    else:
+        logger.error(f"❌ Failed to save {prefix} selfie: {file_path}")
+        return None
 
 
 def save_work_report_file(user_id: int, document: UploadFile) -> Optional[str]:
@@ -809,6 +871,12 @@ async def employee_check_in_route(
         )
 
         if existing_attendance:
+            # Update selfie if provided and not already set
+            if selfie_path and not existing_attendance.selfie:
+                existing_attendance.selfie = _dump_selfie_data(None, check_in=selfie_path)
+                db.commit()
+                db.refresh(existing_attendance)
+                logger.info(f"📸 Updated existing attendance with selfie: {selfie_path}")
             return _prepare_attendance_payload(existing_attendance)
 
         # Create new check-in with location data
@@ -825,6 +893,7 @@ async def employee_check_in_route(
         db.refresh(attendance)
         
         print(f"Successfully created check-in for user {user_id}, attendance ID: {attendance.attendance_id}")
+        logger.info(f"📸 Created attendance with selfie: {selfie_path}")
         
         return _prepare_attendance_payload(attendance)
         
@@ -857,54 +926,96 @@ async def employee_check_in_json(
                 else:
                     b64data = data
                 raw = base64.b64decode(b64data)
-                UPLOAD_DIR = "static/selfies"
+                
+                # Use India timezone for consistent timestamps
+                india_now = datetime.now(INDIA_TZ)
+                timestamp = india_now.strftime('%Y%m%d%H%M%S')
+                
+                # Ensure upload directory exists
+                UPLOAD_DIR = os.path.join(os.getcwd(), "static", "selfies")
                 os.makedirs(UPLOAD_DIR, exist_ok=True)
-                file_name = f"{payload.user_id}_checkin_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+                
+                file_name = f"{payload.user_id}_checkin_{timestamp}.jpg"
                 file_path = os.path.join(UPLOAD_DIR, file_name)
+                
+                logger.info(f"📁 Saving check-in selfie to: {file_path}")
+                logger.info(f"📁 Working directory: {os.getcwd()}")
+                logger.info(f"📁 Timestamp used: {timestamp}")
+                logger.info(f"📁 File name: {file_name}")
+                logger.info(f"📁 Base64 length: {len(b64data)}, Decoded: {len(raw)} bytes")
                 
                 # Save the file
                 with open(file_path, 'wb') as f:
                     f.write(raw)
                 
-                # Verify file was saved
+                # Verify file was saved and set the path
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
-                    print(f"✅ Check-in selfie saved: {file_path} ({file_size} bytes)")
-                    selfie_path = file_path
+                    # Store relative path for database (consistent format)
+                    selfie_path = f"static/selfies/{file_name}"
+                    logger.info(f"✅ Check-in selfie saved successfully!")
+                    logger.info(f"   File path: {file_path}")
+                    logger.info(f"   File size: {file_size} bytes")
+                    logger.info(f"   DB path: {selfie_path}")
                 else:
-                    print(f"❌ Failed to save check-in selfie: {file_path}")
+                    logger.error(f"❌ Failed to save check-in selfie: {file_path}")
+                    selfie_path = None
             except Exception as e:
-                print(f"❌ Error saving check-in selfie: {str(e)}")
+                logger.error(f"❌ Error saving check-in selfie: {str(e)}")
                 import traceback
                 traceback.print_exc()
 
         location_payload = _ensure_location_dict(payload.gps_location)
         processed_location = validate_and_process_location(location_payload)
 
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        # Use India timezone for date calculations
+        india_now = datetime.now(INDIA_TZ)
+        today_start = india_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Convert to UTC for database query (if storing in UTC)
+        today_start_utc = today_start.astimezone(UTC_TZ).replace(tzinfo=None)
+        
         existing_attendance = (
             db.query(Attendance)
             .filter(
                 Attendance.user_id == payload.user_id,
-                Attendance.check_in >= today_start,
+                Attendance.check_in >= today_start_utc,
                 Attendance.check_out.is_(None)
             )
             .first()
         )
         if existing_attendance:
+            logger.info(f"📋 Existing attendance found for user {payload.user_id}")
+            # Update selfie if provided and not already set
+            if selfie_path and not existing_attendance.selfie:
+                existing_attendance.selfie = _dump_selfie_data(None, check_in=selfie_path)
+                db.commit()
+                db.refresh(existing_attendance)
+                logger.info(f"📸 Updated existing attendance with selfie: {selfie_path}")
             return _prepare_attendance_payload(existing_attendance)
 
-        # Create new check-in with location data
+        # Create new check-in with current time (store in UTC for consistency)
+        check_in_time = datetime.utcnow()
+        logger.info(f"⏰ Check-in time (UTC): {check_in_time}")
+        logger.info(f"⏰ Check-in time (India): {check_in_time.replace(tzinfo=UTC_TZ).astimezone(INDIA_TZ)}")
+        
+        selfie_data = _dump_selfie_data(None, check_in=selfie_path) if selfie_path else None
+        logger.info(f"📸 Creating attendance with selfie_path: {selfie_path}")
+        logger.info(f"📸 Selfie data to store: {selfie_data}")
+        
         attendance = Attendance(
             user_id=payload.user_id,
-            check_in=datetime.utcnow(),
+            check_in=check_in_time,
             gps_location=_compose_location_entry(None, "Check-in", processed_location),
-            selfie=_dump_selfie_data(None, check_in=selfie_path) if selfie_path else None,
+            selfie=selfie_data,
             total_hours=0.0
         )
         db.add(attendance)
         db.commit()
         db.refresh(attendance)
+        
+        logger.info(f"✅ Check-in created for user {payload.user_id}, attendance_id: {attendance.attendance_id}")
+        logger.info(f"📸 Selfie data after commit: {attendance.selfie}")
         return _prepare_attendance_payload(attendance)
     except HTTPException:
         raise
@@ -983,6 +1094,8 @@ async def employee_check_out_route(
         attendance.check_out = datetime.utcnow()
         if selfie_path:
             attendance.selfie = _dump_selfie_data(attendance.selfie, check_out=selfie_path)
+            logger.info(f"📸 Updated check-out selfie: {selfie_path}")
+            logger.info(f"📸 Full selfie data: {attendance.selfie}")
         attendance.gps_location = _compose_location_entry(
             attendance.gps_location,
             "Check-out",
@@ -1000,6 +1113,7 @@ async def employee_check_out_route(
         db.refresh(attendance)
         
         print(f"Successfully processed check-out for user {user_id}, attendance ID: {attendance.attendance_id}")
+        logger.info(f"📸 Final selfie data after commit: {attendance.selfie}")
         
         return _prepare_attendance_payload(attendance)
         
@@ -1036,24 +1150,41 @@ async def employee_check_out_json(
                     b64data = data
                 raw = base64.b64decode(b64data)
                 
-                UPLOAD_DIR = "static/selfies"
+                # Use India timezone for consistent timestamps
+                india_now = datetime.now(INDIA_TZ)
+                timestamp = india_now.strftime('%Y%m%d%H%M%S')
+                
+                # Ensure upload directory exists
+                UPLOAD_DIR = os.path.join(os.getcwd(), "static", "selfies")
                 os.makedirs(UPLOAD_DIR, exist_ok=True)
-                file_name = f"{payload.user_id}_checkout_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+                
+                file_name = f"{payload.user_id}_checkout_{timestamp}.jpg"
                 file_path = os.path.join(UPLOAD_DIR, file_name)
+                
+                logger.info(f"📁 Saving check-out selfie to: {file_path}")
+                logger.info(f"📁 Working directory: {os.getcwd()}")
+                logger.info(f"📁 Timestamp used: {timestamp}")
+                logger.info(f"📁 File name: {file_name}")
+                logger.info(f"📁 Base64 length: {len(b64data)}, Decoded: {len(raw)} bytes")
                 
                 # Save the file
                 with open(file_path, 'wb') as f:
                     f.write(raw)
                 
-                # Verify file was saved
+                # Verify file was saved and set the path
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
-                    print(f"✅ Check-out selfie saved: {file_path} ({file_size} bytes)")
-                    selfie_path = file_path
+                    # Store relative path for database (consistent format)
+                    selfie_path = f"static/selfies/{file_name}"
+                    logger.info(f"✅ Check-out selfie saved successfully!")
+                    logger.info(f"   File path: {file_path}")
+                    logger.info(f"   File size: {file_size} bytes")
+                    logger.info(f"   DB path: {selfie_path}")
                 else:
-                    print(f"❌ Failed to save check-out selfie: {file_path}")
+                    logger.error(f"❌ Failed to save check-out selfie: {file_path}")
+                    selfie_path = None
             except Exception as decode_error:
-                print(f"❌ Error saving check-out selfie: {str(decode_error)}")
+                logger.error(f"❌ Error saving check-out selfie: {str(decode_error)}")
                 import traceback
                 traceback.print_exc()
                 raise HTTPException(
@@ -1086,12 +1217,18 @@ async def employee_check_out_json(
                 "longitude": None,
             }
 
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        # Use India timezone for date calculations
+        india_now = datetime.now(INDIA_TZ)
+        today_start = india_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Convert to UTC for database query
+        today_start_utc = today_start.astimezone(UTC_TZ).replace(tzinfo=None)
+        
         attendance = (
             db.query(Attendance)
             .filter(
                 Attendance.user_id == payload.user_id,
-                Attendance.check_in >= today_start,
+                Attendance.check_in >= today_start_utc,
                 Attendance.check_out.is_(None)
             )
             .order_by(Attendance.check_in.desc())
@@ -1100,10 +1237,16 @@ async def employee_check_out_json(
         if not attendance:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active check-in found for today")
 
-        # Update check-out with location data
-        attendance.check_out = datetime.utcnow()
+        # Update check-out with current time (store in UTC for consistency)
+        check_out_time = datetime.utcnow()
+        logger.info(f"⏰ Check-out time (UTC): {check_out_time}")
+        logger.info(f"⏰ Check-out time (India): {check_out_time.replace(tzinfo=UTC_TZ).astimezone(INDIA_TZ)}")
+        
+        attendance.check_out = check_out_time
         if selfie_path:
+            logger.info(f"📸 Updating check-out selfie. Current selfie data: {attendance.selfie}")
             attendance.selfie = _dump_selfie_data(attendance.selfie, check_out=selfie_path)
+            logger.info(f"📸 Updated selfie data: {attendance.selfie}")
         attendance.gps_location = _compose_location_entry(
             attendance.gps_location,
             "Check-out",
@@ -1115,8 +1258,13 @@ async def employee_check_out_json(
 
         time_worked = attendance.check_out - attendance.check_in
         attendance.total_hours = round(time_worked.total_seconds() / 3600, 2)
+        
+        logger.info(f"✅ Check-out completed for user {payload.user_id}, attendance_id: {attendance.attendance_id}, hours: {attendance.total_hours}")
+        logger.info(f"📸 Final selfie data before commit: {attendance.selfie}")
+        
         db.commit()
         db.refresh(attendance)
+        logger.info(f"📸 Final selfie data after commit: {attendance.selfie}")
         return _prepare_attendance_payload(attendance)
     except HTTPException:
         raise

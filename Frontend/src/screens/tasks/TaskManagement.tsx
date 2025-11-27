@@ -935,6 +935,214 @@ const styles = StyleSheet.create({
   actionsColumn: {
     width: 380,
   },
+  // Card View Styles
+  cardViewContainer: {
+    flex: 1,
+    paddingBottom: 16,
+    paddingTop: 4,
+  },
+  taskCardWrapper: {
+    marginBottom: 16,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    overflow: 'visible',
+  },
+  taskCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    padding: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    overflow: 'visible',
+  },
+  taskCardHeaderLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  taskCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 6,
+    lineHeight: 22,
+  },
+  taskCardDescription: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  taskCardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  taskCardMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  taskCardMetaText: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  taskCardBody: {
+    padding: 16,
+    paddingTop: 12,
+  },
+  taskCardInfoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 12,
+  },
+  taskCardInfoItem: {
+    width: '50%',
+    marginBottom: 12,
+    paddingRight: 8,
+  },
+  taskCardInfoLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  taskCardInfoValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  taskCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#F9FAFB',
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  taskCardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  taskCardActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 4,
+  },
+  taskCardActionButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  taskCardPassButton: {
+    backgroundColor: '#F3E8FF',
+    borderColor: '#E9D5FF',
+  },
+  taskCardPassButtonText: {
+    color: '#8B5CF6',
+  },
+  taskCardDeleteButton: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#FECACA',
+  },
+  taskCardDeleteButtonText: {
+    color: '#EF4444',
+  },
+  statusDropdownContainer: {
+    position: 'relative',
+    zIndex: 1000,
+    minWidth: 110,
+  },
+  statusDropdownOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
+  },
+  statusDropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    marginTop: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 15,
+    overflow: 'hidden',
+    zIndex: 2001,
+  },
+  statusDropdownMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    gap: 10,
+  },
+  statusDropdownMenuItemLast: {
+    borderBottomWidth: 0,
+  },
+  statusDropdownMenuItemActive: {
+    backgroundColor: '#F9FAFB',
+  },
+  statusDropdownMenuItemText: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '500',
+    flex: 1,
+  },
+  statusDropdownMenuItemTextActive: {
+    color: '#111827',
+    fontWeight: '600',
+  },
+  viewToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  viewToggleButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#F9FAFB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  viewToggleButtonActive: {
+    backgroundColor: '#8B5CF6',
+    borderColor: '#8B5CF6',
+  },
   // Task Detail Modal Styles
   taskDetailContainer: {
     flex: 1,
@@ -1502,6 +1710,9 @@ export default function TaskManagement() {
   // Status dropdown state
   const [statusDropdownTaskId, setStatusDropdownTaskId] = useState<string | null>(null);
   
+  // View mode state
+  const [viewMode, setViewMode] = useState<'table' | 'card'>('card');
+  
   // Export state
   const [isExporting, setIsExporting] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
@@ -1541,6 +1752,7 @@ export default function TaskManagement() {
     email: string;
     employee_id: string;
     department?: string;
+    role?: string;
     user_id?: number;
   }>>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(false);
@@ -1706,7 +1918,7 @@ export default function TaskManagement() {
           email: emp.email,
           employee_id: emp.employee_id,
           department: emp.department,
-          role: emp.role,
+          role: emp.role || emp.department,
           user_id: emp.user_id,
         }));
         employeeList = transformedEmployees;
@@ -1807,6 +2019,7 @@ export default function TaskManagement() {
         email: emp.email,
         employee_id: emp.employee_id,
         department: emp.department,
+        role: emp.role || emp.department,
         user_id: emp.user_id,
       }));
       
@@ -2311,7 +2524,6 @@ export default function TaskManagement() {
       
       console.log("📤 Starting CSV export...");
       console.log("FileSystem available:", !!FileSystem);
-      console.log("FileSystem.documentDirectory:", FileSystem?.documentDirectory);
       
       const tasksToExport = getExportFilteredTasks();
       console.log(`📊 Exporting ${tasksToExport.length} tasks`);
@@ -2336,11 +2548,11 @@ export default function TaskManagement() {
 
       const csvContent = csvRows.join("\n");
 
-      // Try FileSystem approach first
-      const directory = FileSystem?.documentDirectory || FileSystem?.cacheDirectory;
-      if (FileSystem && directory) {
+      // Try FileSystem approach first (if available)
+      if (FileSystem && (FileSystem as any).documentDirectory) {
         try {
           console.log("✅ Using FileSystem approach");
+          const directory = (FileSystem as any).documentDirectory;
           console.log("📁 Directory:", directory);
           
           // Create file path
@@ -2350,8 +2562,8 @@ export default function TaskManagement() {
           console.log(`💾 Writing to: ${fileUri}`);
 
           // Write to file
-          await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-            encoding: FileSystem.EncodingType.UTF8,
+          await (FileSystem as any).writeAsStringAsync(fileUri, csvContent, {
+            encoding: (FileSystem as any).EncodingType?.UTF8,
           });
 
           console.log("✅ File written successfully");
@@ -2443,7 +2655,6 @@ export default function TaskManagement() {
       
       console.log("📤 Starting PDF/HTML export...");
       console.log("FileSystem available:", !!FileSystem);
-      console.log("FileSystem.documentDirectory:", FileSystem?.documentDirectory);
       
       const tasksToExport = getExportFilteredTasks();
       console.log(`📊 Exporting ${tasksToExport.length} tasks as HTML report`);
@@ -2660,11 +2871,32 @@ export default function TaskManagement() {
 </html>
       `;
 
-      // Try FileSystem approach first
-      const directory = FileSystem?.documentDirectory || FileSystem?.cacheDirectory;
-      if (FileSystem && directory) {
+      // Create a simplified text version for sharing
+      const textReport = `
+TASK REPORT
+Generated: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+
+Date Range: ${getDateRangeLabel()}
+User Filter: ${getUserFilterLabel()}
+Total Tasks: ${tasksToExport.length}
+
+TASKS:
+${tasksToExport.map((task, index) => `
+${index + 1}. ${task.title}
+   ID: #${task.id}
+   Description: ${task.description}
+   Priority: ${task.priority}
+   Status: ${formatStatusLabel(task.status)}
+   Assigned To: ${task.assignedTo.length > 0 ? task.assignedTo[0] : 'Unassigned'}
+   Deadline: ${task.deadline ? new Date(task.deadline).toLocaleDateString() : 'Not set'}
+`).join('\n')}
+      `.trim();
+
+      // Try FileSystem approach first (if available)
+      if (FileSystem && (FileSystem as any).documentDirectory) {
         try {
           console.log("✅ Using FileSystem approach");
+          const directory = (FileSystem as any).documentDirectory;
           console.log("📁 Directory:", directory);
           
           // Create file path
@@ -2674,8 +2906,8 @@ export default function TaskManagement() {
           console.log(`💾 Writing HTML to: ${fileUri}`);
 
           // Write to file
-          await FileSystem.writeAsStringAsync(fileUri, htmlContent, {
-            encoding: FileSystem.EncodingType.UTF8,
+          await (FileSystem as any).writeAsStringAsync(fileUri, htmlContent, {
+            encoding: (FileSystem as any).EncodingType?.UTF8,
           });
 
           console.log("✅ HTML file written successfully");
@@ -2712,27 +2944,6 @@ export default function TaskManagement() {
       }
 
       try {
-        // Create a simplified text version for sharing
-        const textReport = `
-TASK REPORT
-Generated: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-
-Date Range: ${getDateRangeLabel()}
-User Filter: ${getUserFilterLabel()}
-Total Tasks: ${tasksToExport.length}
-
-TASKS:
-${tasksToExport.map((task, index) => `
-${index + 1}. ${task.title}
-   ID: #${task.id}
-   Description: ${task.description}
-   Priority: ${task.priority}
-   Status: ${formatStatusLabel(task.status)}
-   Assigned To: ${task.assignedTo.length > 0 ? task.assignedTo[0] : 'Unassigned'}
-   Deadline: ${task.deadline ? new Date(task.deadline).toLocaleDateString() : 'Not set'}
-`).join('\n')}
-        `.trim();
-
         const result = await Share.share({
           message: textReport,
           title: `Task Report - ${new Date().toLocaleDateString()}`,
@@ -2907,12 +3118,20 @@ ${index + 1}. ${task.title}
             >
               <Ionicons name="download" size={20} color={filteredTasks.length === 0 ? "#D1D5DB" : "#8B5CF6"} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.viewModeButton}>
-              <Ionicons name="list" size={20} color="#8B5CF6" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.viewModeButton}>
-              <Ionicons name="grid" size={20} color="#6B7280" />
-            </TouchableOpacity>
+            <View style={styles.viewToggleContainer}>
+              <TouchableOpacity 
+                style={[styles.viewToggleButton, viewMode === 'card' && styles.viewToggleButtonActive]}
+                onPress={() => setViewMode('card')}
+              >
+                <Ionicons name="grid" size={18} color={viewMode === 'card' ? "#fff" : "#6B7280"} />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.viewToggleButton, viewMode === 'table' && styles.viewToggleButtonActive]}
+                onPress={() => setViewMode('table')}
+              >
+                <Ionicons name="list" size={18} color={viewMode === 'table' ? "#fff" : "#6B7280"} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -3004,12 +3223,211 @@ ${index + 1}. ${task.title}
           />
         )}
 
-        {/* Horizontal Scrollable Table */}
-        <ScrollView 
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.horizontalScrollContainer}
-        >
+        {/* Card View */}
+        {viewMode === 'card' ? (
+          <ScrollView 
+            style={styles.cardViewContainer}
+            onScroll={onScroll}
+            scrollEventThrottle={scrollEventThrottle}
+            showsVerticalScrollIndicator={false}
+          >
+            {filteredTasks.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="clipboard-outline" size={48} color="#9CA3AF" />
+                <Text style={styles.emptyStateText}>No tasks found</Text>
+                <Text style={styles.emptyStateSubtext}>Create a new task to get started</Text>
+              </View>
+            ) : (
+              filteredTasks.map((item, index) => (
+                <View 
+                  key={item.id} 
+                  style={[
+                    styles.taskCardWrapper,
+                    statusDropdownTaskId === item.id && { zIndex: 1000 + index }
+                  ]}
+                >
+                  {/* Card Header */}
+                  <View style={styles.taskCardHeader}>
+                    <View style={styles.taskCardHeaderLeft}>
+                      <Text style={styles.taskCardTitle} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.taskCardDescription} numberOfLines={2}>
+                        {item.description}
+                      </Text>
+                      <View style={styles.taskCardMetaRow}>
+                        <View style={styles.taskCardMetaItem}>
+                          <Ionicons name="calendar-outline" size={14} color="#6B7280" />
+                          <Text style={styles.taskCardMetaText}>
+                            {item.deadline 
+                              ? new Date(item.deadline).toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric'
+                                })
+                              : "No deadline"
+                            }
+                          </Text>
+                        </View>
+                        <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(item.priority), paddingHorizontal: 10, paddingVertical: 4 }]}>
+                          <Text style={[styles.priorityText, { fontSize: 10 }]}>{item.priority}</Text>
+                        </View>
+                      </View>
+                    </View>
+                    <View style={[
+                      styles.statusDropdownContainer,
+                      statusDropdownTaskId === item.id && { zIndex: 2000 }
+                    ]}>
+                      <TouchableOpacity 
+                        style={[
+                          styles.statusBadge, 
+                          { 
+                            backgroundColor: getStatusColor(item.status), 
+                            minWidth: 110,
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                          }
+                        ]}
+                        onPress={() => setStatusDropdownTaskId(statusDropdownTaskId === item.id ? null : item.id)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.statusIndicator} />
+                        <Text style={[styles.statusText, { fontSize: 11 }]} numberOfLines={1}>
+                          {formatStatusLabel(item.status)}
+                        </Text>
+                        <Ionicons 
+                          name={statusDropdownTaskId === item.id ? "chevron-up" : "chevron-down"} 
+                          size={12} 
+                          color="#fff" 
+                          style={{ marginLeft: 4 }} 
+                        />
+                      </TouchableOpacity>
+                      
+                      {/* Status Dropdown Menu */}
+                      {statusDropdownTaskId === item.id && (
+                        <View style={[
+                          styles.statusDropdownMenu,
+                          { 
+                            right: 0,
+                            minWidth: 180,
+                          }
+                        ]}>
+                          {[
+                            { value: 'todo', label: 'To Do', color: '#9CA3AF', icon: 'ellipse-outline' },
+                            { value: 'in-progress', label: 'In Progress', color: '#3B82F6', icon: 'time-outline' },
+                            { value: 'review', label: 'Review', color: '#8B5CF6', icon: 'eye-outline' },
+                            { value: 'completed', label: 'Completed', color: '#10B981', icon: 'checkmark-circle' },
+                            { value: 'cancelled', label: 'Cancelled', color: '#EF4444', icon: 'close-circle' },
+                          ].map((statusOption, idx) => {
+                            const isActive = item.status === statusOption.value;
+                            return (
+                              <TouchableOpacity
+                                key={statusOption.value}
+                                style={[
+                                  styles.statusDropdownMenuItem,
+                                  idx === 4 && styles.statusDropdownMenuItemLast,
+                                  isActive && styles.statusDropdownMenuItemActive,
+                                ]}
+                                onPress={() => {
+                                  updateTaskStatus(item.id, statusOption.value as Task["status"]);
+                                  setStatusDropdownTaskId(null);
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <View style={{
+                                  width: 10,
+                                  height: 10,
+                                  borderRadius: 5,
+                                  backgroundColor: statusOption.color,
+                                }} />
+                                <Text style={[
+                                  styles.statusDropdownMenuItemText,
+                                  isActive && styles.statusDropdownMenuItemTextActive,
+                                ]}>
+                                  {statusOption.label}
+                                </Text>
+                                {isActive && (
+                                  <Ionicons name="checkmark" size={18} color={statusOption.color} />
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+
+                  {/* Card Body */}
+                  <View style={styles.taskCardBody}>
+                    <View style={styles.taskCardInfoGrid}>
+                      <View style={styles.taskCardInfoItem}>
+                        <Text style={styles.taskCardInfoLabel}>Assigned By</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="person-circle" size={16} color="#8B5CF6" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.taskCardInfoValue} numberOfLines={1}>
+                              {item.assignedBy || "Unknown"}
+                            </Text>
+                            <Text style={[styles.taskCardMetaText, { fontSize: 10 }]} numberOfLines={1}>
+                              {item.assignedByRole || "N/A"}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                      <View style={styles.taskCardInfoItem}>
+                        <Text style={styles.taskCardInfoLabel}>Assigned To</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="person" size={16} color="#6B7280" />
+                          <Text style={styles.taskCardInfoValue} numberOfLines={1}>
+                            {item.assignedToName || "Unknown"}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Card Footer */}
+                  <View style={styles.taskCardFooter}>
+                    <View style={styles.taskCardActions}>
+                      <TouchableOpacity 
+                        style={styles.taskCardActionButton}
+                        onPress={() => openTaskDetail(item)}
+                      >
+                        <Ionicons name="eye-outline" size={16} color="#6B7280" />
+                        <Text style={styles.taskCardActionButtonText}>View</Text>
+                      </TouchableOpacity>
+                      
+                      {(user?.role === 'admin' || user?.role === 'hr' || user?.role === 'manager') && (
+                        <TouchableOpacity 
+                          style={[styles.taskCardActionButton, styles.taskCardPassButton]}
+                          onPress={() => openPassTaskModal(item)}
+                        >
+                          <Ionicons name="git-branch-outline" size={16} color="#8B5CF6" />
+                          <Text style={[styles.taskCardActionButtonText, styles.taskCardPassButtonText]}>Pass</Text>
+                        </TouchableOpacity>
+                      )}
+                      
+                      {item.assigned_by && user?.user_id && item.assigned_by === user.user_id && (
+                        <TouchableOpacity 
+                          style={[styles.taskCardActionButton, styles.taskCardDeleteButton]}
+                          onPress={() => deleteTask(item.id)}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                          <Text style={[styles.taskCardActionButtonText, styles.taskCardDeleteButtonText]}>Delete</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        ) : (
+          /* Table View */
+          <ScrollView 
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.horizontalScrollContainer}
+          >
           <View style={styles.tableWrapper}>
             {/* Task Table Header */}
             <View style={styles.tableHeader}>
@@ -3217,6 +3635,7 @@ ${index + 1}. ${task.title}
             )}
           </View>
         </ScrollView>
+        )}
       </View>
 
       {/* ➕ Add Task Button */}

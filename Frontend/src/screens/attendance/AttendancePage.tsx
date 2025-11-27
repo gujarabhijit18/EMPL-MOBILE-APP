@@ -2,25 +2,65 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { format } from "date-fns";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Location from "expo-location";
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Image as RNImage,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { Button, Card, Chip } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
+
+// IST Timezone Helper Functions (inline to avoid module resolution issues)
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // UTC+5:30
+
+const getCurrentISTTime = (): Date => {
+  const now = new Date();
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  return new Date(utcTime + IST_OFFSET_MS);
+};
+
+const formatAttendanceDate = (date: Date): string => {
+  return date.toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
+const getDayOfWeek = (date: Date): string => {
+  return date.toLocaleDateString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'long',
+  });
+};
+
+// Helper to build full selfie URL from backend path
+const buildSelfieUrl = (path: string | null | undefined): string | null => {
+  if (!path) return null;
+  // If already a full URL, return as is
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  // Build full URL using API base
+  const baseUrl = apiService.getBaseUrl();
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${baseUrl}${cleanPath}`;
+};
 
 interface AttendanceRecord {
   id: string;
@@ -28,7 +68,11 @@ interface AttendanceRecord {
   checkInTime?: string;
   checkOutTime?: string;
   selfie?: string | null;
+  checkInSelfie?: string | null;
+  checkOutSelfie?: string | null;
   status?: string;
+  workSummary?: string;
+  workReportFileName?: string;
 }
 
 export default function AttendancePage() {
@@ -43,6 +87,7 @@ export default function AttendancePage() {
   const [currentAttendance, setCurrentAttendance] = useState<AttendanceRecord | null>(null);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [todaysWork, setTodaysWork] = useState("");
+  const [workReportFile, setWorkReportFile] = useState<{ uri: string; name: string; type: string } | null>(null);
   const cameraRef = useRef<any>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const navigation = useNavigation();
@@ -142,14 +187,28 @@ export default function AttendancePage() {
       
       // Transform API data to match component structure
       const today = format(new Date(), "yyyy-MM-dd");
-      const transformedData: AttendanceRecord[] = data.map((record) => ({
-        id: record.attendance_id.toString(),
-        date: format(new Date(record.check_in), "yyyy-MM-dd"),
-        checkInTime: format(new Date(record.check_in), "hh:mm a"),
-        checkOutTime: record.check_out ? format(new Date(record.check_out), "hh:mm a") : undefined,
-        status: "present",
-        selfie: record.checkInSelfie || record.selfie,
-      }));
+      const transformedData: AttendanceRecord[] = data.map((record: any) => {
+        // Extract work report filename from path if available
+        const workReportPath = record.work_report || record.workReport;
+        let workReportFileName: string | undefined;
+        if (workReportPath) {
+          const parts = workReportPath.split('/');
+          workReportFileName = parts[parts.length - 1];
+        }
+        
+        return {
+          id: record.attendance_id.toString(),
+          date: format(new Date(record.check_in), "yyyy-MM-dd"),
+          checkInTime: format(new Date(record.check_in), "hh:mm a"),
+          checkOutTime: record.check_out ? format(new Date(record.check_out), "hh:mm a") : undefined,
+          status: "present",
+          selfie: record.checkInSelfie || record.selfie,
+          checkInSelfie: record.checkInSelfie,
+          checkOutSelfie: record.checkOutSelfie,
+          workSummary: record.work_summary || record.workSummary,
+          workReportFileName: workReportFileName,
+        };
+      });
       
       setAttendanceHistory(transformedData);
       setCurrentAttendance(transformedData.find((r) => r.date === today) || null);
@@ -230,18 +289,21 @@ export default function AttendancePage() {
         setAttendanceHistory((prev) => [record, ...prev]);
         Alert.alert("Success", "Checked In Successfully!");
       } else if (currentAttendance) {
-        // Call check-out API with work summary
-        const response = await apiService.checkOut(
+        // Call check-out API with work summary and optional file
+        await apiService.checkOut(
           parseInt(user.id),
           gpsLocationString,
           base64Image,
-          workSummaryForCheckout || "Completed daily tasks"  // Use work summary or default
+          workSummaryForCheckout || "Completed daily tasks",
+          workReportFile
         );
 
         const formattedTime = format(new Date(), "hh:mm a");
         const updated: AttendanceRecord = {
           ...currentAttendance,
           checkOutTime: formattedTime,
+          workSummary: workSummaryForCheckout || "Completed daily tasks",
+          workReportFileName: workReportFile?.name,
         };
         
         setCurrentAttendance(updated);
@@ -249,9 +311,10 @@ export default function AttendancePage() {
           prev.map((item) => (item.id === updated.id ? updated : item))
         );
         
-        // Clear work summary
+        // Clear work summary and file
         setWorkSummaryForCheckout("");
         setTodaysWork("");
+        setWorkReportFile(null);
         
         Alert.alert("Success", "Checked Out Successfully!");
       }
@@ -274,7 +337,34 @@ export default function AttendancePage() {
     }
   };
 
+  // Pick work report PDF file
+  const pickWorkReportFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        setWorkReportFile({
+          uri: file.uri,
+          name: file.name,
+          type: file.mimeType || 'application/pdf',
+        });
+        console.log("📄 Work report file selected:", file.name);
+      }
+    } catch (error) {
+      console.error("Error picking document:", error);
+      Alert.alert("Error", "Failed to pick document. Please try again.");
+    }
+  };
+
   const confirmCheckOut = () => {
+    if (!todaysWork.trim()) {
+      Alert.alert("Required", "Please provide today's work summary before checking out.");
+      return;
+    }
     // Store the work summary before closing modal
     setWorkSummaryForCheckout(todaysWork);
     setShowCheckoutModal(false);
@@ -330,8 +420,8 @@ export default function AttendancePage() {
           </View>
         </View>
         <View style={styles.heroDateBadge}>
-          <Text style={styles.heroDate}>{format(new Date(), "dd MMM yyyy")}</Text>
-          <Text style={styles.heroDay}>{format(new Date(), "EEEE")}</Text>
+          <Text style={styles.heroDate}>{formatAttendanceDate(getCurrentISTTime())}</Text>
+          <Text style={styles.heroDay}>{getDayOfWeek(getCurrentISTTime())}</Text>
         </View>
       </View>
 
@@ -382,6 +472,70 @@ export default function AttendancePage() {
                 >
                   {currentAttendance.status === "late" ? "Late Arrival" : "On Time"}
                 </Chip>
+
+                {/* Selfies Section - show check-in and check-out selfies */}
+                {(currentAttendance.checkInSelfie || currentAttendance.checkOutSelfie) && (
+                  <View style={styles.selfiesContainer}>
+                    <View style={styles.selfiesHeader}>
+                      <Ionicons name="camera-outline" size={18} color="#2563eb" />
+                      <Text style={styles.selfiesTitle}>Attendance Selfies</Text>
+                    </View>
+                    <View style={styles.selfiesRow}>
+                      {/* Check-in Selfie */}
+                      <View style={styles.selfieItem}>
+                        <Text style={styles.selfieLabel}>Check-in</Text>
+                        {currentAttendance.checkInSelfie && buildSelfieUrl(currentAttendance.checkInSelfie) ? (
+                          <RNImage 
+                            source={{ uri: buildSelfieUrl(currentAttendance.checkInSelfie)! }}
+                            style={styles.selfieImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.selfieImagePlaceholder}>
+                            <Ionicons name="person-outline" size={24} color="#9ca3af" />
+                          </View>
+                        )}
+                      </View>
+                      
+                      {/* Check-out Selfie */}
+                      <View style={styles.selfieItem}>
+                        <Text style={styles.selfieLabel}>Check-out</Text>
+                        {currentAttendance.checkOutSelfie && buildSelfieUrl(currentAttendance.checkOutSelfie) ? (
+                          <RNImage 
+                            source={{ uri: buildSelfieUrl(currentAttendance.checkOutSelfie)! }}
+                            style={styles.selfieImage}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={styles.selfieImagePlaceholder}>
+                            <Ionicons name="person-outline" size={24} color="#9ca3af" />
+                            <Text style={styles.selfieImagePlaceholderText}>
+                              {currentAttendance.checkOutTime ? "No selfie" : "Pending"}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                )}
+
+                {/* Today's Work Summary - shown after checkout */}
+                {currentAttendance.checkOutTime && currentAttendance.workSummary && (
+                  <View style={styles.workSummaryCard}>
+                    <View style={styles.workSummaryHeader}>
+                      <Ionicons name="document-text-outline" size={18} color="#2563eb" />
+                      <Text style={styles.workSummaryTitle}>Today's Work Summary</Text>
+                    </View>
+                    <Text style={styles.workSummaryText}>{currentAttendance.workSummary}</Text>
+                    
+                    {currentAttendance.workReportFileName && (
+                      <View style={styles.workReportFileInfo}>
+                        <Ionicons name="attach" size={16} color="#10b981" />
+                        <Text style={styles.workReportFileName}>{currentAttendance.workReportFileName}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </View>
             ) : (
               <View style={styles.noRecordContainer}>
@@ -453,23 +607,83 @@ export default function AttendancePage() {
           <Modal visible={showCheckoutModal} transparent animationType="slide">
             <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
+                {/* Close Button */}
+                <TouchableOpacity 
+                  style={styles.modalCloseBtn}
+                  onPress={() => {
+                    setShowCheckoutModal(false);
+                    setWorkReportFile(null);
+                  }}
+                >
+                  <Ionicons name="close" size={24} color="#6b7280" />
+                </TouchableOpacity>
+                
                 <Text style={styles.modalTitle}>Confirm Check-out</Text>
-                <Text style={styles.modalSubtitle}>Please provide a brief summary of your work today</Text>
+                <Text style={styles.modalSubtitle}>
+                  Please provide today's work summary before checking out. You can optionally upload a work report PDF.
+                </Text>
+                
+                {/* Work Summary Input */}
+                <Text style={styles.inputLabel}>Today's Work Summary <Text style={{ color: '#ef4444' }}>*</Text></Text>
                 <TextInput
-                  placeholder="e.g., Completed project tasks, attended meetings..."
+                  placeholder="Brief description of today's work..."
                   value={todaysWork}
                   onChangeText={setTodaysWork}
                   style={styles.textInput}
                   multiline
                   numberOfLines={4}
+                  textAlignVertical="top"
                 />
+                
+                {/* PDF Upload Section */}
+                <Text style={styles.inputLabel}>Upload Work Report PDF (Optional)</Text>
+                <TouchableOpacity 
+                  style={styles.filePickerBtn}
+                  onPress={pickWorkReportFile}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="cloud-upload-outline" size={20} color="#2563eb" />
+                  <Text style={styles.filePickerText}>
+                    {workReportFile ? workReportFile.name : "Browse... No file selected."}
+                  </Text>
+                </TouchableOpacity>
+                
+                {/* Selected File Preview */}
+                {workReportFile && (
+                  <View style={styles.selectedFile}>
+                    <View style={styles.selectedFileInfo}>
+                      <Ionicons name="document-text" size={20} color="#10b981" />
+                      <Text style={styles.selectedFileName} numberOfLines={1}>
+                        {workReportFile.name}
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setWorkReportFile(null)}>
+                      <Ionicons name="close-circle" size={22} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                )}
+                
+                {/* Action Buttons */}
                 <View style={styles.modalButtons}>
-                  <Button mode="outlined" onPress={() => setShowCheckoutModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button mode="contained" onPress={confirmCheckOut} buttonColor="#ef4444">
-                    Continue
-                  </Button>
+                  <TouchableOpacity 
+                    style={styles.cancelBtn}
+                    onPress={() => {
+                      setShowCheckoutModal(false);
+                      setWorkReportFile(null);
+                    }}
+                  >
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[
+                      styles.proceedBtn,
+                      !todaysWork.trim() && styles.proceedBtnDisabled
+                    ]}
+                    onPress={confirmCheckOut}
+                    disabled={!todaysWork.trim()}
+                  >
+                    <Text style={styles.proceedBtnText}>Proceed to Check-out</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
@@ -651,33 +865,126 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "#0008",
+    backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "center",
     alignItems: "center",
+    padding: 20,
   },
   modalContent: {
-    width: "90%",
+    width: "100%",
+    maxWidth: 400,
     backgroundColor: "white",
-    borderRadius: 10,
-    padding: 16,
+    borderRadius: 16,
+    padding: 24,
+    position: "relative",
   },
-  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 8 },
+  modalCloseBtn: {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    zIndex: 10,
+  },
+  modalTitle: { 
+    fontSize: 20, 
+    fontWeight: "700", 
+    marginBottom: 8,
+    color: "#111827",
+  },
   modalSubtitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#6b7280",
-    marginBottom: 12,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+    marginBottom: 8,
   },
   textInput: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 12,
+    borderWidth: 2,
+    borderColor: "#2563eb",
+    borderRadius: 10,
+    padding: 14,
     minHeight: 100,
-    marginBottom: 16,
+    marginBottom: 20,
     textAlignVertical: "top",
     fontSize: 14,
+    color: "#111827",
+    backgroundColor: "#fff",
   },
-  modalButtons: { flexDirection: "row", justifyContent: "space-between" },
+  filePickerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    borderRadius: 10,
+    padding: 14,
+    backgroundColor: "#f9fafb",
+    gap: 10,
+  },
+  filePickerText: {
+    fontSize: 14,
+    color: "#6b7280",
+    flex: 1,
+  },
+  selectedFile: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#ecfdf5",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#a7f3d0",
+  },
+  selectedFileInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    gap: 8,
+  },
+  selectedFileName: {
+    fontSize: 13,
+    color: "#065f46",
+    fontWeight: "500",
+    flex: 1,
+  },
+  modalButtons: { 
+    flexDirection: "row", 
+    justifyContent: "space-between",
+    gap: 12,
+    marginTop: 24,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: "#f3f4f6",
+    alignItems: "center",
+  },
+  cancelBtnText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#374151",
+  },
+  proceedBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: "#2563eb",
+    alignItems: "center",
+  },
+  proceedBtnDisabled: {
+    backgroundColor: "#93c5fd",
+  },
+  proceedBtnText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#fff",
+  },
   loaderOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#0002",
@@ -702,5 +1009,99 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
+  },
+  workSummaryCard: {
+    marginTop: 16,
+    padding: 14,
+    backgroundColor: "#f0f9ff",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+  },
+  workSummaryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+    gap: 8,
+  },
+  workSummaryTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1e40af",
+  },
+  workSummaryText: {
+    fontSize: 14,
+    color: "#374151",
+    lineHeight: 20,
+  },
+  workReportFileInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#bfdbfe",
+    gap: 6,
+  },
+  workReportFileName: {
+    fontSize: 13,
+    color: "#065f46",
+    fontWeight: "500",
+  },
+  selfiesContainer: {
+    marginTop: 16,
+    padding: 14,
+    backgroundColor: "#fefce8",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#fde047",
+  },
+  selfiesHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 8,
+  },
+  selfiesTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#854d0e",
+  },
+  selfiesRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    gap: 16,
+  },
+  selfieItem: {
+    alignItems: "center",
+    flex: 1,
+  },
+  selfieLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginBottom: 8,
+  },
+  selfieImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 2,
+    borderColor: "#10b981",
+  },
+  selfieImagePlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#f3f4f6",
+    borderWidth: 2,
+    borderColor: "#d1d5db",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selfieImagePlaceholderText: {
+    fontSize: 10,
+    color: "#9ca3af",
+    marginTop: 4,
   },
 });
