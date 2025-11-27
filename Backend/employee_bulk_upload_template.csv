@@ -1,0 +1,4 @@
+employee_id,name,email,department,designation,phone,role,gender,shift_type,employee_type,pan_card,aadhar_card,address
+EMP001,John Doe,john.doe@company.com,Engineering,Senior Developer,9876543210,EMPLOYEE,Male,Day Shift,Full-time Employee Type,ABCDE1234F,123456789012,123 Main St
+EMP002,Jane Smith,jane.smith@company.com,HR,HR Manager,9876543211,HR,Female,Day Shift,Full-time Employee Type,BCDEF2345G,234567890123,456 Oak Ave
+EMP003,Bob Johnson,bob.johnson@company.com,Marketing,Marketing Lead,9876543212,MANAGER,Male,Day Shift,Full-time Employee Type,CDEFG3456H,345678901234,789 Pine Rd
