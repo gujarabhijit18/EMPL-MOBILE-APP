@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { Appearance, ColorSchemeName } from "react-native";
+import { getColors, ThemeColors } from "../constants/theme";
 
 /**
  * 🎨 Theme Types
@@ -14,6 +15,7 @@ interface ThemeContextType {
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
   isDarkMode: boolean;
+  colors: ThemeColors;
 }
 
 /**
@@ -88,6 +90,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     themeMode === "dark" || (themeMode === "system" && systemTheme === "dark");
 
   /**
+   * 🎨 Get current theme colors
+   */
+  const colors = getColors(isDarkMode);
+
+  /**
    * 🎨 Theme Setters
    */
   const setColorTheme = (theme: ColorTheme) => setColorThemeState(theme);
@@ -101,6 +108,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         themeMode,
         setThemeMode,
         isDarkMode,
+        colors,
       }}
     >
       {children}
@@ -114,7 +122,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 export const useTheme = () => {
   const context = useContext(ThemeContext);
   if (!context) {
-    throw new Error("useTheme must be used within a ThemeProvider");
+    // Return default values instead of throwing error for better dev experience
+    console.warn("useTheme must be used within a ThemeProvider - using defaults");
+    return {
+      colorTheme: "default" as ColorTheme,
+      setColorTheme: () => {},
+      themeMode: "light" as ThemeMode,
+      setThemeMode: () => {},
+      isDarkMode: false,
+      colors: getColors(false),
+    };
   }
   return context;
 };

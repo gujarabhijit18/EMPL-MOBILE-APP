@@ -7,29 +7,31 @@ import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  FlatList,
-  Image,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Easing,
+    FlatList,
+    Image,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_CONFIG } from "../../config/api";
+import { useTheme } from "../../contexts/ThemeContext";
 import { apiService, Employee, EmployeeData } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
 
 const EmployeeManagement = () => {
   const navigation = useNavigation();
+  const { isDarkMode, colors } = useTheme();
   
   // Tab bar visibility hook
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();

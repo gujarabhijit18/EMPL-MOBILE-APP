@@ -6,20 +6,83 @@ import * as Location from "expo-location";
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { Button, Card, Chip, Switch } from "react-native-paper";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
+
+// IST Timezone Helper Functions
+// Backend stores times in UTC, we convert to IST for display
+
+// Get current time
+const getCurrentISTTime = (): Date => {
+  return new Date();
+};
+
+// Convert UTC datetime to IST Date object
+// Backend stores times in UTC without 'Z' suffix, we need to add it
+const convertToIST = (dateString: string | Date): Date => {
+  if (dateString instanceof Date) {
+    return dateString;
+  }
+  
+  // If the string doesn't have timezone info, assume it's UTC from backend
+  if (!dateString.includes('Z') && !dateString.includes('+')) {
+    // Add 'Z' to treat as UTC, JavaScript will convert to local time (IST)
+    const utcDate = new Date(dateString + 'Z');
+    if (!isNaN(utcDate.getTime())) {
+      return utcDate;
+    }
+  }
+  
+  return new Date(dateString);
+};
+
+// Format time to display in IST (e.g., "12:09 PM")
+const formatTimeToIST = (dateString: string | Date | undefined | null): string => {
+  if (!dateString) return "-";
+  try {
+    const date = convertToIST(dateString);
+    if (isNaN(date.getTime())) return "-";
+    
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 should be 12
+    const hoursStr = hours.toString().padStart(2, '0');
+    
+    return `${hoursStr}:${minutes} ${ampm}`;
+  } catch (error) {
+    console.error("Error formatting time:", error);
+    return "-";
+  }
+};
+
+// Get date string (yyyy-MM-dd format) in IST
+const getISTDateString = (dateString: string | Date): string => {
+  try {
+    const date = convertToIST(dateString);
+    if (isNaN(date.getTime())) return format(new Date(), "yyyy-MM-dd");
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } catch (error) {
+    console.error("Error getting date string:", error);
+    return format(new Date(), "yyyy-MM-dd");
+  }
+};
 
 interface AttendanceRecord {
   id: string;
@@ -87,14 +150,16 @@ export default function AttendanceWithToggle() {
         // Load self attendance
         const data = await apiService.getSelfAttendance(parseInt(user.id));
         
-        const today = format(new Date(), "yyyy-MM-dd");
-        const transformedData: AttendanceRecord[] = data.map((record) => ({
+        // Use IST for today's date comparison
+        const istNow = getCurrentISTTime();
+        const today = format(istNow, "yyyy-MM-dd");
+        const transformedData: AttendanceRecord[] = data.map((record: any) => ({
           id: record.attendance_id.toString(),
           userId: record.user_id.toString(),
-          date: format(new Date(record.check_in), "yyyy-MM-dd"),
-          checkInTime: format(new Date(record.check_in), "hh:mm a"),
-          checkOutTime: record.check_out ? format(new Date(record.check_out), "hh:mm a") : undefined,
-          status: "present",
+          date: getISTDateString(record.check_in),
+          checkInTime: formatTimeToIST(record.check_in),
+          checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
+          status: record.status || "present",
           location: record.gps_location,
           selfie: record.checkInSelfie || record.selfie,
           workHours: record.total_hours,
@@ -111,12 +176,12 @@ export default function AttendanceWithToggle() {
           data = data.filter((record: any) => record.department === user.department);
         }
         
-        const transformedData: AttendanceRecord[] = data.map((record) => ({
+        const transformedData: AttendanceRecord[] = data.map((record: any) => ({
           id: record.attendance_id.toString(),
           userId: record.user_id.toString(),
-          date: format(new Date(record.check_in), "yyyy-MM-dd"),
-          checkInTime: format(new Date(record.check_in), "hh:mm a"),
-          checkOutTime: record.check_out ? format(new Date(record.check_out), "hh:mm a") : undefined,
+          date: getISTDateString(record.check_in),
+          checkInTime: formatTimeToIST(record.check_in),
+          checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
           status: record.status || "present",
           location: record.gps_location,
           selfie: record.checkInSelfie || record.selfie,
@@ -185,9 +250,10 @@ export default function AttendanceWithToggle() {
         
         console.log("✅ Check-in response:", response);
 
-        const now = new Date();
-        const formattedTime = format(now, "hh:mm a");
-        const today = format(now, "yyyy-MM-dd");
+        // Use IST time for display
+        const istNow = getCurrentISTTime();
+        const formattedTime = formatTimeToIST(istNow);
+        const today = format(istNow, "yyyy-MM-dd");
 
         const record: AttendanceRecord = {
           id: response.attendance_id.toString(),
@@ -210,7 +276,9 @@ export default function AttendanceWithToggle() {
           todaysWork || "Completed daily tasks"  // Include work summary
         );
 
-        const formattedTime = format(new Date(), "hh:mm a");
+        // Use IST time for display
+        const istNow = getCurrentISTTime();
+        const formattedTime = formatTimeToIST(istNow);
         const updated = { 
           ...currentAttendance, 
           checkOutTime: formattedTime,

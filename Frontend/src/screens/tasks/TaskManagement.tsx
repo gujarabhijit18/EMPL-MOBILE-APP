@@ -1,5 +1,5 @@
 // 📂 src/screens/tasks/TaskManagement.tsx
-import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe icon import
+import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import { useNavigation } from "@react-navigation/native";
@@ -9,29 +9,30 @@ import * as Sharing from 'expo-sharing';
 import { setStatusBarStyle, StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-  Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  ToastAndroid,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Easing,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    ToastAndroid,
+    TouchableOpacity,
+    View
 } from "react-native";
 import {
-  FAB,
-  ProgressBar
+    FAB,
+    ProgressBar
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
@@ -1675,6 +1676,7 @@ const styles = StyleSheet.create({
 export default function TaskManagement() {
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { isDarkMode, colors } = useTheme();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [taskDetailModalVisible, setTaskDetailModalVisible] = useState(false);

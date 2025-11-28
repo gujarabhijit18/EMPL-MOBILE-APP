@@ -1,27 +1,28 @@
-import React, { useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  Animated,
-  Easing
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  ProgressBar,
-  Card,
-  Button,
-  Badge,
-} from "react-native-paper";
-import { Ionicons } from "@expo/vector-icons"; // Works natively in Expo
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useAuth } from "../../contexts/AuthContext";
-import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { StatusBar } from 'expo-status-bar';
+import React, { useRef } from 'react';
+import {
+    Alert,
+    Animated,
+    Easing,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import {
+    Badge,
+    Button,
+    Card,
+    ProgressBar,
+} from "react-native-paper";
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
+import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
 // Mock translation hook (Expo-safe, no API)
 const useLanguage = () => ({
@@ -82,6 +83,8 @@ const mockDashboardData = {
 // Dashboard Component
 const AdminDashboard: React.FC = () => {
   const { t, language } = useLanguage();
+  const { isDarkMode, colors } = useTheme();
+  
   // Define the navigation param list type
   type RootStackParamList = {
     Profile: undefined;
@@ -363,9 +366,9 @@ const AdminDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <Ionicons name="refresh" size={40} color="#2563eb" />
-        <Text style={{ color: "#2563eb", marginTop: 8 }}>Loading...</Text>
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <Ionicons name="refresh" size={40} color={colors.info} />
+        <Text style={{ color: colors.info, marginTop: 8 }}>Loading...</Text>
       </View>
     );
   }
@@ -465,11 +468,11 @@ const AdminDashboard: React.FC = () => {
   ].map((button, idx) => ({ ...button, index: idx }));
 
   return (
-    <SafeAreaView style={styles.safeAreaContainer}>
-      <StatusBar style="light" />
-      <View style={styles.container}>
+    <SafeAreaView style={[styles.safeAreaContainer, { backgroundColor: colors.header }]}>
+      <StatusBar style={isDarkMode ? "light" : "light"} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Enhanced Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.header }]}>
           <View style={styles.headerTopRow}>
             <View style={styles.adminProfileSection}>
               <TouchableOpacity 
@@ -631,7 +634,7 @@ const AdminDashboard: React.FC = () => {
           ]}
         >
           {/* Content Container */}
-          <View style={styles.contentContainer}>
+          <View style={[styles.contentContainer, { backgroundColor: colors.background }]}>
             {/* Quick Stats */}
             <View style={styles.statsGrid}>
               <View style={[styles.statCard, { backgroundColor: "#3b82f6" }]}>
@@ -677,21 +680,23 @@ const AdminDashboard: React.FC = () => {
           </View>
 
           {/* Department Performance */}
-          <Card style={styles.sectionCard}>
+          <Card style={[styles.sectionCard, { backgroundColor: colors.cardBackground }]}>
             <Card.Title
               title="Department Performance"
               subtitle="Performance metrics by department"
+              titleStyle={{ color: colors.textPrimary }}
+              subtitleStyle={{ color: colors.textSecondary }}
               left={() => <Ionicons name="trending-up" size={24} color="#2563eb" />}
             />
             <Card.Content>
               {stats.departmentPerformance.map((dept) => (
                 <View key={dept.name} style={styles.deptItem}>
                   <View>
-                    <Text style={styles.deptName}>{dept.name}</Text>
-                    <Text style={styles.deptSub}>{dept.employees} employees</Text>
+                    <Text style={[styles.deptName, { color: colors.textPrimary }]}>{dept.name}</Text>
+                    <Text style={[styles.deptSub, { color: colors.textSecondary }]}>{dept.employees} employees</Text>
                   </View>
                   <View style={{ alignItems: "flex-end" }}>
-                    <Text style={styles.deptPerf}>{dept.performance}%</Text>
+                    <Text style={[styles.deptPerf, { color: colors.textPrimary }]}>{dept.performance}%</Text>
                     <Badge
                       style={{
                         backgroundColor:
@@ -710,10 +715,12 @@ const AdminDashboard: React.FC = () => {
           </Card>
 
           {/* Recent Activities */}
-          <Card style={styles.sectionCard}>
+          <Card style={[styles.sectionCard, { backgroundColor: colors.cardBackground }]}>
             <Card.Title
               title={t.dashboard.recentActivities}
               subtitle="Latest employee activities"
+              titleStyle={{ color: colors.textPrimary }}
+              subtitleStyle={{ color: colors.textSecondary }}
               left={() => <Ionicons name="pulse" size={24} color="#22c55e" />}
             />
             <Card.Content>
@@ -742,8 +749,8 @@ const AdminDashboard: React.FC = () => {
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.activityUser}>{activity.user}</Text>
-                    <Text style={styles.activityText}>
+                    <Text style={[styles.activityUser, { color: colors.textPrimary }]}>{activity.user}</Text>
+                    <Text style={[styles.activityText, { color: colors.textSecondary }]}>
                       {activity.type === "check-in"
                         ? "Checked in"
                         : activity.type === "leave"
@@ -760,10 +767,12 @@ const AdminDashboard: React.FC = () => {
           </Card>
 
           {/* Profile & Settings */}
-          <Card style={styles.sectionCard}>
+          <Card style={[styles.sectionCard, { backgroundColor: colors.cardBackground }]}>
             <Card.Title
               title="Account & Settings"
               subtitle="Manage your profile and preferences"
+              titleStyle={{ color: colors.textPrimary }}
+              subtitleStyle={{ color: colors.textSecondary }}
               left={() => <Ionicons name="settings-outline" size={24} color="#2563eb" />}
             />
             <Card.Content>

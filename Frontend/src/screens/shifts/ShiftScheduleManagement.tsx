@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, Modal, Animated, Easing, Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // Add imports for better UI
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Chip, TextInput as PaperTextInput } from 'react-native-paper';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
+import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
+import { Button, Chip, TextInput as PaperTextInput } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Import tab bar visibility
-import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
 import { useNavigation } from '@react-navigation/native';
+import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
 
 interface Shift {
   shift_id: number;
@@ -98,6 +98,7 @@ export default function ShiftScheduleManagement() {
   // Tab bar visibility hook
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
   const navigation = useNavigation<any>();
+  const { isDarkMode, colors } = useTheme();
 
   // Animation values for header elements
   const headerOpacity = useRef(new Animated.Value(0)).current;

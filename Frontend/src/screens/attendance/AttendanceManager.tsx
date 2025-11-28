@@ -35,31 +35,85 @@ import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 // Import real auth context
 import { API_CONFIG } from "../../config/api";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 
-// IST Timezone Helper Functions (inline to avoid module resolution issues)
-const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // UTC+5:30
+// IST Timezone Helper Functions
+// Backend stores times in UTC, we convert to IST for display
 
+// Get current time
 const getCurrentISTTime = (): Date => {
-  const now = new Date();
-  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-  return new Date(utcTime + IST_OFFSET_MS);
+  return new Date();
 };
 
+// Convert UTC datetime to IST Date object
+// Backend stores times in UTC without 'Z' suffix, we need to add it
+const convertToIST = (dateString: string | Date): Date => {
+  if (dateString instanceof Date) {
+    return dateString;
+  }
+  
+  // If the string doesn't have timezone info, assume it's UTC from backend
+  if (!dateString.includes('Z') && !dateString.includes('+')) {
+    // Add 'Z' to treat as UTC, JavaScript will convert to local time (IST)
+    const utcDate = new Date(dateString + 'Z');
+    if (!isNaN(utcDate.getTime())) {
+      return utcDate;
+    }
+  }
+  
+  return new Date(dateString);
+};
+
+// Format date for display (e.g., "28 Nov 2025")
 const formatAttendanceDate = (date: Date): string => {
-  return date.toLocaleDateString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  const day = date.getDate().toString().padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
 };
 
+// Get day of week
 const getDayOfWeek = (date: Date): string => {
-  return date.toLocaleDateString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    weekday: 'long',
-  });
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[date.getDay()];
+};
+
+// Format time to display in IST (e.g., "12:09 PM")
+const formatTimeToIST = (dateString: string | Date | undefined | null): string => {
+  if (!dateString) return "-";
+  try {
+    const date = convertToIST(dateString);
+    if (isNaN(date.getTime())) return "-";
+    
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 should be 12
+    const hoursStr = hours.toString().padStart(2, '0');
+    
+    return `${hoursStr}:${minutes} ${ampm}`;
+  } catch (error) {
+    console.error("Error formatting time:", error);
+    return "-";
+  }
+};
+
+// Get date string (yyyy-MM-dd format) in IST
+const getISTDateString = (dateString: string | Date): string => {
+  try {
+    const date = convertToIST(dateString);
+    if (isNaN(date.getTime())) return format(new Date(), "yyyy-MM-dd");
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } catch (error) {
+    console.error("Error getting date string:", error);
+    return format(new Date(), "yyyy-MM-dd");
+  }
 };
 
 const useLanguage = () => ({
@@ -98,6 +152,7 @@ const formatLocationLabel = (value?: GeoLocation | string | null) => {
 
 const AttendanceManager: React.FC = () => {
   const { user } = useAuth();
+  const { isDarkMode, colors } = useTheme();
   const { t } = useLanguage();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -225,13 +280,15 @@ const AttendanceManager: React.FC = () => {
       const data = await apiService.getSelfAttendance(parseInt(user.id));
       
       // Transform API data to match component structure
-      const today = format(new Date(), "yyyy-MM-dd");
-      const transformedData: SelfAttendanceRecord[] = data.map((record) => ({
+      // Use IST for today's date comparison
+      const istNow = getCurrentISTTime();
+      const today = format(istNow, "yyyy-MM-dd");
+      const transformedData: SelfAttendanceRecord[] = data.map((record: any) => ({
         id: record.attendance_id.toString(),
-        date: format(new Date(record.check_in), "yyyy-MM-dd"),
-        checkInTime: format(new Date(record.check_in), "hh:mm a"),
-        checkOutTime: record.check_out ? format(new Date(record.check_out), "hh:mm a") : undefined,
-        status: "present",
+        date: getISTDateString(record.check_in),
+        checkInTime: formatTimeToIST(record.check_in),
+        checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
+        status: record.status || "present",
         checkInLocation: record.gps_location,
         checkOutLocation: record.check_out ? record.gps_location : undefined,
         selfie: record.selfie,
@@ -333,8 +390,8 @@ const AttendanceManager: React.FC = () => {
           employeeId: record.employee_id || `EMP${record.user_id}`,
           department: record.department || "N/A",
           email: record.email || record.userEmail || "N/A",
-          check_in: format(new Date(record.check_in), "hh:mm a"),
-          check_out: record.check_out ? format(new Date(record.check_out), "hh:mm a") : "",
+          check_in: formatTimeToIST(record.check_in),
+          check_out: record.check_out ? formatTimeToIST(record.check_out) : "",
           location: locationText,
           selfie: checkInSelfie,
           checkOutSelfie: checkOutSelfie,
@@ -496,9 +553,10 @@ const AttendanceManager: React.FC = () => {
         
         console.log("✅ Check-in response:", response);
 
-        const now = new Date();
-        const formattedTime = format(now, "hh:mm a");
-        const today = format(now, "yyyy-MM-dd");
+        // Use IST time for display
+        const istNow = getCurrentISTTime();
+        const formattedTime = formatTimeToIST(istNow);
+        const today = format(istNow, "yyyy-MM-dd");
 
         const record: SelfAttendanceRecord = {
           id: response.attendance_id.toString(),
@@ -523,7 +581,9 @@ const AttendanceManager: React.FC = () => {
           workReportFile  // Include work report file if selected
         );
 
-        const formattedTime = format(new Date(), "hh:mm a");
+        // Use IST time for display
+        const istNow = getCurrentISTTime();
+        const formattedTime = formatTimeToIST(istNow);
         const updated: SelfAttendanceRecord = {
           ...currentAttendance,
           checkOutTime: formattedTime,

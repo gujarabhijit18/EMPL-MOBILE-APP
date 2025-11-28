@@ -8,45 +8,100 @@ import * as Location from "expo-location";
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Image as RNImage,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Modal,
+    Image as RNImage,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { Button, Card, Chip } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
 
-// IST Timezone Helper Functions (inline to avoid module resolution issues)
-const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // UTC+5:30
+// IST Timezone offset: +5:30 from UTC
+const IST_OFFSET_HOURS = 5;
+const IST_OFFSET_MINUTES = 30;
 
+// Get current time
 const getCurrentISTTime = (): Date => {
-  const now = new Date();
-  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-  return new Date(utcTime + IST_OFFSET_MS);
+  return new Date();
 };
 
+// Convert UTC datetime to IST Date object
+// Backend stores times in UTC, we need to ensure proper parsing
+const convertToIST = (dateString: string | Date): Date => {
+  if (dateString instanceof Date) {
+    return dateString;
+  }
+  
+  // If the string doesn't have timezone info, assume it's UTC from backend
+  if (!dateString.includes('Z') && !dateString.includes('+')) {
+    // Add 'Z' to treat as UTC, JavaScript will convert to local time
+    const utcDate = new Date(dateString + 'Z');
+    if (!isNaN(utcDate.getTime())) {
+      return utcDate;
+    }
+  }
+  
+  return new Date(dateString);
+};
+
+// Format date for display (e.g., "28 Nov 2025")
 const formatAttendanceDate = (date: Date): string => {
-  return date.toLocaleDateString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  const day = date.getDate().toString().padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
 };
 
+// Get day of week
 const getDayOfWeek = (date: Date): string => {
-  return date.toLocaleDateString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    weekday: 'long',
-  });
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[date.getDay()];
+};
+
+// Format time to display in IST (e.g., "12:09 PM")
+// Backend returns UTC time, we convert to IST for display
+const formatTimeToIST = (dateString: string | Date | undefined): string => {
+  if (!dateString) return "-";
+  try {
+    // Convert to IST
+    const date = convertToIST(dateString);
+    if (isNaN(date.getTime())) return "-";
+    
+    // Get local time (device is in IST, so getHours returns IST)
+    let hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 should be 12
+    const hoursStr = hours.toString().padStart(2, '0');
+    
+    return `${hoursStr}:${minutes} ${ampm}`;
+  } catch (error) {
+    console.error("Error formatting time:", error);
+    return "-";
+  }
+};
+
+// Format date to string (e.g., "28 Nov 2025")
+const formatDateToIST = (dateString: string | Date | undefined): string => {
+  if (!dateString) return "-";
+  try {
+    const date = convertToIST(dateString);
+    if (isNaN(date.getTime())) return "-";
+    return formatAttendanceDate(date);
+  } catch (error) {
+    console.error("Error formatting date:", error);
+    return "-";
+  }
 };
 
 // Helper to build full selfie URL from backend path
@@ -186,7 +241,9 @@ export default function AttendancePage() {
       }
       
       // Transform API data to match component structure
-      const today = format(new Date(), "yyyy-MM-dd");
+      // Use IST for today's date comparison
+      const istNow = getCurrentISTTime();
+      const today = format(istNow, "yyyy-MM-dd");
       const transformedData: AttendanceRecord[] = data.map((record: any) => {
         // Extract work report filename from path if available
         const workReportPath = record.work_report || record.workReport;
@@ -196,12 +253,16 @@ export default function AttendancePage() {
           workReportFileName = parts[parts.length - 1];
         }
         
+        // Get the check-in date in IST for proper date grouping
+        const checkInDate = new Date(record.check_in);
+        const checkInDateIST = checkInDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // yyyy-MM-dd format
+        
         return {
           id: record.attendance_id.toString(),
-          date: format(new Date(record.check_in), "yyyy-MM-dd"),
-          checkInTime: format(new Date(record.check_in), "hh:mm a"),
-          checkOutTime: record.check_out ? format(new Date(record.check_out), "hh:mm a") : undefined,
-          status: "present",
+          date: checkInDateIST,
+          checkInTime: formatTimeToIST(record.check_in),
+          checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
+          status: record.status || "present",
           selfie: record.checkInSelfie || record.selfie,
           checkInSelfie: record.checkInSelfie,
           checkOutSelfie: record.checkOutSelfie,
@@ -273,9 +334,10 @@ export default function AttendancePage() {
         
         console.log("✅ Check-in response:", response);
 
-        const now = new Date();
-        const formattedTime = format(now, "hh:mm a");
-        const today = format(now, "yyyy-MM-dd");
+        // Use IST time for display
+        const istNow = getCurrentISTTime();
+        const formattedTime = formatTimeToIST(istNow);
+        const today = format(istNow, "yyyy-MM-dd");
 
         const record: AttendanceRecord = {
           id: response.attendance_id.toString(),
@@ -298,7 +360,9 @@ export default function AttendancePage() {
           workReportFile
         );
 
-        const formattedTime = format(new Date(), "hh:mm a");
+        // Use IST time for display
+        const istNow = getCurrentISTTime();
+        const formattedTime = formatTimeToIST(istNow);
         const updated: AttendanceRecord = {
           ...currentAttendance,
           checkOutTime: formattedTime,
@@ -374,7 +438,7 @@ export default function AttendancePage() {
   // Store work summary for checkout
   const [workSummaryForCheckout, setWorkSummaryForCheckout] = useState("");
 
-  // ✅ Helper
+  // ✅ Helper - time is already formatted in IST from loadAttendanceData
   const formatTime = (time?: string) => (time ? time : "-");
 
   // ✅ Camera Screen (Expo)
@@ -581,7 +645,7 @@ export default function AttendancePage() {
                   <View style={styles.historyDateContainer}>
                     <Ionicons name="calendar-outline" size={18} color="#2563eb" />
                     <Text style={styles.historyDate}>
-                      {format(new Date(item.date), "dd MMM yyyy")}
+                      {formatDateToIST(item.date)}
                     </Text>
                   </View>
                   <View style={styles.historyTimes}>

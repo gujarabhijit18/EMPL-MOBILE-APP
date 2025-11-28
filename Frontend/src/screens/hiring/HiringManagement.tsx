@@ -5,21 +5,22 @@ import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Easing,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
@@ -29,6 +30,7 @@ export default function HiringManagement() {
   const navigation = useNavigation();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
   const { user } = useAuth();
+  const { isDarkMode, colors } = useTheme();
   const isHR = user?.role === "hr";
 
   const headerOpacity = useRef(new Animated.Value(0)).current;

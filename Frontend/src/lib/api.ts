@@ -55,6 +55,51 @@ export interface Employee {
   is_active?: boolean;    // Alternative field name used by backend
 }
 
+// Department interfaces
+export interface DepartmentCreate {
+  name: string;
+  code: string;
+  manager_id?: number;
+  description?: string;
+  status?: string;
+  employee_count?: number;
+  budget?: number;
+  location?: string;
+}
+
+export interface DepartmentUpdate {
+  name?: string;
+  code?: string;
+  manager_id?: number;
+  description?: string;
+  status?: string;
+  employee_count?: number;
+  budget?: number;
+  location?: string;
+}
+
+export interface DepartmentResponse {
+  id: number;
+  name: string;
+  code: string;
+  manager_id?: number;
+  description?: string;
+  status: string;
+  employee_count?: number;
+  budget?: number;
+  location?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DepartmentManager {
+  id: number;
+  name: string;
+  email: string;
+  department?: string;
+  role: string;
+}
+
 export interface LeaveRequestData {
   employee_id: string;
   leave_type: string;
@@ -1889,6 +1934,87 @@ class ApiService {
       method: "DELETE",
     });
   }
+
+  // ======================
+  // 🔹 Department APIs
+  // ======================
+
+  async getDepartments(): Promise<DepartmentResponse[]> {
+    console.log("📥 Fetching departments");
+    return this.request("/departments/");
+  }
+
+  async createDepartment(departmentData: DepartmentCreate): Promise<DepartmentResponse> {
+    console.log("📤 Creating department:", departmentData);
+    return this.request("/departments/", {
+      method: "POST",
+      body: JSON.stringify(departmentData),
+    });
+  }
+
+  async updateDepartment(deptId: number, departmentData: DepartmentUpdate): Promise<DepartmentResponse> {
+    console.log("📤 Updating department:", deptId, departmentData);
+    return this.request(`/departments/${deptId}`, {
+      method: "PUT",
+      body: JSON.stringify(departmentData),
+    });
+  }
+
+  async deleteDepartment(deptId: number): Promise<void> {
+    console.log("🗑️ Deleting department:", deptId);
+    return this.request(`/departments/${deptId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getDepartmentManagers(): Promise<DepartmentManager[]> {
+    console.log("📥 Fetching department managers");
+    return this.request("/departments/managers");
+  }
+
+  // ======================
+  // 🔹 Settings APIs
+  // ======================
+
+  async getMySettings(): Promise<UserSettings> {
+    console.log("📥 Fetching user settings");
+    return this.request("/settings/me");
+  }
+
+  async updateMySettings(settingsData: Partial<UserSettings>): Promise<UserSettings> {
+    console.log("📤 Updating user settings:", settingsData);
+    return this.request("/settings/me", {
+      method: "PUT",
+      body: JSON.stringify(settingsData),
+    });
+  }
+
+  async getSettingsByUserId(userId: number): Promise<UserSettings> {
+    console.log("📥 Fetching settings for user:", userId);
+    return this.request(`/settings/${userId}`);
+  }
+
+  async updateSettingsByUserId(userId: number, settingsData: Partial<UserSettings>): Promise<UserSettings> {
+    console.log("📤 Updating settings for user:", userId, settingsData);
+    return this.request(`/settings/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify(settingsData),
+    });
+  }
+}
+
+// Settings interface
+export interface UserSettings {
+  id: number;
+  user_id: number;
+  theme_mode: string;
+  color_theme: string;
+  language: string;
+  email_notifications: boolean;
+  push_notifications: boolean;
+  two_factor_enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // ✅ Export Singleton

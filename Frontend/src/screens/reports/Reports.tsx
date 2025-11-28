@@ -1,14 +1,14 @@
-import React, { useMemo, useState, useRef } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Animated, Easing, Dimensions, Modal } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Button, Card, Badge, Divider, ProgressBar, Chip } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons";
-import { StatusBar } from 'expo-status-bar';
 import { useNavigation } from "@react-navigation/native";
 import { LinearGradient } from 'expo-linear-gradient';
-import { BarChart, LineChart } from "react-native-chart-kit";
+import { StatusBar } from 'expo-status-bar';
+import React, { useMemo, useRef, useState } from "react";
+import { Animated, Easing, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Button, Card, ProgressBar } from "react-native-paper";
+import { SafeAreaView } from "react-native-safe-area-context";
 // Import Lucide icons with correct names
-import { Calendar, ChevronDown } from "lucide-react-native";
+import { ChevronDown } from "lucide-react-native";
+import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
 type ReportStatus = "approved" | "pending" | "rejected";
@@ -427,6 +427,7 @@ const StarRating = ({
 
 export default function Reports() {
   const navigation = useNavigation();
+  const { isDarkMode, colors } = useTheme();
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<TabType>("employee");
   const [filters, setFilters] = useState<FilterOptions>({

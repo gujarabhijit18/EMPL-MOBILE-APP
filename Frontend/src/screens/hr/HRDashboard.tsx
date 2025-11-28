@@ -1,20 +1,21 @@
-import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe icons
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from "react";
 import {
-  Alert,
-  Animated,
-  Easing,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    Animated,
+    Easing,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
 interface Stats {
@@ -31,6 +32,7 @@ interface Stats {
 export default function HRDashboard() {
   const navigation = useNavigation<any>();
   const { logout, user } = useAuth();
+  const { isDarkMode, colors } = useTheme();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const dropdownOpacity = React.useRef(new Animated.Value(0)).current;
@@ -148,11 +150,11 @@ export default function HRDashboard() {
   };
 
   return (
-    <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
-      <StatusBar style="light" />
-      <View style={styles.container}>
+    <SafeAreaView style={[styles.safeAreaContainer, { backgroundColor: colors.header }]} edges={['top']}>
+      <StatusBar style={isDarkMode ? "light" : "light"} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Enhanced Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.header }]}>
           <View style={styles.headerContent}>
             <TouchableOpacity
               activeOpacity={0.8}

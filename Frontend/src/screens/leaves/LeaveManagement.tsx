@@ -24,6 +24,7 @@ import { Button, Card, Chip } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { API_CONFIG } from "../../config/api";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { apiService, LeaveRequestResponse, LeaveSummary } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
@@ -38,6 +39,7 @@ interface Holiday {
 
 export default function LeaveManagement() {
   const { user } = useAuth();
+  const { isDarkMode, colors } = useTheme();
   const navigation = useNavigation();
   
   // Animation values for header elements

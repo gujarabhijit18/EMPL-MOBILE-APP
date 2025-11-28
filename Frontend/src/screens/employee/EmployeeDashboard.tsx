@@ -1,30 +1,32 @@
+import { Ionicons } from "@expo/vector-icons";
+import { format } from "date-fns";
+import { StatusBar } from 'expo-status-bar';
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-  Animated,
-  Easing,
+    Alert,
+    Animated,
+    Easing,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import {
-  Card,
-  Button,
-  ProgressBar,
-  Chip,
-  Avatar,
+    Avatar,
+    Button,
+    Card,
+    Chip,
+    ProgressBar,
 } from "react-native-paper";
-import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe icon import
-import { format } from "date-fns";
-import { useAuth } from "../../contexts/AuthContext";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { StatusBar } from 'expo-status-bar';
+import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
 export default function EmployeeDashboard({ navigation }: any) {
   const { user, logout } = useAuth();
+  const { isDarkMode, colors } = useTheme();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
   const [stats] = useState({
     tasksAssigned: 12,
@@ -118,10 +120,10 @@ export default function EmployeeDashboard({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#39549fff' }} edges={['top']}>
-      <StatusBar style="light" />
-      <View style={styles.pageContainer}>
-        <View style={styles.header}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.header }} edges={['top']}>
+      <StatusBar style={isDarkMode ? "light" : "light"} />
+      <View style={[styles.pageContainer, { backgroundColor: colors.background }]}>
+        <View style={[styles.header, { backgroundColor: colors.header }]}>
           <View style={styles.headerTopRow}>
             <View style={styles.profileSection}>
               <TouchableOpacity onPress={toggleDropdown} activeOpacity={0.8} style={styles.avatarTouchable}>

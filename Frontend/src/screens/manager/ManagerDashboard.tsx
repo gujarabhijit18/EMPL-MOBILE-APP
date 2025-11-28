@@ -1,26 +1,28 @@
-import React, { useState, useRef } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  Animated,
-  Easing,
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient"; // ✅ Expo-compatible gradient
-import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe icons
-import { ProgressBar } from "react-native-paper";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { useAuth } from "../../contexts/AuthContext";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from 'expo-status-bar';
+import React, { useRef, useState } from "react";
+import {
+    Alert,
+    Animated,
+    Easing,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { ProgressBar } from "react-native-paper";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
 export default function ManagerDashboard() {
   const navigation = useNavigation<any>();
   const { logout, user } = useAuth();
+  const { isDarkMode, colors } = useTheme();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
 
   // ✅ Offline mock stats
@@ -137,11 +139,11 @@ export default function ManagerDashboard() {
   });
 
   return (
-    <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
-      <StatusBar style="light" />
-      <View style={styles.container}>
-        <View style={styles.headerContainer}>
-          <View style={styles.headerGradient}>
+    <SafeAreaView style={[styles.safeAreaContainer, { backgroundColor: colors.header }]} edges={['top']}>
+      <StatusBar style={isDarkMode ? "light" : "light"} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.headerContainer, { backgroundColor: colors.header }]}>
+          <View style={[styles.headerGradient, { backgroundColor: colors.header }]}>
             <View style={styles.headerContent}>
               <TouchableOpacity activeOpacity={0.8} onPress={toggleDropdown} style={styles.avatarTouchable}>
                 <View style={styles.headerAvatar}>

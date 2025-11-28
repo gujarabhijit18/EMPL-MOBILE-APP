@@ -1,34 +1,27 @@
 /**
  * Date and Time Utilities for Expo App
  * Handles timezone conversions and formatting for India Standard Time (IST)
+ * 
+ * NOTE: We use Intl.DateTimeFormat with timeZone: 'Asia/Kolkata' for all IST formatting.
+ * This ensures correct time display regardless of the device's local timezone.
  */
-
-// India Standard Time offset: UTC+5:30
-const IST_OFFSET_HOURS = 5;
-const IST_OFFSET_MINUTES = 30;
-const IST_OFFSET_MS = (IST_OFFSET_HOURS * 60 + IST_OFFSET_MINUTES) * 60 * 1000;
 
 /**
- * Get current date and time in India Standard Time (IST)
- * @returns Date object adjusted to IST
+ * Get current date and time
+ * @returns Current Date object
  */
 export const getCurrentISTTime = (): Date => {
-  const now = new Date();
-  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const istTime = new Date(utcTime + IST_OFFSET_MS);
-  return istTime;
+  return new Date(); // Return device's current time
 };
 
 /**
  * Convert UTC date to IST
  * @param utcDate - Date in UTC
- * @returns Date object in IST
+ * @returns Date object (use with formatters that specify Asia/Kolkata timezone)
  */
 export const convertUTCToIST = (utcDate: Date | string): Date => {
   const date = typeof utcDate === 'string' ? new Date(utcDate) : utcDate;
-  const utcTime = date.getTime();
-  const istTime = new Date(utcTime + IST_OFFSET_MS);
-  return istTime;
+  return date; // Return as-is, formatting functions will handle timezone
 };
 
 /**
@@ -37,9 +30,7 @@ export const convertUTCToIST = (utcDate: Date | string): Date => {
  * @returns Date object in UTC
  */
 export const convertISTToUTC = (istDate: Date): Date => {
-  const istTime = istDate.getTime();
-  const utcTime = new Date(istTime - IST_OFFSET_MS);
-  return utcTime;
+  return istDate; // Return as-is for now
 };
 
 /**
@@ -114,15 +105,25 @@ export const getCurrentISTTimestamp = (): string => {
  * @param date - Date to format
  * @returns Formatted time string
  */
-export const formatAttendanceTime = (date: Date | string): string => {
-  const istDate = typeof date === 'string' ? convertUTCToIST(date) : date;
+export const formatAttendanceTime = (date: Date | string | null | undefined): string => {
+  if (!date) return '-';
   
-  return istDate.toLocaleTimeString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
+  try {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    
+    // Check for invalid date
+    if (isNaN(dateObj.getTime())) return '-';
+    
+    return dateObj.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch (error) {
+    console.error('Error formatting attendance time:', error);
+    return '-';
+  }
 };
 
 /**
