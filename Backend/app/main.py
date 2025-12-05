@@ -18,6 +18,7 @@ from app.routes import (
     shift_routes,
     department_routes,
     settings_routes,
+    online_status_routes,
 )
 import os
 
@@ -53,6 +54,24 @@ try:
 except Exception as _e:
     # Fail-soft: app will still boot; detailed error returned via middleware if used
     pass
+
+# Debug middleware to log request headers (helps debug iOS auth issues)
+class RequestDebugMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Log headers for /employees endpoint to debug auth issues
+        if "/employees" in request.url.path and request.method == "GET":
+            print(f"\n{'='*50}")
+            print(f"📥 Request to: {request.method} {request.url.path}")
+            print(f"📋 Headers received:")
+            for key, value in request.headers.items():
+                if key.lower() == "authorization":
+                    print(f"   🔑 {key}: {value[:50]}..." if len(value) > 50 else f"   🔑 {key}: {value}")
+                else:
+                    print(f"   {key}: {value[:50]}..." if len(value) > 50 else f"   {key}: {value}")
+            print(f"{'='*50}\n")
+        
+        response = await call_next(request)
+        return response
 
 # Custom middleware to add CORS headers to all responses
 class CORSMiddlewareWithErrorHandling(BaseHTTPMiddleware):
@@ -95,6 +114,7 @@ app = FastAPI(
     title="Employee Management System",
     version="1.0",
     middleware=[
+        Middleware(RequestDebugMiddleware),  # Debug middleware first
         Middleware(CORSMiddlewareWithErrorHandling)
     ]
 )
@@ -147,6 +167,7 @@ app.include_router(hiring_routes.router)
 app.include_router(shift_routes.router)
 app.include_router(department_routes.router)
 app.include_router(settings_routes.router)
+app.include_router(online_status_routes.router)
 
 @app.get("/")
 async def home():

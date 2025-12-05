@@ -1,18 +1,31 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
 import { format, addDays, startOfWeek, endOfWeek, isSameDay } from 'date-fns';
 
 export default function TeamShifts() {
   const navigation = useNavigation();
-  const { onScroll, scrollEventThrottle, tabBarHeight } = useAutoHideTabBarOnScroll({
+  const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll({
     threshold: 16,
     overscrollMargin: 50,
   });
+
+  // Animation values
+  const headerAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(headerAnim, {
+      toValue: 1,
+      duration: 600,
+      useNativeDriver: true,
+      easing: Easing.out(Easing.cubic),
+    }).start();
+  }, []);
   // Sample schedule data (static for Expo demo)
   const [schedule] = useState(() => {
     const today = new Date();
@@ -104,22 +117,81 @@ export default function TeamShifts() {
   const dayBoxWidth = windowWidth / 7;
 
   return (
-    <SafeAreaView style={styles.safeAreaContainer}>
-      <StatusBar style="light" />
-      <View style={styles.headerArea}>
-        <View style={styles.headerTopRow}>
-          <TouchableOpacity style={styles.backButton} onPress={() => (navigation as any).goBack()}>
-            <Ionicons name="arrow-back" size={20} color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerTitle}>Shift Management</Text>
-            <Text style={styles.headerSubtitle}>Plan, track and view team shifts</Text>
-          </View>
+    <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
+      <StatusBar style="light" backgroundColor="#10b981" translucent={false} />
+
+      {/* Premium Gradient Header */}
+      <LinearGradient
+        colors={['#10b981', '#059669', '#047857']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        {/* Background Pattern */}
+        <View style={styles.headerPattern}>
+          <View style={[styles.patternCircle, { top: -30, right: -30, width: 140, height: 140 }]} />
+          <View style={[styles.patternCircle, { bottom: -40, left: -40, width: 160, height: 160 }]} />
+          <View style={[styles.patternCircle, { top: 50, right: 100, width: 80, height: 80 }]} />
         </View>
-      </View>
+
+        <Animated.View
+          style={[
+            styles.headerContent,
+            {
+              opacity: headerAnim,
+              transform: [
+                {
+                  translateY: headerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-20, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {/* Header Top Row */}
+          <View style={styles.headerTopRow}>
+            <TouchableOpacity style={styles.backButton} onPress={() => (navigation as any).goBack()} activeOpacity={0.7}>
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+
+            <View style={styles.headerTitleSection}>
+              <Text style={styles.headerTitle}>My Shifts</Text>
+              <Text style={styles.headerSubtitle}>Plan, track and view your shifts</Text>
+            </View>
+
+            <TouchableOpacity style={styles.refreshButton} activeOpacity={0.7}>
+              <Ionicons name="refresh-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Quick Stats Bar */}
+          <View style={styles.quickStatsBar}>
+            <View style={styles.quickStatItem}>
+              <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.quickStatValue}>{schedule.assignments.length}</Text>
+              <Text style={styles.quickStatLabel}>Total</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.quickStatItem}>
+              <Ionicons name="arrow-up-outline" size={16} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.quickStatValue}>{schedule.upcoming_shifts.length}</Text>
+              <Text style={styles.quickStatLabel}>Upcoming</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.quickStatItem}>
+              <Ionicons name="checkmark-done-outline" size={16} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.quickStatValue}>{schedule.past_shifts.length}</Text>
+              <Text style={styles.quickStatLabel}>Completed</Text>
+            </View>
+          </View>
+        </Animated.View>
+      </LinearGradient>
 
       <ScrollView
-        style={[styles.contentContainer, { paddingBottom: tabBarHeight + 16 }]}
+        style={styles.contentContainer}
+        contentContainerStyle={{ paddingBottom: tabBarVisible ? tabBarHeight + 24 : 24 }}
         onScroll={onScroll}
         scrollEventThrottle={scrollEventThrottle}
         showsVerticalScrollIndicator={false}
@@ -345,64 +417,113 @@ export default function TeamShifts() {
 const styles = StyleSheet.create({
   safeAreaContainer: {
     flex: 1,
-    backgroundColor: '#39549fff'
+    backgroundColor: '#10b981'
   },
-  headerArea: {
-    backgroundColor: '#39549fff',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 24
+  headerGradient: {
+    paddingTop: 8,
+    paddingBottom: 24,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  headerPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  patternCircle: {
+    position: 'absolute',
+    borderRadius: 9999,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  headerContent: {
+    paddingHorizontal: 20,
+    position: 'relative',
+    zIndex: 1,
   },
   headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  headerIconTile: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+  refreshButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  headerIconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
-  headerTextContainer: {
+  headerTitleSection: {
     flex: 1,
-    paddingHorizontal: 16
+    paddingHorizontal: 16,
   },
   headerTitle: {
     fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff'
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: 0.3,
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: '#a5b4fc'
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  quickStatsBar: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 16,
+    padding: 14,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  quickStatItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  quickStatValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 4,
+    letterSpacing: 0.3,
+  },
+  quickStatLabel: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 2,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  statDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   contentContainer: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#f8fafc',
     padding: 16,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: -10
   },
   header: {
     flexDirection: 'row',

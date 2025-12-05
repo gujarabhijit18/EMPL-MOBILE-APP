@@ -90,9 +90,8 @@ const CreateDepartmentForm = () => {
       if (!form.name.trim()) newErrors.name = 'Department name is required';
       if (!form.code.trim()) newErrors.code = 'Department code is required';
       if (form.code.length > 5) newErrors.code = 'Code must be 5 characters or less';
-    } else if (step === 1) {
-      if (!form.manager_id) newErrors.manager_id = 'Please select a manager';
     }
+    // Manager is optional - no validation required for step 1
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -160,20 +159,94 @@ const CreateDepartmentForm = () => {
     </View>
   );
 
+  const [managerSearch, setManagerSearch] = useState('');
+  const [showManagerDropdown, setShowManagerDropdown] = useState(false);
+  
+  const filteredManagers = managers.filter(m => 
+    m.name.toLowerCase().includes(managerSearch.toLowerCase()) ||
+    m.role.toLowerCase().includes(managerSearch.toLowerCase()) ||
+    (m.department && m.department.toLowerCase().includes(managerSearch.toLowerCase()))
+  );
+
+  const selectedManager = managers.find(m => m.id === form.manager_id);
+
   const renderStep1 = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Management & Team</Text>
       <Text style={styles.stepSubtitle}>Assign manager and set team size</Text>
+      
+      {/* Manager Selection with Search */}
       <View style={styles.inputGroup}>
-        <Text style={styles.label}><Ionicons name="person-outline" size={16} color="#667eea" /> Department Manager *</Text>
-        <View style={styles.pickerContainer}>
-          <Picker selectedValue={form.manager_id} onValueChange={(v) => setForm({ ...form, manager_id: v })} style={styles.picker}>
-            <Picker.Item label="Select Manager" value={null} />
-            {managers.map((m) => <Picker.Item key={m.id} label={`${m.name} (${m.role})`} value={m.id} />)}
-          </Picker>
-        </View>
-        {errors.manager_id && <Text style={styles.errorText}>{errors.manager_id}</Text>}
+        <Text style={styles.label}><Ionicons name="person-outline" size={16} color="#667eea" /> Department Manager (Optional)</Text>
+        
+        {/* Selected Manager Display */}
+        {selectedManager ? (
+          <View style={styles.selectedManagerCard}>
+            <View style={styles.selectedManagerAvatar}>
+              <Ionicons name="person" size={24} color="#667eea" />
+            </View>
+            <View style={styles.selectedManagerInfo}>
+              <Text style={styles.selectedManagerName}>{selectedManager.name}</Text>
+              <Text style={styles.selectedManagerRole}>{selectedManager.role} {selectedManager.department ? `• ${selectedManager.department}` : ''}</Text>
+            </View>
+            <TouchableOpacity style={styles.clearManagerButton} onPress={() => setForm({ ...form, manager_id: null })}>
+              <Ionicons name="close-circle" size={24} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.managerSelectButton} onPress={() => setShowManagerDropdown(!showManagerDropdown)}>
+            <Ionicons name="person-add-outline" size={20} color="#667eea" />
+            <Text style={styles.managerSelectButtonText}>Select a Manager</Text>
+            <Ionicons name={showManagerDropdown ? "chevron-up" : "chevron-down"} size={20} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
+        
+        {/* Manager Dropdown */}
+        {showManagerDropdown && !selectedManager && (
+          <View style={styles.managerDropdown}>
+            <View style={styles.managerSearchContainer}>
+              <Ionicons name="search" size={18} color="#9ca3af" />
+              <TextInput
+                style={styles.managerSearchInput}
+                placeholder="Search managers..."
+                placeholderTextColor="#9ca3af"
+                value={managerSearch}
+                onChangeText={setManagerSearch}
+              />
+            </View>
+            <ScrollView style={styles.managerList} nestedScrollEnabled>
+              {filteredManagers.length === 0 ? (
+                <View style={styles.noManagersFound}>
+                  <Ionicons name="person-outline" size={32} color="#d1d5db" />
+                  <Text style={styles.noManagersText}>No managers found</Text>
+                </View>
+              ) : (
+                filteredManagers.map((m) => (
+                  <TouchableOpacity
+                    key={m.id}
+                    style={styles.managerOption}
+                    onPress={() => {
+                      setForm({ ...form, manager_id: m.id });
+                      setShowManagerDropdown(false);
+                      setManagerSearch('');
+                    }}
+                  >
+                    <View style={styles.managerOptionAvatar}>
+                      <Text style={styles.managerOptionAvatarText}>{m.name.charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.managerOptionInfo}>
+                      <Text style={styles.managerOptionName}>{m.name}</Text>
+                      <Text style={styles.managerOptionRole}>{m.role} {m.department ? `• ${m.department}` : ''}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color="#d1d5db" />
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        )}
       </View>
+
       <View style={styles.inputGroup}>
         <Text style={styles.label}><Ionicons name="people-outline" size={16} color="#667eea" /> Number of Employees</Text>
         <View style={styles.numberInputContainer}>
@@ -338,6 +411,27 @@ const styles = StyleSheet.create({
   nextButtonFull: { flex: 1 },
   nextButtonInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8 },
   nextButtonText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
+  // Manager Selection Styles
+  selectedManagerCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f9ff', borderWidth: 2, borderColor: '#667eea', borderRadius: 12, padding: 12, gap: 12 },
+  selectedManagerAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center' },
+  selectedManagerInfo: { flex: 1 },
+  selectedManagerName: { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+  selectedManagerRole: { fontSize: 13, color: '#6b7280', marginTop: 2 },
+  clearManagerButton: { padding: 4 },
+  managerSelectButton: { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#e5e7eb', borderRadius: 12, padding: 16, gap: 12, backgroundColor: '#ffffff' },
+  managerSelectButtonText: { flex: 1, fontSize: 16, color: '#9ca3af' },
+  managerDropdown: { borderWidth: 2, borderColor: '#e5e7eb', borderRadius: 12, backgroundColor: '#ffffff', marginTop: 8, overflow: 'hidden' },
+  managerSearchContainer: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', gap: 8 },
+  managerSearchInput: { flex: 1, fontSize: 15, color: '#1f2937' },
+  managerList: { maxHeight: 200 },
+  noManagersFound: { alignItems: 'center', padding: 24, gap: 8 },
+  noManagersText: { fontSize: 14, color: '#9ca3af' },
+  managerOption: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', gap: 12 },
+  managerOptionAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#667eea', justifyContent: 'center', alignItems: 'center' },
+  managerOptionAvatarText: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
+  managerOptionInfo: { flex: 1 },
+  managerOptionName: { fontSize: 15, fontWeight: '600', color: '#1f2937' },
+  managerOptionRole: { fontSize: 12, color: '#6b7280', marginTop: 2 },
 });
 
 export default CreateDepartmentForm;

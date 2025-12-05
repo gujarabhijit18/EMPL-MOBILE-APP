@@ -15,7 +15,7 @@ class TaskCreate(TaskBase):
 
 class TaskOut(TaskBase):
     task_id: int
-    assigned_to: int
+    assigned_to: Optional[int] = None
     assigned_by: int
     created_at: Optional[datetime] = None
     last_passed_by: Optional[int] = None
@@ -59,6 +59,21 @@ class TaskNotificationOut(BaseModel):
     pass_details: Optional[dict] = None
     is_read: bool
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TaskCommentCreate(BaseModel):
+    message: str
+
+
+class TaskCommentOut(BaseModel):
+    id: int
+    task_id: int
+    user_id: int
+    message: str
+    created_at: datetime
+    user_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

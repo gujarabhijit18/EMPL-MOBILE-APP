@@ -2,28 +2,31 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
-import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from "expo-linear-gradient";
+import { StatusBar, setStatusBarBackgroundColor, setStatusBarStyle } from "expo-status-bar";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Easing,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    ToastAndroid,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  ToastAndroid,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { Button, Card, Divider } from "react-native-paper";
 import RNPickerSelect from "react-native-picker-select";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ColorTheme, ThemeMode, useTheme } from "../../contexts/ThemeContext";
 import { apiService, UserSettings } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
+
+const { width } = Dimensions.get("window");
 
 interface LanguageItem {
   label: string;
@@ -32,25 +35,33 @@ interface LanguageItem {
 
 export default function SettingsScreen() {
   const navigation = useNavigation();
-  
+
   // Use global theme context
   const { themeMode, setThemeMode, colorTheme, setColorTheme, isDarkMode } = useTheme();
-  
+
   // Tab bar visibility with auto-hide on scroll
-  const { onScroll, scrollEventThrottle, tabBarHeight } = useAutoHideTabBarOnScroll({
+  const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll({
     threshold: 16,
     overscrollMargin: 50,
   });
-  
-  // Animation values for header elements
-  const headerOpacity = useRef(new Animated.Value(0)).current;
-  const headerTranslateY = useRef(new Animated.Value(-20)).current;
-  
+
+  // Animation values
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const contentAnim = useRef(new Animated.Value(0)).current;
+
+  // Set status bar
+  useEffect(() => {
+    if (Platform.OS === "android") {
+      setStatusBarBackgroundColor("#6366f1", true);
+    }
+    setStatusBarStyle("light");
+  }, []);
+
   // Loading state
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [userId, setUserId] = useState<number | null>(null);
-  
+
   // Language
   const [language, setLanguage] = useState("en");
 
@@ -59,23 +70,21 @@ export default function SettingsScreen() {
   const [pushNotifications, setPushNotifications] = useState(true);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
-  // Dynamic styles based on theme
-  const dynamicStyles = getThemedStyles(isDarkMode);
-  
   // Animate header elements on component mount
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(headerOpacity, {
+      Animated.timing(headerAnim, {
         toValue: 1,
         duration: 600,
         useNativeDriver: true,
         easing: Easing.out(Easing.cubic),
       }),
-      Animated.timing(headerTranslateY, {
-        toValue: 0,
-        duration: 600,
+      Animated.timing(contentAnim, {
+        toValue: 1,
+        duration: 500,
+        delay: 200,
         useNativeDriver: true,
-        easing: Easing.out(Easing.back(1.5)),
+        easing: Easing.out(Easing.cubic),
       }),
     ]).start();
   }, []);
@@ -84,26 +93,20 @@ export default function SettingsScreen() {
   const loadSettings = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Get user ID from stored user data
       const userData = await AsyncStorage.getItem("user");
       if (userData) {
         const user = JSON.parse(userData);
         setUserId(user.user_id);
-        
-        // Fetch settings from API
+
         const settings = await apiService.getSettingsByUserId(user.user_id);
-        console.log("📥 Loaded settings from API:", settings);
-        
-        // Update global theme context
-        setThemeMode(settings.theme_mode as ThemeMode || "system");
-        setColorTheme(settings.color_theme as ColorTheme || "default");
-        
+
+        setThemeMode((settings.theme_mode as ThemeMode) || "system");
+        setColorTheme((settings.color_theme as ColorTheme) || "default");
         setLanguage(settings.language || "en");
         setEmailNotifications(settings.email_notifications ?? true);
         setPushNotifications(settings.push_notifications ?? true);
         setTwoFactorEnabled(settings.two_factor_enabled ?? false);
-        
-        // Also save to local storage for offline access
+
         await AsyncStorage.multiSet([
           ["themeMode", settings.theme_mode || "system"],
           ["userColorTheme", settings.color_theme || "default"],
@@ -113,18 +116,15 @@ export default function SettingsScreen() {
           ["twoFactorEnabled", JSON.stringify(settings.two_factor_enabled ?? false)],
         ]);
       } else {
-        // Fallback to local storage if not logged in
         await loadLocalSettings();
       }
     } catch (error) {
-      console.log("⚠️ Error loading settings from API, falling back to local:", error);
       await loadLocalSettings();
     } finally {
       setIsLoading(false);
     }
   }, [setThemeMode, setColorTheme]);
 
-  // Load from local storage (fallback)
   const loadLocalSettings = async () => {
     try {
       const storedTheme = await AsyncStorage.getItem("themeMode");
@@ -150,59 +150,56 @@ export default function SettingsScreen() {
   }, [loadSettings]);
 
   // ✅ Save Settings to API
-  const saveSettings = useCallback(async (settingsData: Partial<UserSettings>) => {
-    if (!userId) {
-      // Save locally if no user ID
+  const saveSettings = useCallback(
+    async (settingsData: Partial<UserSettings>) => {
+      if (!userId) {
+        try {
+          await AsyncStorage.multiSet([
+            ["themeMode", themeMode],
+            ["userColorTheme", colorTheme],
+            ["language", language],
+            ["emailNotifications", JSON.stringify(emailNotifications)],
+            ["pushNotifications", JSON.stringify(pushNotifications)],
+            ["twoFactorEnabled", JSON.stringify(twoFactorEnabled)],
+          ]);
+        } catch (error) {
+          console.log("⚠️ Error saving local settings:", error);
+        }
+        return;
+      }
+
+      setIsSaving(true);
       try {
+        const updatedSettings = await apiService.updateSettingsByUserId(userId, settingsData);
+
         await AsyncStorage.multiSet([
-          ["themeMode", themeMode],
-          ["userColorTheme", colorTheme],
-          ["language", language],
-          ["emailNotifications", JSON.stringify(emailNotifications)],
-          ["pushNotifications", JSON.stringify(pushNotifications)],
-          ["twoFactorEnabled", JSON.stringify(twoFactorEnabled)],
+          ["themeMode", updatedSettings.theme_mode],
+          ["userColorTheme", updatedSettings.color_theme],
+          ["language", updatedSettings.language],
+          ["emailNotifications", JSON.stringify(updatedSettings.email_notifications)],
+          ["pushNotifications", JSON.stringify(updatedSettings.push_notifications)],
+          ["twoFactorEnabled", JSON.stringify(updatedSettings.two_factor_enabled)],
         ]);
       } catch (error) {
-        console.log("⚠️ Error saving local settings:", error);
+        try {
+          await AsyncStorage.multiSet([
+            ["themeMode", themeMode],
+            ["userColorTheme", colorTheme],
+            ["language", language],
+            ["emailNotifications", JSON.stringify(emailNotifications)],
+            ["pushNotifications", JSON.stringify(pushNotifications)],
+            ["twoFactorEnabled", JSON.stringify(twoFactorEnabled)],
+          ]);
+        } catch (localError) {
+          console.log("⚠️ Error saving local settings:", localError);
+        }
+      } finally {
+        setIsSaving(false);
       }
-      return;
-    }
+    },
+    [userId, themeMode, colorTheme, language, emailNotifications, pushNotifications, twoFactorEnabled]
+  );
 
-    setIsSaving(true);
-    try {
-      const updatedSettings = await apiService.updateSettingsByUserId(userId, settingsData);
-      console.log("✅ Settings saved to API:", updatedSettings);
-      
-      // Also update local storage
-      await AsyncStorage.multiSet([
-        ["themeMode", updatedSettings.theme_mode],
-        ["userColorTheme", updatedSettings.color_theme],
-        ["language", updatedSettings.language],
-        ["emailNotifications", JSON.stringify(updatedSettings.email_notifications)],
-        ["pushNotifications", JSON.stringify(updatedSettings.push_notifications)],
-        ["twoFactorEnabled", JSON.stringify(updatedSettings.two_factor_enabled)],
-      ]);
-    } catch (error) {
-      console.log("⚠️ Error saving settings to API:", error);
-      // Still save locally as fallback
-      try {
-        await AsyncStorage.multiSet([
-          ["themeMode", themeMode],
-          ["userColorTheme", colorTheme],
-          ["language", language],
-          ["emailNotifications", JSON.stringify(emailNotifications)],
-          ["pushNotifications", JSON.stringify(pushNotifications)],
-          ["twoFactorEnabled", JSON.stringify(twoFactorEnabled)],
-        ]);
-      } catch (localError) {
-        console.log("⚠️ Error saving local settings:", localError);
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  }, [userId, themeMode, colorTheme, language, emailNotifications, pushNotifications, twoFactorEnabled]);
-
-  // ✅ Toast replacement
   const showToast = (message: string) => {
     if (Platform.OS === "android") {
       ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -211,15 +208,14 @@ export default function SettingsScreen() {
     }
   };
 
-  // ✅ Handle setting changes
   const handleThemeModeChange = (value: ThemeMode) => {
-    setThemeMode(value); // Update global context
+    setThemeMode(value);
     saveSettings({ theme_mode: value });
     showToast(`${value.charAt(0).toUpperCase() + value.slice(1)} mode applied`);
   };
 
   const handleColorThemeChange = (value: ColorTheme, label: string) => {
-    setColorTheme(value); // Update global context
+    setColorTheme(value);
     saveSettings({ color_theme: value });
     showToast(`${label} theme applied`);
   };
@@ -248,7 +244,6 @@ export default function SettingsScreen() {
     showToast(`Two-Factor Authentication ${value ? "enabled" : "disabled"}`);
   };
 
-  // ✅ Static Options
   const themeModes = [
     { label: "Light", value: "light" as ThemeMode, icon: "sunny-outline" },
     { label: "Dark", value: "dark" as ThemeMode, icon: "moon-outline" },
@@ -270,386 +265,329 @@ export default function SettingsScreen() {
     { label: "मराठी", value: "mr" },
   ];
 
-  // Calculate stats for header cards
-  const totalSettings = 6;
-  const enabledSettings = [
-    emailNotifications,
-    pushNotifications,
-    twoFactorEnabled
-  ].filter(Boolean).length + 3;
-
-  // Get current theme mode display text
-  const getThemeModeDisplay = () => {
-    if (themeMode === "system") {
-      return isDarkMode ? "SYS-D" : "SYS-L";
-    }
-    return themeMode.toUpperCase();
-  };
-
   if (isLoading) {
     return (
-      <SafeAreaView style={[styles.safeAreaContainer, dynamicStyles.safeArea]} edges={['top']}>
-        <StatusBar style={isDarkMode ? "light" : "dark"} />
-        <View style={[styles.loadingContainer, dynamicStyles.safeArea]}>
+      <View style={styles.loaderContainer}>
+        <LinearGradient colors={["#6366f1", "#4f46e5"]} style={styles.loaderGradient}>
           <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>Loading settings...</Text>
-        </View>
-      </SafeAreaView>
+          <Text style={styles.loaderText}>Loading settings...</Text>
+        </LinearGradient>
+      </View>
     );
   }
-  
+
   return (
-    <SafeAreaView style={[styles.safeAreaContainer, dynamicStyles.safeArea]} edges={['top']}>
-      <StatusBar style={isDarkMode ? "light" : "dark"} />
-      
-      {/* Enhanced Header */}
-      <View style={[styles.header, dynamicStyles.header]}>
-        <View style={styles.headerTopRow}>
-          <TouchableOpacity 
-            style={styles.backButton} 
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          
-          <Animated.View 
-            style={[
-              styles.headerTextContainer,
-              { opacity: headerOpacity, transform: [{ translateY: headerTranslateY }] }
-            ]}
-          >
-            <View style={styles.headerTitleRow}>
-              <Text style={styles.headerTitle}>Settings</Text>
-              {isSaving && (
-                <ActivityIndicator size="small" color="#fff" style={styles.savingIndicator} />
-              )}
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <StatusBar style="light" backgroundColor="#6366f1" translucent={false} />
+
+      {/* Premium Gradient Header */}
+      <LinearGradient
+        colors={["#6366f1", "#4f46e5", "#4338ca"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        {/* Background Pattern */}
+        <View style={styles.headerPattern}>
+          <View style={[styles.patternCircle, { top: -30, right: -30, width: 140, height: 140 }]} />
+          <View style={[styles.patternCircle, { bottom: -40, left: -40, width: 160, height: 160 }]} />
+          <View style={[styles.patternCircle, { top: 50, right: 100, width: 80, height: 80 }]} />
+        </View>
+
+        <Animated.View
+          style={[
+            styles.headerContent,
+            {
+              opacity: headerAnim,
+              transform: [
+                {
+                  translateY: headerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-20, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {/* Header Top Row */}
+          <View style={styles.headerTopRow}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+
+            <View style={styles.headerTitleSection}>
+              <View style={styles.headerTitleRow}>
+                <Text style={styles.headerTitle}>Settings</Text>
+                {isSaving && <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />}
+              </View>
+              <Text style={styles.headerSubtitle}>Customize your preferences</Text>
             </View>
-            <Text style={styles.headerSubtitle}>Customize your preferences</Text>
-          </Animated.View>
-          
-          <TouchableOpacity 
-            style={styles.headerIconButton}
-            onPress={() => loadSettings()}
-          >
-            <Ionicons name="refresh-outline" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-        
-        {/* Stats Cards */}
-        <View style={styles.statsRow}>
-          <Card style={[styles.statsCard, dynamicStyles.statsCard]}>
-            <Ionicons name="settings" size={20} color="#3b82f6" style={styles.statsIcon} />
-            <Text style={[styles.cardLabel, dynamicStyles.cardLabel]}>Total</Text>
-            <Text style={[styles.cardValue, dynamicStyles.cardValue]}>{totalSettings}</Text>
-          </Card>
-          <Card style={[styles.statsCard, dynamicStyles.statsCard]}>
-            <Ionicons name="checkmark-circle" size={20} color="#10b981" style={styles.statsIcon} />
-            <Text style={[styles.cardLabel, dynamicStyles.cardLabel]}>Active</Text>
-            <Text style={[styles.cardValue, dynamicStyles.cardValue]}>{enabledSettings}</Text>
-          </Card>
-          <Card style={[styles.statsCard, dynamicStyles.statsCard]}>
-            <Ionicons 
-              name={isDarkMode ? "moon" : "sunny"} 
-              size={20} 
-              color={isDarkMode ? "#a78bfa" : "#f59e0b"} 
-              style={styles.statsIcon} 
-            />
-            <Text style={[styles.cardLabel, dynamicStyles.cardLabel]}>Mode</Text>
-            <Text style={[styles.cardValue, dynamicStyles.cardValue]}>{getThemeModeDisplay()}</Text>
-          </Card>
-        </View>
-      </View>
-      
-      <ScrollView 
-        style={[styles.contentContainer, dynamicStyles.contentContainer, { paddingBottom: tabBarHeight + 16 }]}
+
+            <TouchableOpacity style={styles.refreshButton} onPress={() => loadSettings()} activeOpacity={0.7}>
+              <Ionicons name="refresh-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </LinearGradient>
+
+      {/* Main Content */}
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBarVisible ? tabBarHeight + 24 : 24 }]}
         onScroll={onScroll}
         scrollEventThrottle={scrollEventThrottle}
         showsVerticalScrollIndicator={false}
       >
+        <Animated.View
+          style={{
+            opacity: contentAnim,
+            transform: [
+              {
+                translateY: contentAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [30, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          {/* Display Mode Section */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconBg, { backgroundColor: "#fef3c7" }]}>
+                <Ionicons name="contrast-outline" size={18} color="#f59e0b" />
+              </View>
+              <View>
+                <Text style={styles.sectionTitle}>Display Mode</Text>
+                <Text style={styles.sectionSubtitle}>Choose Light / Dark / System</Text>
+              </View>
+            </View>
 
-        {/* 🌗 Theme Mode */}
-        <Card style={[styles.card, dynamicStyles.card]}>
-          <Card.Title 
-            title="🌓 Display Mode" 
-            subtitle="Choose Light / Dark / System mode"
-            titleStyle={dynamicStyles.cardTitle}
-            subtitleStyle={dynamicStyles.cardSubtitle}
-          />
-          <Card.Content>
-            <View style={styles.rowWrap}>
+            <View style={styles.themeModeContainer}>
               {themeModes.map((mode) => (
                 <TouchableOpacity
                   key={mode.value}
-                  style={[
-                    styles.optionCard,
-                    dynamicStyles.optionCard,
-                    themeMode === mode.value && styles.activeCard,
-                  ]}
+                  style={[styles.themeModeCard, themeMode === mode.value && styles.themeModeCardActive]}
                   onPress={() => handleThemeModeChange(mode.value)}
+                  activeOpacity={0.7}
                 >
-                  <Ionicons
-                    name={mode.icon as any}
-                    size={24}
-                    color={themeMode === mode.value ? "#fff" : (isDarkMode ? "#e5e7eb" : "#333")}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      dynamicStyles.optionText,
-                      themeMode === mode.value && { color: "#fff" },
-                    ]}
+                  <LinearGradient
+                    colors={themeMode === mode.value ? ["#6366f1", "#4f46e5"] : ["#f9fafb", "#f3f4f6"]}
+                    style={styles.themeModeGradient}
                   >
-                    {mode.label}
-                  </Text>
+                    <Ionicons
+                      name={mode.icon as any}
+                      size={28}
+                      color={themeMode === mode.value ? "#fff" : "#6b7280"}
+                    />
+                    <Text style={[styles.themeModeText, themeMode === mode.value && styles.themeModeTextActive]}>
+                      {mode.label}
+                    </Text>
+                  </LinearGradient>
                 </TouchableOpacity>
               ))}
             </View>
-          </Card.Content>
-        </Card>
+          </View>
 
-        {/* 🎨 Color Theme */}
-        <Card style={[styles.card, dynamicStyles.card]}>
-          <Card.Title 
-            title="🎨 Color Theme" 
-            subtitle="Choose your favorite accent color"
-            titleStyle={dynamicStyles.cardTitle}
-            subtitleStyle={dynamicStyles.cardSubtitle}
-          />
-          <Card.Content>
-            <View style={styles.colorRow}>
-              {colorThemes.map((theme) => (
-                <TouchableOpacity
-                  key={theme.value}
-                  onPress={() => handleColorThemeChange(theme.value, theme.label)}
-                  style={[
-                    styles.colorCircle,
-                    { backgroundColor: theme.color },
-                    colorTheme === theme.value && styles.activeCircle,
-                  ]}
+          {/* Color Theme Section */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconBg, { backgroundColor: "#ede9fe" }]}>
+                <Ionicons name="color-palette-outline" size={18} color="#8b5cf6" />
+              </View>
+              <View>
+                <Text style={styles.sectionTitle}>Color Theme</Text>
+                <Text style={styles.sectionSubtitle}>Choose your accent color</Text>
+              </View>
+            </View>
+
+            <View style={styles.colorThemeCard}>
+              <View style={styles.colorThemeGrid}>
+                {colorThemes.map((theme) => (
+                  <TouchableOpacity
+                    key={theme.value}
+                    style={styles.colorThemeItem}
+                    onPress={() => handleColorThemeChange(theme.value, theme.label)}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={[
+                        styles.colorCircle,
+                        { backgroundColor: theme.color },
+                        colorTheme === theme.value && styles.colorCircleActive,
+                      ]}
+                    >
+                      {colorTheme === theme.value && <Ionicons name="checkmark" size={18} color="#fff" />}
+                    </View>
+                    <Text style={[styles.colorLabel, colorTheme === theme.value && { color: theme.color }]}>
+                      {theme.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          {/* Language Section */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconBg, { backgroundColor: "#dbeafe" }]}>
+                <Ionicons name="language-outline" size={18} color="#3b82f6" />
+              </View>
+              <View>
+                <Text style={styles.sectionTitle}>Language</Text>
+                <Text style={styles.sectionSubtitle}>Select your preferred language</Text>
+              </View>
+            </View>
+
+            <View style={styles.languageCard}>
+              <View style={styles.pickerWrapper}>
+                <RNPickerSelect
+                  onValueChange={(value: string) => handleLanguageChange(value)}
+                  items={languages}
+                  value={language}
+                  style={{
+                    inputIOS: styles.pickerInput,
+                    inputAndroid: styles.pickerInput,
+                    iconContainer: { top: 14, right: 12 },
+                  }}
+                  Icon={() => <Ionicons name="chevron-down" size={20} color="#6b7280" />}
                 />
-              ))}
+              </View>
             </View>
-          </Card.Content>
-        </Card>
+          </View>
 
-        {/* 🌐 Language */}
-        <Card style={[styles.card, dynamicStyles.card]}>
-          <Card.Title 
-            title="🌐 Language" 
-            subtitle="Select your preferred language"
-            titleStyle={dynamicStyles.cardTitle}
-            subtitleStyle={dynamicStyles.cardSubtitle}
-          />
-          <Card.Content>
-            <View style={[styles.pickerContainer, dynamicStyles.pickerContainer]}>
-              <RNPickerSelect
-                onValueChange={(value: string) => handleLanguageChange(value)}
-                items={languages}
-                value={language}
-                style={{
-                  inputIOS: [styles.picker, dynamicStyles.picker],
-                  inputAndroid: [styles.picker, dynamicStyles.picker],
-                }}
-              />
+          {/* Notifications Section */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconBg, { backgroundColor: "#d1fae5" }]}>
+                <Ionicons name="notifications-outline" size={18} color="#10b981" />
+              </View>
+              <View>
+                <Text style={styles.sectionTitle}>Notifications</Text>
+                <Text style={styles.sectionSubtitle}>Manage how you receive alerts</Text>
+              </View>
             </View>
-          </Card.Content>
-        </Card>
 
-        {/* 🔔 Notifications */}
-        <Card style={[styles.card, dynamicStyles.card]}>
-          <Card.Title 
-            title="🔔 Notifications" 
-            subtitle="Manage how you receive alerts"
-            titleStyle={dynamicStyles.cardTitle}
-            subtitleStyle={dynamicStyles.cardSubtitle}
-          />
-          <Card.Content>
-            <View style={styles.settingRow}>
-              <View>
-                <Text style={[styles.settingTitle, dynamicStyles.settingTitle]}>Email Notifications</Text>
-                <Text style={[styles.settingDesc, dynamicStyles.settingDesc]}>Receive updates via email</Text>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingItem}>
+                <View style={[styles.settingIconBg, { backgroundColor: "#dbeafe" }]}>
+                  <Ionicons name="mail-outline" size={20} color="#3b82f6" />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingTitle}>Email Notifications</Text>
+                  <Text style={styles.settingSubtitle}>Receive updates via email</Text>
+                </View>
+                <Switch
+                  value={emailNotifications}
+                  onValueChange={handleEmailNotificationsChange}
+                  trackColor={{ false: "#e5e7eb", true: "#6366f1" }}
+                  thumbColor="#fff"
+                />
               </View>
-              <Switch
-                value={emailNotifications}
-                onValueChange={handleEmailNotificationsChange}
-                trackColor={{ false: isDarkMode ? "#4b5563" : "#d1d5db", true: "#3b82f6" }}
-                thumbColor={emailNotifications ? "#fff" : "#f4f3f4"}
-              />
-            </View>
-            <Divider style={dynamicStyles.divider} />
-            <View style={styles.settingRow}>
-              <View>
-                <Text style={[styles.settingTitle, dynamicStyles.settingTitle]}>Push Notifications</Text>
-                <Text style={[styles.settingDesc, dynamicStyles.settingDesc]}>Enable mobile push alerts</Text>
-              </View>
-              <Switch
-                value={pushNotifications}
-                onValueChange={handlePushNotificationsChange}
-                trackColor={{ false: isDarkMode ? "#4b5563" : "#d1d5db", true: "#3b82f6" }}
-                thumbColor={pushNotifications ? "#fff" : "#f4f3f4"}
-              />
-            </View>
-          </Card.Content>
-        </Card>
 
-        {/* 🔒 Security */}
-        <Card style={[styles.card, dynamicStyles.card]}>
-          <Card.Title 
-            title="🔒 Security" 
-            subtitle="Privacy and safety options"
-            titleStyle={dynamicStyles.cardTitle}
-            subtitleStyle={dynamicStyles.cardSubtitle}
-          />
-          <Card.Content>
-            <View style={styles.settingRow}>
-              <View>
-                <Text style={[styles.settingTitle, dynamicStyles.settingTitle]}>Two-Factor Authentication</Text>
-                <Text style={[styles.settingDesc, dynamicStyles.settingDesc]}>Add extra login protection</Text>
+              <View style={styles.settingDivider} />
+
+              <View style={styles.settingItem}>
+                <View style={[styles.settingIconBg, { backgroundColor: "#fef3c7" }]}>
+                  <Ionicons name="phone-portrait-outline" size={20} color="#f59e0b" />
+                </View>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingTitle}>Push Notifications</Text>
+                  <Text style={styles.settingSubtitle}>Enable mobile push alerts</Text>
+                </View>
+                <Switch
+                  value={pushNotifications}
+                  onValueChange={handlePushNotificationsChange}
+                  trackColor={{ false: "#e5e7eb", true: "#6366f1" }}
+                  thumbColor="#fff"
+                />
               </View>
-              <Switch
-                value={twoFactorEnabled}
-                onValueChange={handleTwoFactorChange}
-                trackColor={{ false: isDarkMode ? "#4b5563" : "#d1d5db", true: "#3b82f6" }}
-                thumbColor={twoFactorEnabled ? "#fff" : "#f4f3f4"}
+            </View>
+          </View>
+
+          {/* Sync Status */}
+          <View style={styles.syncStatusContainer}>
+            <View style={[styles.syncStatusBadge, { backgroundColor: userId ? "#d1fae5" : "#f3f4f6" }]}>
+              <Ionicons
+                name={userId ? "cloud-done-outline" : "cloud-offline-outline"}
+                size={16}
+                color={userId ? "#10b981" : "#6b7280"}
               />
+              <Text style={[styles.syncStatusText, { color: userId ? "#10b981" : "#6b7280" }]}>
+                {userId ? "Settings synced with server" : "Settings stored locally"}
+              </Text>
             </View>
-            <Divider style={dynamicStyles.divider} />
-            <View style={styles.settingRow}>
-              <View>
-                <Text style={[styles.settingTitle, dynamicStyles.settingTitle]}>Change Password</Text>
-                <Text style={[styles.settingDesc, dynamicStyles.settingDesc]}>
-                  Update password regularly for better security
-                </Text>
-              </View>
-              <Button
-                mode="outlined"
-                onPress={() => Alert.alert("Change Password", "Redirecting...")}
-                textColor={isDarkMode ? "#93c5fd" : "#3b82f6"}
-              >
-                Change
-              </Button>
-            </View>
-          </Card.Content>
-        </Card>
-        
-        {/* Sync Status */}
-        <View style={styles.syncStatus}>
-          <Ionicons 
-            name={userId ? "cloud-done-outline" : "cloud-offline-outline"} 
-            size={16} 
-            color={userId ? "#10b981" : (isDarkMode ? "#9ca3af" : "#6b7280")} 
-          />
-          <Text style={[styles.syncText, { color: userId ? "#10b981" : (isDarkMode ? "#9ca3af" : "#6b7280") }]}>
-            {userId ? "Settings synced with server" : "Settings stored locally"}
-          </Text>
-        </View>
+          </View>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// 🎨 Dynamic themed styles
-const getThemedStyles = (isDarkMode: boolean) => StyleSheet.create({
-  safeArea: {
-    backgroundColor: isDarkMode ? "#1e293b" : "#39549fff",
-  },
-  header: {
-    backgroundColor: isDarkMode ? "#1e293b" : "#39549fff",
-  },
-  contentContainer: {
-    backgroundColor: isDarkMode ? "#0f172a" : "#f9fafb",
-  },
-  statsCard: {
-    backgroundColor: isDarkMode ? "#1e293b" : "white",
-  },
-  cardLabel: {
-    color: isDarkMode ? "#9ca3af" : "#6b7280",
-  },
-  cardValue: {
-    color: isDarkMode ? "#f3f4f6" : "#111827",
-  },
-  card: {
-    backgroundColor: isDarkMode ? "#1e293b" : "white",
-  },
-  cardTitle: {
-    color: isDarkMode ? "#f3f4f6" : "#111827",
-  },
-  cardSubtitle: {
-    color: isDarkMode ? "#9ca3af" : "#6b7280",
-  },
-  optionCard: {
-    backgroundColor: isDarkMode ? "#374151" : "#E5E7EB",
-  },
-  optionText: {
-    color: isDarkMode ? "#e5e7eb" : "#333",
-  },
-  pickerContainer: {
-    backgroundColor: isDarkMode ? "#374151" : "#fff",
-  },
-  picker: {
-    color: isDarkMode ? "#f3f4f6" : "#111",
-  },
-  settingTitle: {
-    color: isDarkMode ? "#f3f4f6" : "#111827",
-  },
-  settingDesc: {
-    color: isDarkMode ? "#9ca3af" : "#6B7280",
-  },
-  divider: {
-    backgroundColor: isDarkMode ? "#374151" : "#e5e7eb",
-  },
-});
 
-// 🎨 Base Styles
 const styles = StyleSheet.create({
-  safeAreaContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: "#6366f1",
+  },
+  loaderContainer: {
     flex: 1,
   },
-  loadingContainer: {
+  loaderGradient: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
-  loadingText: {
-    color: "#fff",
-    marginTop: 12,
+  loaderText: {
+    marginTop: 16,
     fontSize: 16,
+    color: "#fff",
+    fontWeight: "500",
   },
-  contentContainer: {
-    flex: 1,
-    padding: 16,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: -20,
+  headerGradient: {
+    paddingTop: 8,
+    paddingBottom: 24,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    position: "relative",
+    overflow: "hidden",
   },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 30,
+  headerPattern: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  patternCircle: {
+    position: "absolute",
+    borderRadius: 9999,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  headerContent: {
+    paddingHorizontal: 20,
+    position: "relative",
+    zIndex: 1,
   },
   headerTopRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 20,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
   },
-  headerIconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerTextContainer: {
+  headerTitleSection: {
     flex: 1,
     paddingHorizontal: 16,
   },
@@ -659,119 +597,212 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 22,
-    fontWeight: "bold",
-    color: "white",
-    marginBottom: 4,
-  },
-  savingIndicator: {
-    marginLeft: 8,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: 0.3,
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: "#a5b4fc",
-    opacity: 0.9,
+    fontSize: 13,
+    color: "rgba(255, 255, 255, 0.8)",
+    marginTop: 2,
+    fontWeight: "500",
   },
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-    marginTop: 10,
+  refreshButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
   },
-  statsCard: {
+  scrollView: {
     flex: 1,
-    marginHorizontal: 4,
-    padding: 12,
-    alignItems: "center",
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    backgroundColor: "#f8fafc",
   },
-  statsIcon: {
-    marginBottom: 6,
+  scrollContent: {
+    padding: 16,
   },
-  cardLabel: { 
-    fontSize: 12, 
-    marginBottom: 4,
-  },
-  cardValue: { 
-    fontSize: 18, 
-    fontWeight: "bold", 
-  },
-  card: { 
-    marginVertical: 8, 
-    borderRadius: 12, 
-    elevation: 2,
-  },
-  rowWrap: { 
-    flexDirection: "row", 
-    justifyContent: "space-around", 
-    flexWrap: "wrap",
-  },
-  optionCard: {
-    width: 90,
-    height: 90,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    margin: 6,
-  },
-  activeCard: { 
-    backgroundColor: "#3B82F6",
-  },
-  optionText: { 
-    marginTop: 6, 
-    fontSize: 12, 
-    fontWeight: "600",
-  },
-  colorRow: { 
-    flexDirection: "row", 
-    justifyContent: "space-around", 
-    flexWrap: "wrap",
-  },
-  colorCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    margin: 6,
-    borderWidth: 2,
-    borderColor: "#E5E7EB",
-  },
-  activeCircle: { 
-    borderColor: "#3B82F6", 
-    borderWidth: 3,
-  },
-  pickerContainer: {
-    padding: 12,
-    borderRadius: 10,
-  },
-  picker: {
-    fontSize: 14,
-  },
-  settingRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  settingTitle: { 
-    fontSize: 15, 
-    fontWeight: "600",
-  },
-  settingDesc: { 
-    fontSize: 12,
-  },
-  syncStatus: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
+  sectionContainer: {
     marginBottom: 20,
   },
-  syncText: {
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 12,
+  },
+  sectionIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1f2937",
+  },
+  sectionSubtitle: {
     fontSize: 12,
-    marginLeft: 6,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  themeModeContainer: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  themeModeCard: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  themeModeCardActive: {
+    shadowColor: "#6366f1",
+    shadowOpacity: 0.3,
+    elevation: 4,
+  },
+  themeModeGradient: {
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  themeModeText: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+  themeModeTextActive: {
+    color: "#fff",
+  },
+  colorThemeCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  colorThemeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  colorThemeItem: {
+    width: (width - 80) / 3,
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  colorCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 3,
+    borderColor: "transparent",
+  },
+  colorCircleActive: {
+    borderColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  colorLabel: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6b7280",
+  },
+  languageCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  pickerWrapper: {
+    paddingHorizontal: 4,
+  },
+  pickerInput: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#1f2937",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    paddingRight: 40,
+  },
+  settingsCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  settingItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 14,
+  },
+  settingIconBg: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  settingInfo: {
+    flex: 1,
+  },
+  settingTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#1f2937",
+    marginBottom: 2,
+  },
+  settingSubtitle: {
+    fontSize: 12,
+    color: "#9ca3af",
+  },
+  settingDivider: {
+    height: 1,
+    backgroundColor: "#f3f4f6",
+    marginLeft: 74,
+  },
+  syncStatusContainer: {
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  syncStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    gap: 8,
+  },
+  syncStatusText: {
+    fontSize: 13,
+    fontWeight: "500",
   },
 });

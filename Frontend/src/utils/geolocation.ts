@@ -4,16 +4,6 @@ import { Alert } from "react-native";
 import { GeoLocation } from "../types";
 
 // -----------------------------
-// ✅ PVG College Coordinates (Sample)
-// -----------------------------
-const PVG_COLLEGE_COORDS = {
-  latitude: 18.4649,
-  longitude: 73.8678,
-  address: "PVG College, Parvati, Pune, Maharashtra 411009",
-  radius: 100, // meters
-};
-
-// -----------------------------
 // ✅ Type Definitions
 // -----------------------------
 export type LocationData = GeoLocation & {
@@ -30,10 +20,20 @@ export const formatLocationLabel = (value?: GeoLocation | string | null) => {
 };
 
 // -----------------------------
-// ✅ Request Location Permission (Expo Way)
+// ✅ Request Location Permission (Expo Way - Cross-Platform)
 // -----------------------------
 export const requestLocationPermission = async (): Promise<boolean> => {
   try {
+    // First check if location services are enabled
+    const servicesEnabled = await Location.hasServicesEnabledAsync();
+    if (!servicesEnabled) {
+      Alert.alert(
+        "Location Services Disabled",
+        "Please enable location services in your device settings to use this feature."
+      );
+      return false;
+    }
+
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
@@ -91,67 +91,64 @@ const calculateDistance = (
 };
 
 // -----------------------------
-// ✅ Check if Current Location is Within PVG Campus
+// ✅ Check if Current Location is Within Allowed Area
 // -----------------------------
 export const isWithinAllowedLocation = (
   currentLat: number,
   currentLon: number,
-  allowedLat: number = PVG_COLLEGE_COORDS.latitude,
-  allowedLon: number = PVG_COLLEGE_COORDS.longitude,
-  allowedRadiusMeters: number = PVG_COLLEGE_COORDS.radius
+  allowedLat: number,
+  allowedLon: number,
+  allowedRadiusMeters: number
 ): boolean => {
   const distance = calculateDistance(currentLat, currentLon, allowedLat, allowedLon);
   return distance <= allowedRadiusMeters;
 };
 
 // -----------------------------
-// ✅ Offline Mock Reverse Geocoding
+// ✅ Reverse Geocoding - Get Address from Coordinates
 // -----------------------------
 export const getAddressFromCoords = async (
   lat: number,
   lon: number
 ): Promise<{ address: string; placeName: string }> => {
   try {
-    // Expo reverse geocoding (offline-friendly if cached)
+    // Expo reverse geocoding
     const geocode = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
     if (geocode.length > 0) {
       const place = geocode[0];
+      const addressParts = [
+        place.name || place.street,
+        place.city,
+        place.region,
+        place.postalCode,
+        place.country
+      ].filter(Boolean);
+      
       return {
-        address: `${place.name || place.street}, ${place.city || ""} ${place.region || ""}`,
-        placeName: place.name || place.city || "Unknown Area",
+        address: addressParts.join(", "),
+        placeName: place.name || place.street || place.city || "Unknown Location",
       };
     }
-  } catch {
-    // Ignore errors — fallback below
+  } catch (error) {
+    console.error("Reverse geocoding error:", error);
   }
 
-  // 🚫 No API calls — simulated local result
-  const isNearPVG = isWithinAllowedLocation(lat, lon);
+  // Fallback if geocoding fails
   return {
-    address: isNearPVG
-      ? PVG_COLLEGE_COORDS.address
-      : "Approximate location detected (offline mode)",
-    placeName: isNearPVG ? "PVG College Campus" : "Unknown Area",
+    address: `Location: ${lat.toFixed(6)}, ${lon.toFixed(6)}`,
+    placeName: "Location detected",
   };
 };
 
 // -----------------------------
-// ✅ Get Current Location with Validation
+// ✅ Get Current Location - Detects User's Actual Location
 // -----------------------------
 export const getCurrentLocation = async (): Promise<LocationData> => {
   try {
     const position = await getCurrentPosition();
     const { latitude, longitude, accuracy } = position.coords;
 
-    // Validate location proximity
-    const isAllowed = isWithinAllowedLocation(latitude, longitude);
-    if (!isAllowed) {
-      throw new Error(
-        "❌ You must be within PVG College premises to check in/out."
-      );
-    }
-
-    // Reverse geocode (offline-safe)
+    // Get address from coordinates
     const { address, placeName } = await getAddressFromCoords(latitude, longitude);
 
     return {
@@ -167,15 +164,3 @@ export const getCurrentLocation = async (): Promise<LocationData> => {
     throw error;
   }
 };
-
-// -----------------------------
-// ✅ Mock Location (For Emulator / Testing)
-// -----------------------------
-export const getMockLocation = (): LocationData => ({
-  latitude: 18.4649,
-  longitude: 73.8678,
-  accuracy: 10,
-  address: PVG_COLLEGE_COORDS.address,
-  placeName: "PVG College Campus (Mock)",
-  timestamp: Date.now(),
-});

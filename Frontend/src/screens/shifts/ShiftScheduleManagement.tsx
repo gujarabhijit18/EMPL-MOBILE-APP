@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 // Import tab bar visibility
 import { useNavigation } from '@react-navigation/native';
 import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface Shift {
   shift_id: number;
@@ -301,65 +302,79 @@ export default function ShiftScheduleManagement() {
 
   return (
     <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
-      <StatusBar style="light" />
+      <StatusBar style="light" backgroundColor="#f59e0b" translucent={false} />
 
-      {/* Enhanced Header */}
-      <View style={styles.header}>
-        <LinearGradient
-          colors={['#39549fff', '#39549fff']}
-          style={styles.headerGradient}
+      {/* Premium Gradient Header */}
+      <LinearGradient
+        colors={['#f59e0b', '#d97706', '#b45309']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        {/* Background Pattern */}
+        <View style={styles.headerPattern}>
+          <View style={[styles.patternCircle, { top: -30, right: -30, width: 140, height: 140 }]} />
+          <View style={[styles.patternCircle, { bottom: -40, left: -40, width: 160, height: 160 }]} />
+          <View style={[styles.patternCircle, { top: 50, right: 100, width: 80, height: 80 }]} />
+        </View>
+
+        <Animated.View
+          style={[
+            styles.headerContent,
+            {
+              opacity: headerOpacity,
+              transform: [{ translateY: headerTranslateY }],
+            },
+          ]}
         >
-          <Animated.View 
-            style={[
-              styles.headerTitleRow,
-              { opacity: headerOpacity, transform: [{ translateY: headerTranslateY }] }
-            ]}
-          >
-            <TouchableOpacity 
-              style={styles.backButtonCompact} 
-              onPress={() => navigation.goBack()} 
+          {/* Header Top Row */}
+          <View style={styles.headerTopRow}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+
+            <View style={styles.headerTitleSection}>
+              <Text style={styles.headerTitle}>Shift Management</Text>
+              <Text style={styles.headerSubtitle}>Manage team schedules & shifts</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => setShiftModalVisible(true)}
               activeOpacity={0.7}
             >
-              <Ionicons name="arrow-back" size={22} color="#fff" />
+              <Ionicons name="add" size={22} color="#fff" />
             </TouchableOpacity>
-            
-            <View style={styles.headerTextContainer}>
-              <Animated.Text 
-                style={[
-                  styles.headerTitle,
-                  { opacity: headerOpacity }
-                ]}
-              >
-                Shift Management
-              </Animated.Text>
-              <Animated.Text 
-                style={[
-                  styles.headerSubtitle,
-                  { opacity: headerOpacity }
-                ]}
-              >
-                Manage team schedules & shifts
-              </Animated.Text>
+          </View>
+
+          {/* Quick Stats Bar */}
+          <View style={styles.quickStatsBar}>
+            <View style={styles.quickStatItem}>
+              <Ionicons name="time-outline" size={16} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.quickStatValue}>{shifts.length}</Text>
+              <Text style={styles.quickStatLabel}>Total Shifts</Text>
             </View>
-            
-            <Animated.View 
-              style={[
-                styles.headerActionContainer,
-                { opacity: headerOpacity }
-              ]}
-            >
-              <TouchableOpacity 
-                style={styles.createButton}
-                onPress={() => setShiftModalVisible(true)}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="add-circle" size={20} color="#fff" />
-                <Text style={styles.createButtonText}>Create</Text>
-              </TouchableOpacity>
-            </Animated.View>
-          </Animated.View>
-        </LinearGradient>
-      </View>
+            <View style={styles.statDivider} />
+            <View style={styles.quickStatItem}>
+              <Ionicons name="checkmark-circle-outline" size={16} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.quickStatValue}>{shifts.filter(s => s.is_active).length}</Text>
+              <Text style={styles.quickStatLabel}>Active</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.quickStatItem}>
+              <Ionicons name="people-outline" size={16} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.quickStatValue}>{schedule.shifts.reduce((acc, s) => acc + s.total_assigned, 0)}</Text>
+              <Text style={styles.quickStatLabel}>Assigned</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.quickStatItem}>
+              <Ionicons name="alert-circle-outline" size={16} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.quickStatValue}>{schedule.unassigned_users.length}</Text>
+              <Text style={styles.quickStatLabel}>Unassigned</Text>
+            </View>
+          </View>
+        </Animated.View>
+      </LinearGradient>
 
       <ScrollView 
         style={styles.container} 
@@ -788,56 +803,99 @@ export default function ShiftScheduleManagement() {
 }
 
 const styles = StyleSheet.create({
-  safeAreaContainer: { flex: 1, backgroundColor: '#39549fff' },
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+  safeAreaContainer: { flex: 1, backgroundColor: '#f59e0b' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
   headerGradient: {
-    borderRadius: 20,
-    paddingVertical: 20,
-    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 24,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    position: 'relative',
+    overflow: 'hidden',
   },
-  headerTitleRow: {
+  headerPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  patternCircle: {
+    position: 'absolute',
+    borderRadius: 9999,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  headerContent: {
+    paddingHorizontal: 20,
+    position: 'relative',
+    zIndex: 1,
+  },
+  headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 20,
   },
-  headerIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  headerSubtitle: { color: '#d1fae5', fontSize: 12, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
-  headerActionContainer: {
-    alignItems: 'center',
-  },
-  backButtonCompact: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    marginRight: 8,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  createButton: {
-    flexDirection: 'row',
+  headerTitleSection: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  headerTitle: { color: '#fff', fontSize: 22, fontWeight: '800', letterSpacing: 0.3 },
+  headerSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: 2, fontWeight: '500' },
+  addButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  createButtonText: { color: '#fff', fontSize: 12, fontWeight: '600', marginLeft: 4 },
+  quickStatsBar: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 16,
+    padding: 14,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  quickStatItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  quickStatValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 4,
+    letterSpacing: 0.3,
+  },
+  quickStatLabel: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 2,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  statDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
   modeSelector: { flexDirection: 'row', justifyContent: 'center', marginVertical: 16, backgroundColor: '#fff', borderRadius: 12, padding: 4, elevation: 2 },
   modeButton: { flex: 1, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, alignItems: 'center' },
   modeButtonActive: { backgroundColor: '#2563eb' },

@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import Session
 
-from app.db.models.task import Task, TaskHistory
+from app.db.models.task import Task, TaskHistory, TaskComment
 from app.db.models.notification import TaskNotification
 from app.db.models.user import User
 from app.enums import TaskAction, TaskStatus
@@ -13,6 +13,7 @@ from app.enums import TaskAction, TaskStatus
 
 _TASK_PASS_COLUMNS_READY = False
 _TASK_NOTIFICATION_TABLE_READY = False
+_TASK_COMMENT_TABLE_READY = False
 
 
 def _json_default(value):
@@ -136,6 +137,29 @@ def list_tasks(db: Session, user_id: int):
         .distinct()
         .all()
     )
+
+def list_all_tasks(db: Session, department: str = None, roles: list = None):
+    _ensure_task_pass_columns(db)
+    query = db.query(Task)
+    
+    if roles:
+        # Filter tasks where assigned_to user has one of the specified roles
+        query = (
+            query
+            .join(User, Task.assigned_to == User.user_id)
+            .filter(User.role.in_(roles))
+            .distinct()
+        )
+    elif department:
+        # Filter tasks where assigned_to or assigned_by user is in the same department
+        query = (
+            query
+            .join(User, or_(Task.assigned_to == User.user_id, Task.assigned_by == User.user_id))
+            .filter(User.department == department)
+            .distinct()
+        )
+    
+    return query.all()
 
 def update_task_status(db: Session, task_id: int, status: TaskStatus, updated_by: int):
     task = db.query(Task).filter(Task.task_id == task_id).first()
@@ -311,3 +335,127 @@ def mark_task_notification_as_read(
         db.refresh(notification)
 
     return notification
+
+
+# ==========================================
+# Task Comments CRUD
+# ==========================================
+
+def _ensure_task_comment_table(db: Session) -> None:
+    global _TASK_COMMENT_TABLE_READY
+    if _TASK_COMMENT_TABLE_READY:
+        return
+
+    bind = db.get_bind()
+    inspector = inspect(bind)
+    
+    # Check if table exists
+    if "task_comments" not in inspector.get_table_names():
+        # Create the table if it doesn't exist
+        TaskComment.__table__.create(bind, checkfirst=True)
+    else:
+        # Table exists, check for missing columns
+        columns = {col["name"] for col in inspector.get_columns("task_comments")}
+        
+        statements: list[str] = []
+        
+        if "message" not in columns:
+            statements.append("ALTER TABLE task_comments ADD COLUMN message TEXT")
+        if "task_id" not in columns:
+            statements.append("ALTER TABLE task_comments ADD COLUMN task_id INTEGER")
+        if "user_id" not in columns:
+            statements.append("ALTER TABLE task_comments ADD COLUMN user_id INTEGER")
+        if "created_at" not in columns:
+            statements.append("ALTER TABLE task_comments ADD COLUMN created_at TIMESTAMP")
+        
+        # If there's an old 'comment' column, drop it or make it nullable
+        if "comment" in columns:
+            try:
+                # Try to drop the old comment column
+                db.execute(text("ALTER TABLE task_comments DROP COLUMN comment"))
+                print("✅ Dropped old 'comment' column from task_comments table")
+            except Exception as e:
+                # If drop fails, try to make it nullable with a default
+                try:
+                    db.execute(text("ALTER TABLE task_comments MODIFY COLUMN comment TEXT NULL DEFAULT NULL"))
+                    print("✅ Made 'comment' column nullable in task_comments table")
+                except Exception as e2:
+                    print(f"Warning: Could not modify comment column: {e2}")
+        
+        for statement in statements:
+            try:
+                db.execute(text(statement))
+            except Exception as e:
+                print(f"Warning: Could not execute {statement}: {e}")
+        
+        if statements or "comment" in columns:
+            db.commit()
+
+    _TASK_COMMENT_TABLE_READY = True
+
+
+def create_task_comment(
+    db: Session,
+    *,
+    task_id: int,
+    user_id: int,
+    message: str,
+) -> TaskComment:
+    _ensure_task_comment_table(db)
+    comment = TaskComment(
+        task_id=task_id,
+        user_id=user_id,
+        message=message,
+        created_at=datetime.utcnow(),
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+def list_task_comments(db: Session, task_id: int) -> list[dict]:
+    _ensure_task_comment_table(db)
+    comments = (
+        db.query(TaskComment, User.name)
+        .join(User, TaskComment.user_id == User.user_id)
+        .filter(TaskComment.task_id == task_id)
+        .order_by(TaskComment.created_at.asc())
+        .all()
+    )
+    
+    result = []
+    for comment, user_name in comments:
+        result.append({
+            "id": comment.id,
+            "task_id": comment.task_id,
+            "user_id": comment.user_id,
+            "message": comment.message,
+            "created_at": comment.created_at,
+            "user_name": user_name,
+        })
+    return result
+
+
+def delete_task_comment(
+    db: Session,
+    *,
+    comment_id: int,
+    user_id: int,
+) -> bool:
+    _ensure_task_comment_table(db)
+    comment = (
+        db.query(TaskComment)
+        .filter(
+            TaskComment.id == comment_id,
+            TaskComment.user_id == user_id,
+        )
+        .first()
+    )
+
+    if not comment:
+        return False
+
+    db.delete(comment)
+    db.commit()
+    return True

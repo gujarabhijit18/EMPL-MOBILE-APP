@@ -1,16 +1,18 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { format } from "date-fns";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView } from "expo-camera";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
-import * as Location from "expo-location";
-import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from "expo-linear-gradient";
+import { StatusBar, setStatusBarBackgroundColor, setStatusBarStyle } from 'expo-status-bar';
 import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Animated,
+    Dimensions,
     Modal,
+    Platform,
     Image as RNImage,
     ScrollView,
     StyleSheet,
@@ -19,99 +21,64 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { Button, Card, Chip } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
+import OnlineStatusToggle from "../../components/OnlineStatusToggle";
+import CameraService, { CameraPhoto } from "../../services/cameraService";
+import LocationService from "../../services/locationService";
+import { requestAttendancePermissions } from "../../utils/permissions";
 
-// IST Timezone offset: +5:30 from UTC
-const IST_OFFSET_HOURS = 5;
-const IST_OFFSET_MINUTES = 30;
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-// Get current time
-const getCurrentISTTime = (): Date => {
-  return new Date();
-};
+// IST Timezone helpers
+const getCurrentISTTime = (): Date => new Date();
 
-// Convert UTC datetime to IST Date object
-// Backend stores times in UTC, we need to ensure proper parsing
 const convertToIST = (dateString: string | Date): Date => {
-  if (dateString instanceof Date) {
-    return dateString;
-  }
-  
-  // If the string doesn't have timezone info, assume it's UTC from backend
+  if (dateString instanceof Date) return dateString;
   if (!dateString.includes('Z') && !dateString.includes('+')) {
-    // Add 'Z' to treat as UTC, JavaScript will convert to local time
     const utcDate = new Date(dateString + 'Z');
-    if (!isNaN(utcDate.getTime())) {
-      return utcDate;
-    }
+    if (!isNaN(utcDate.getTime())) return utcDate;
   }
-  
   return new Date(dateString);
 };
 
-// Format date for display (e.g., "28 Nov 2025")
 const formatAttendanceDate = (date: Date): string => {
   const day = date.getDate().toString().padStart(2, '0');
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  return `${day} ${month} ${year}`;
+  return `${day} ${months[date.getMonth()]} ${date.getFullYear()}`;
 };
 
-// Get day of week
 const getDayOfWeek = (date: Date): string => {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   return days[date.getDay()];
 };
 
-// Format time to display in IST (e.g., "12:09 PM")
-// Backend returns UTC time, we convert to IST for display
 const formatTimeToIST = (dateString: string | Date | undefined): string => {
   if (!dateString) return "-";
   try {
-    // Convert to IST
     const date = convertToIST(dateString);
     if (isNaN(date.getTime())) return "-";
-    
-    // Get local time (device is in IST, so getHours returns IST)
     let hours = date.getHours();
     const minutes = date.getMinutes().toString().padStart(2, '0');
     const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; // 0 should be 12
-    const hoursStr = hours.toString().padStart(2, '0');
-    
-    return `${hoursStr}:${minutes} ${ampm}`;
-  } catch (error) {
-    console.error("Error formatting time:", error);
-    return "-";
-  }
+    hours = hours % 12 || 12;
+    return `${hours.toString().padStart(2, '0')}:${minutes} ${ampm}`;
+  } catch { return "-"; }
 };
 
-// Format date to string (e.g., "28 Nov 2025")
 const formatDateToIST = (dateString: string | Date | undefined): string => {
   if (!dateString) return "-";
   try {
     const date = convertToIST(dateString);
     if (isNaN(date.getTime())) return "-";
     return formatAttendanceDate(date);
-  } catch (error) {
-    console.error("Error formatting date:", error);
-    return "-";
-  }
+  } catch { return "-"; }
 };
 
-// Helper to build full selfie URL from backend path
 const buildSelfieUrl = (path: string | null | undefined): string | null => {
   if (!path) return null;
-  // If already a full URL, return as is
-  if (path.startsWith('http://') || path.startsWith('https://')) {
-    return path;
-  }
-  // Build full URL using API base
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
   const baseUrl = apiService.getBaseUrl();
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${baseUrl}${cleanPath}`;
@@ -130,6 +97,37 @@ interface AttendanceRecord {
   workReportFileName?: string;
 }
 
+// Animated Pulse Component for live status
+const PulseIndicator = ({ color = "#22c55e" }: { color?: string }) => {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  
+  // Set status bar to match header color
+  useEffect(() => {
+    if (Platform.OS === "android") {
+      setStatusBarBackgroundColor("#3b82f6", true);
+    }
+    setStatusBarStyle("light");
+  }, []);
+
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.3, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
+
+  return (
+    <View style={styles.pulseContainer}>
+      <Animated.View style={[styles.pulseOuter, { backgroundColor: color, opacity: 0.3, transform: [{ scale: pulseAnim }] }]} />
+      <View style={[styles.pulseInner, { backgroundColor: color }]} />
+    </View>
+  );
+};
+
 export default function AttendancePage() {
   const { user } = useAuth();
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean>(false);
@@ -137,82 +135,55 @@ export default function AttendancePage() {
   const [isCheckingIn, setIsCheckingIn] = useState(true);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationAddress, setLocationAddress] = useState<string>("");
+  const [hasCameraPermission, setHasCameraPermission] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceRecord[]>([]);
   const [currentAttendance, setCurrentAttendance] = useState<AttendanceRecord | null>(null);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [todaysWork, setTodaysWork] = useState("");
   const [workReportFile, setWorkReportFile] = useState<{ uri: string; name: string; type: string } | null>(null);
+  const [workSummaryForCheckout, setWorkSummaryForCheckout] = useState("");
   const cameraRef = useRef<any>(null);
-  const [permission, requestPermission] = useCameraPermissions();
   const navigation = useNavigation();
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    requestPermissions();
-    loadAttendanceData();
+    const initialize = async () => {
+      await requestPermissions();
+      await loadAttendanceData();
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
+    };
+    initialize();
   }, []);
 
-  // ✅ Request camera + location permission
+  const refreshCurrentLocation = async () => {
+    try {
+      const result = await LocationService.getCurrentLocationWithAddress({
+        accuracy: 'high',
+        timeout: 20000,
+      });
+      setLocation(result.coordinates);
+      setLocationAddress(result.address?.formattedAddress || `${result.coordinates.latitude.toFixed(6)}, ${result.coordinates.longitude.toFixed(6)}`);
+    } catch (error) {
+      console.warn("Unable to refresh location:", error);
+      setLocationAddress("Unable to determine current location");
+    }
+  };
+
   const requestPermissions = async () => {
     try {
-      if (!permission?.granted) {
-        const cameraResult = await requestPermission();
-        if (!cameraResult.granted) {
-          Alert.alert("Camera Permission Required", "Please enable camera access in settings to use attendance features.");
-          return;
-        }
+      const { camera, location } = await requestAttendancePermissions();
+      setHasCameraPermission(camera);
+      setHasLocationPermission(location);
+
+      if (!camera) {
+        Alert.alert("Camera Permission Required", "Please enable camera access in settings to continue.");
       }
 
-      const { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
-      setHasLocationPermission(locationStatus === "granted");
-
-      if (locationStatus === "granted") {
-        try {
-          const currentLocation = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          
-          const coords = {
-            latitude: currentLocation.coords.latitude,
-            longitude: currentLocation.coords.longitude,
-          };
-          
-          setLocation(coords);
-          
-          console.log("📍 Location captured:", {
-            lat: coords.latitude,
-            lon: coords.longitude,
-            accuracy: currentLocation.coords.accuracy
-          });
-          
-          // Get human-readable address
-          try {
-            const [place] = await Location.reverseGeocodeAsync(coords);
-            if (place) {
-              const addressParts = [
-                place.name,
-                place.street,
-                place.district || place.subregion,
-                place.city,
-                place.region,
-                place.country
-              ].filter(Boolean);
-              
-              const formattedAddress = addressParts.join(", ");
-              setLocationAddress(formattedAddress || "Location detected");
-              console.log("📍 Address:", formattedAddress);
-            } else {
-              setLocationAddress(`${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`);
-            }
-          } catch (geoError) {
-            console.warn("Failed to reverse geocode:", geoError);
-            setLocationAddress(`${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`);
-          }
-        } catch (locError) {
-          console.error("Failed to get location:", locError);
-          Alert.alert("Location Error", "Unable to get your location. Please ensure GPS is enabled.");
-        }
+      if (location) {
+        await refreshCurrentLocation();
       } else {
+        setLocationAddress("Location access is required for attendance tracking.");
         Alert.alert("Location Permission Required", "Location access is needed for attendance tracking.");
       }
     } catch (error) {
@@ -220,42 +191,29 @@ export default function AttendancePage() {
     }
   };
 
-  // ✅ Load attendance data from API
   const loadAttendanceData = async () => {
     if (!user?.id) return;
-    
     try {
       setIsLoading(true);
-      
-      // For HR and Manager, show only their department's attendance
-      // For others, show their own attendance
       let data;
       if (user.role === "hr" || user.role === "manager") {
-        // Get all attendance and filter by department
         data = await apiService.getAllAttendance();
-        // Filter by user's department
         data = data.filter((record: any) => record.department === user.department);
       } else {
-        // Regular employees see only their own attendance
         data = await apiService.getSelfAttendance(parseInt(user.id));
       }
       
-      // Transform API data to match component structure
-      // Use IST for today's date comparison
       const istNow = getCurrentISTTime();
       const today = format(istNow, "yyyy-MM-dd");
       const transformedData: AttendanceRecord[] = data.map((record: any) => {
-        // Extract work report filename from path if available
         const workReportPath = record.work_report || record.workReport;
         let workReportFileName: string | undefined;
         if (workReportPath) {
           const parts = workReportPath.split('/');
           workReportFileName = parts[parts.length - 1];
         }
-        
-        // Get the check-in date in IST for proper date grouping
         const checkInDate = new Date(record.check_in);
-        const checkInDateIST = checkInDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // yyyy-MM-dd format
+        const checkInDateIST = checkInDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
         
         return {
           id: record.attendance_id.toString(),
@@ -267,7 +225,7 @@ export default function AttendancePage() {
           checkInSelfie: record.checkInSelfie,
           checkOutSelfie: record.checkOutSelfie,
           workSummary: record.work_summary || record.workSummary,
-          workReportFileName: workReportFileName,
+          workReportFileName,
         };
       });
       
@@ -281,9 +239,8 @@ export default function AttendancePage() {
     }
   };
 
-  // ✅ Open camera (Expo)
   const openCamera = (checkIn: boolean) => {
-    if (!permission?.granted) {
+    if (!hasCameraPermission) {
       Alert.alert("Permission Required", "Please grant camera access.");
       return;
     }
@@ -291,50 +248,41 @@ export default function AttendancePage() {
     setCameraVisible(true);
   };
 
-  // ✅ Capture photo
   const takePicture = async () => {
-    if (cameraRef.current) {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.5, base64: true });
+    if (!cameraRef.current) return;
+    try {
+      const photo = await CameraService.takePicture(cameraRef, { quality: 0.75, base64: true });
       setCameraVisible(false);
-      handleSubmitAttendance(photo.uri);
+      await handleSubmitAttendance(photo);
+    } catch (error) {
+      console.error("Camera capture failed:", error);
+      Alert.alert("Camera Error", "Failed to capture selfie. Please try again.");
     }
   };
 
-  // ✅ Submit attendance with real API
-  const handleSubmitAttendance = async (photoUri: string) => {
+  const handleSubmitAttendance = async (photo: CameraPhoto) => {
     if (!user?.id) {
       Alert.alert("Error", "User not found. Please log in again.");
       return;
     }
-
     setIsLoading(true);
     try {
-      const gpsLocationString = location 
-        ? `${location.latitude},${location.longitude}` 
-        : "0,0";
+      const coords = await LocationService.getLocationWithRetry(3, { accuracy: 'high', timeout: 20000 });
+      setLocation(coords);
+      try {
+        const address = await LocationService.getAddressFromCoordinates(coords);
+        if (address?.formattedAddress) {
+          setLocationAddress(address.formattedAddress);
+        }
+      } catch (addressError) {
+        console.warn("Address lookup failed:", addressError);
+      }
 
-      // Convert image to base64
-      const base64Image = await FileSystem.readAsStringAsync(photoUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      const gpsLocationString = LocationService.formatCoordinatesForAPI(coords);
+      const base64Image = photo.base64 ?? await CameraService.photoToBase64(photo.uri);
 
       if (isCheckingIn) {
-        // Call check-in API
-        console.log("📤 Calling check-in API with:", {
-          userId: parseInt(user.id),
-          gpsLocation: gpsLocationString,
-          imageLength: base64Image.length
-        });
-        
-        const response = await apiService.checkIn(
-          parseInt(user.id),
-          gpsLocationString,
-          base64Image
-        );
-        
-        console.log("✅ Check-in response:", response);
-
-        // Use IST time for display
+        const response = await apiService.checkIn(parseInt(user.id), gpsLocationString, base64Image);
         const istNow = getCurrentISTTime();
         const formattedTime = formatTimeToIST(istNow);
         const today = format(istNow, "yyyy-MM-dd");
@@ -343,15 +291,14 @@ export default function AttendancePage() {
           id: response.attendance_id.toString(),
           date: today,
           checkInTime: formattedTime,
-          selfie: photoUri,
+          selfie: photo.uri,
           status: "present",
         };
         
         setCurrentAttendance(record);
         setAttendanceHistory((prev) => [record, ...prev]);
-        Alert.alert("Success", "Checked In Successfully!");
+        Alert.alert("✅ Success", "You've checked in successfully!");
       } else if (currentAttendance) {
-        // Call check-out API with work summary and optional file
         await apiService.checkOut(
           parseInt(user.id),
           gpsLocationString,
@@ -360,7 +307,6 @@ export default function AttendancePage() {
           workReportFile
         );
 
-        // Use IST time for display
         const istNow = getCurrentISTTime();
         const formattedTime = formatTimeToIST(istNow);
         const updated: AttendanceRecord = {
@@ -371,55 +317,32 @@ export default function AttendancePage() {
         };
         
         setCurrentAttendance(updated);
-        setAttendanceHistory((prev) =>
-          prev.map((item) => (item.id === updated.id ? updated : item))
-        );
-        
-        // Clear work summary and file
+        setAttendanceHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
         setWorkSummaryForCheckout("");
         setTodaysWork("");
         setWorkReportFile(null);
-        
-        Alert.alert("Success", "Checked Out Successfully!");
+        Alert.alert("✅ Success", "You've checked out successfully!");
       }
-
-      // Reload attendance data
       await loadAttendanceData();
     } catch (error: any) {
-      console.error("❌ Failed to submit attendance:", error);
-      console.error("Error details:", {
-        message: error.message,
-        stack: error.stack
-      });
-      
-      Alert.alert(
-        "Attendance Error", 
-        error.message || "Unable to submit attendance. Please try again."
-      );
+      console.error("Failed to submit attendance:", error);
+      Alert.alert("Attendance Error", error.message || "Unable to submit attendance. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Pick work report PDF file
   const pickWorkReportFile = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
         copyToCacheDirectory: true,
       });
-      
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
-        setWorkReportFile({
-          uri: file.uri,
-          name: file.name,
-          type: file.mimeType || 'application/pdf',
-        });
-        console.log("📄 Work report file selected:", file.name);
+        setWorkReportFile({ uri: file.uri, name: file.name, type: file.mimeType || 'application/pdf' });
       }
-    } catch (error) {
-      console.error("Error picking document:", error);
+    } catch {
       Alert.alert("Error", "Failed to pick document. Please try again.");
     }
   };
@@ -429,268 +352,308 @@ export default function AttendancePage() {
       Alert.alert("Required", "Please provide today's work summary before checking out.");
       return;
     }
-    // Store the work summary before closing modal
     setWorkSummaryForCheckout(todaysWork);
     setShowCheckoutModal(false);
     openCamera(false);
   };
 
-  // Store work summary for checkout
-  const [workSummaryForCheckout, setWorkSummaryForCheckout] = useState("");
-
-  // ✅ Helper - time is already formatted in IST from loadAttendanceData
   const formatTime = (time?: string) => (time ? time : "-");
 
-  // ✅ Camera Screen (Expo)
+  // Camera Screen
   if (cameraVisible) {
     return (
-      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
-          <CameraView 
-            ref={cameraRef} 
-            style={{ flex: 1 }} 
-            facing="front"
-          >
-            <View style={styles.cameraOverlay}>
-              <TouchableOpacity style={styles.captureButton} onPress={takePicture}>
-                <View style={styles.captureInner} />
-              </TouchableOpacity>
-              <Button
-                mode="contained"
-                style={{ marginTop: 16 }}
-                onPress={() => setCameraVisible(false)}
-              >
-                Cancel
-              </Button>
-            </View>
-          </CameraView>
-        </View>
-      </SafeAreaView>
+      <View style={styles.cameraContainer}>
+        <StatusBar style="light" backgroundColor="transparent" translucent />
+        <CameraView ref={cameraRef} style={{ flex: 1 }} facing="front">
+          <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+            <LinearGradient colors={["rgba(0,0,0,0.4)", "transparent", "rgba(0,0,0,0.8)"]} locations={[0, 0.3, 1]} style={styles.cameraGradient}>
+              <View style={styles.cameraControls}>
+                <Text style={styles.cameraTitle}>{isCheckingIn ? "Check-in Selfie" : "Check-out Selfie"}</Text>
+                <Text style={styles.cameraSubtitle}>Position your face in the frame</Text>
+                <View style={styles.captureButtonContainer}>
+                  <TouchableOpacity style={styles.captureButton} onPress={takePicture} activeOpacity={0.8}>
+                    <View style={styles.captureInner}>
+                      <Ionicons name="camera" size={28} color="#1e40af" />
+                    </View>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={styles.cameraCancelBtn} onPress={() => setCameraVisible(false)}>
+                  <Text style={styles.cameraCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </SafeAreaView>
+        </CameraView>
+      </View>
     );
   }
 
-  return (
-    <SafeAreaView style={styles.safeAreaContainer} edges={['top']}>
-      <StatusBar style="light" />
+  const getStatusInfo = () => {
+    if (!currentAttendance?.checkInTime) return { status: "not_started", label: "Not Started", color: "#6b7280", bgColor: "#f3f4f6" };
+    if (!currentAttendance?.checkOutTime) return { status: "in_progress", label: "Working", color: "#f59e0b", bgColor: "#fef3c7" };
+    return { status: "completed", label: "Completed", color: "#22c55e", bgColor: "#dcfce7" };
+  };
 
-      <View style={styles.header}>
-        <View style={styles.heroContentRow}>
-          <TouchableOpacity style={styles.backCircle} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={20} color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.heroTitleBlock}>
-            <Text style={styles.headerTitle}>Attendance</Text>
-            <Text style={styles.headerSubtitle}>Track your check-ins and keep the team aligned</Text>
+  const statusInfo = getStatusInfo();
+
+  return (
+    <View style={styles.mainContainer}>
+      <StatusBar style="light" backgroundColor="#3b82f6" translucent={false} />
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: "#3b82f6" }]} edges={['top']}>
+      
+      {/* Premium Header with Gradient */}
+      <LinearGradient colors={["#3b82f6", "#1e40af"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.headerGradient}>
+        <View style={styles.headerContent}>
+          <View style={styles.headerTop}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerTitleContainer}>
+              <Text style={styles.headerTitle}>Attendance</Text>
+              <Text style={styles.headerSubtitle}>Track your daily check-ins</Text>
+            </View>
+            <View style={styles.headerRight}>
+              <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
+                {statusInfo.status === "in_progress" && <PulseIndicator color={statusInfo.color} />}
+                <Text style={[styles.statusBadgeText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
+              </View>
+            </View>
+          </View>
+          
+          {/* Date Display Card */}
+          <View style={styles.dateCard}>
+            <View style={styles.dateIconContainer}>
+              <Ionicons name="calendar" size={24} color="#3b82f6" />
+            </View>
+            <View style={styles.dateInfo}>
+              <Text style={styles.dateText}>{formatAttendanceDate(getCurrentISTTime())}</Text>
+              <Text style={styles.dayText}>{getDayOfWeek(getCurrentISTTime())}</Text>
+            </View>
+            <View style={styles.timeDisplay}>
+              <Text style={styles.currentTime}>{format(getCurrentISTTime(), "hh:mm")}</Text>
+              <Text style={styles.ampm}>{format(getCurrentISTTime(), "a")}</Text>
+            </View>
           </View>
         </View>
-        <View style={styles.heroDateBadge}>
-          <Text style={styles.heroDate}>{formatAttendanceDate(getCurrentISTTime())}</Text>
-          <Text style={styles.heroDay}>{getDayOfWeek(getCurrentISTTime())}</Text>
-        </View>
-      </View>
+      </LinearGradient>
 
-      <View style={styles.contentContainer}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent}>
-          {/* Location Status Card */}
+      <Animated.View style={[styles.contentContainer, { opacity: fadeAnim }]}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
+          {/* Location Card */}
           {location && (
-            <Card style={styles.locationCard}>
-              <View style={styles.locationHeader}>
-                <Ionicons name="location" size={20} color="#2563eb" />
-                <Text style={styles.locationTitle}>Current Location</Text>
-              </View>
-              <Text style={styles.locationText}>
-                📍 {locationAddress || "Detecting address..."}
-              </Text>
-              {locationAddress && (
-                <Text style={styles.locationCoords}>
-                  {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
-                </Text>
-              )}
-              <Text style={styles.locationSubtext}>Location will be recorded with attendance</Text>
-            </Card>
+            <View style={styles.locationCard}>
+              <LinearGradient colors={["#eff6ff", "#dbeafe"]} style={styles.locationGradient}>
+                <View style={styles.locationHeader}>
+                  <View style={styles.locationIconBg}>
+                    <Ionicons name="location" size={18} color="#2563eb" />
+                  </View>
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationTitle}>Current Location</Text>
+                    <Text style={styles.locationAddress} numberOfLines={2}>{locationAddress || "Detecting..."}</Text>
+                  </View>
+                  <Ionicons name="checkmark-circle" size={22} color="#22c55e" />
+                </View>
+              </LinearGradient>
+            </View>
           )}
 
-          <Card style={styles.card}>
-            <Text style={styles.sectionTitle}>Today's Status</Text>
+          {/* Online/Offline Status Toggle - Shows only when checked in and not checked out */}
+          {user?.id && (
+            <OnlineStatusToggle
+              userId={parseInt(user.id)}
+              isCheckedIn={!!currentAttendance?.checkInTime}
+              isCheckedOut={!!currentAttendance?.checkOutTime}
+              onStatusChange={(isOnline, summary) => {
+                console.log(`Status changed to ${isOnline ? 'Online' : 'Offline'}`, summary);
+              }}
+            />
+          )}
+
+          {/* Today's Status Card */}
+          <View style={styles.statusCard}>
+            <View style={styles.statusCardHeader}>
+              <Text style={styles.sectionTitle}>Today's Status</Text>
+              {currentAttendance?.status && (
+                <View style={[styles.statusChip, { backgroundColor: currentAttendance.status === "late" ? "#fef2f2" : "#f0fdf4" }]}>
+                  <View style={[styles.statusDot, { backgroundColor: currentAttendance.status === "late" ? "#ef4444" : "#22c55e" }]} />
+                  <Text style={[styles.statusChipText, { color: currentAttendance.status === "late" ? "#dc2626" : "#16a34a" }]}>
+                    {currentAttendance.status === "late" ? "Late" : "On Time"}
+                  </Text>
+                </View>
+              )}
+            </View>
+
             {currentAttendance ? (
-              <View style={{ marginTop: 10 }}>
-                <View style={styles.statusRow}>
-                  <Ionicons name="log-in-outline" size={18} color="#10b981" />
-                  <Text style={styles.statusLabel}>Check-in:</Text>
-                  <Text style={styles.statusValue}>{formatTime(currentAttendance.checkInTime)}</Text>
-                </View>
-                <View style={styles.statusRow}>
-                  <Ionicons name="log-out-outline" size={18} color="#ef4444" />
-                  <Text style={styles.statusLabel}>Check-out:</Text>
-                  <Text style={styles.statusValue}>{formatTime(currentAttendance.checkOutTime)}</Text>
-                </View>
-                <Chip 
-                  style={{ 
-                    marginTop: 12,
-                    backgroundColor: currentAttendance.status === "late" ? "#fee2e2" : "#dcfce7"
-                  }}
-                  textStyle={{ 
-                    color: currentAttendance.status === "late" ? "#dc2626" : "#16a34a",
-                    fontWeight: "600"
-                  }}
-                >
-                  {currentAttendance.status === "late" ? "Late Arrival" : "On Time"}
-                </Chip>
-
-                {/* Selfies Section - show check-in and check-out selfies */}
-                {(currentAttendance.checkInSelfie || currentAttendance.checkOutSelfie) && (
-                  <View style={styles.selfiesContainer}>
-                    <View style={styles.selfiesHeader}>
-                      <Ionicons name="camera-outline" size={18} color="#2563eb" />
-                      <Text style={styles.selfiesTitle}>Attendance Selfies</Text>
-                    </View>
-                    <View style={styles.selfiesRow}>
-                      {/* Check-in Selfie */}
-                      <View style={styles.selfieItem}>
-                        <Text style={styles.selfieLabel}>Check-in</Text>
-                        {currentAttendance.checkInSelfie && buildSelfieUrl(currentAttendance.checkInSelfie) ? (
-                          <RNImage 
-                            source={{ uri: buildSelfieUrl(currentAttendance.checkInSelfie)! }}
-                            style={styles.selfieImage}
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <View style={styles.selfieImagePlaceholder}>
-                            <Ionicons name="person-outline" size={24} color="#9ca3af" />
-                          </View>
-                        )}
-                      </View>
-                      
-                      {/* Check-out Selfie */}
-                      <View style={styles.selfieItem}>
-                        <Text style={styles.selfieLabel}>Check-out</Text>
-                        {currentAttendance.checkOutSelfie && buildSelfieUrl(currentAttendance.checkOutSelfie) ? (
-                          <RNImage 
-                            source={{ uri: buildSelfieUrl(currentAttendance.checkOutSelfie)! }}
-                            style={styles.selfieImage}
-                            resizeMode="cover"
-                          />
-                        ) : (
-                          <View style={styles.selfieImagePlaceholder}>
-                            <Ionicons name="person-outline" size={24} color="#9ca3af" />
-                            <Text style={styles.selfieImagePlaceholderText}>
-                              {currentAttendance.checkOutTime ? "No selfie" : "Pending"}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
+              <View style={styles.timeCardsContainer}>
+                {/* Check-in Card */}
+                <View style={[styles.timeCard, styles.checkInCard]}>
+                  <View style={styles.timeCardIcon}>
+                    <Ionicons name="log-in" size={20} color="#22c55e" />
                   </View>
-                )}
+                  <Text style={styles.timeCardLabel}>Check-in</Text>
+                  <Text style={styles.timeCardValue}>{formatTime(currentAttendance.checkInTime)}</Text>
+                </View>
+                
+                {/* Check-out Card */}
+                <View style={[styles.timeCard, styles.checkOutCard]}>
+                  <View style={styles.timeCardIcon}>
+                    <Ionicons name="log-out" size={20} color={currentAttendance.checkOutTime ? "#ef4444" : "#9ca3af"} />
+                  </View>
+                  <Text style={styles.timeCardLabel}>Check-out</Text>
+                  <Text style={[styles.timeCardValue, !currentAttendance.checkOutTime && styles.pendingText]}>
+                    {currentAttendance.checkOutTime ? formatTime(currentAttendance.checkOutTime) : "Pending"}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.emptyStateContainer}>
+                <View style={styles.emptyStateIcon}>
+                  <MaterialCommunityIcons name="clock-outline" size={48} color="#d1d5db" />
+                </View>
+                <Text style={styles.emptyStateTitle}>No Record Today</Text>
+                <Text style={styles.emptyStateSubtitle}>Check in to start tracking your attendance</Text>
+              </View>
+            )}
 
-                {/* Today's Work Summary - shown after checkout */}
-                {currentAttendance.checkOutTime && currentAttendance.workSummary && (
-                  <View style={styles.workSummaryCard}>
-                    <View style={styles.workSummaryHeader}>
-                      <Ionicons name="document-text-outline" size={18} color="#2563eb" />
-                      <Text style={styles.workSummaryTitle}>Today's Work Summary</Text>
-                    </View>
-                    <Text style={styles.workSummaryText}>{currentAttendance.workSummary}</Text>
-                    
-                    {currentAttendance.workReportFileName && (
-                      <View style={styles.workReportFileInfo}>
-                        <Ionicons name="attach" size={16} color="#10b981" />
-                        <Text style={styles.workReportFileName}>{currentAttendance.workReportFileName}</Text>
+            {/* Selfies Section */}
+            {currentAttendance && (currentAttendance.checkInSelfie || currentAttendance.checkOutSelfie) && (
+              <View style={styles.selfiesSection}>
+                <Text style={styles.selfiesSectionTitle}>Attendance Selfies</Text>
+                <View style={styles.selfiesGrid}>
+                  <View style={styles.selfieCard}>
+                    <Text style={styles.selfieLabel}>Check-in</Text>
+                    {currentAttendance.checkInSelfie && buildSelfieUrl(currentAttendance.checkInSelfie) ? (
+                      <RNImage source={{ uri: buildSelfieUrl(currentAttendance.checkInSelfie)! }} style={styles.selfieImage} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.selfiePlaceholder}>
+                        <Ionicons name="person" size={24} color="#d1d5db" />
                       </View>
                     )}
                   </View>
-                )}
-              </View>
-            ) : (
-              <View style={styles.noRecordContainer}>
-                <Ionicons name="time-outline" size={32} color="#9ca3af" />
-                <Text style={styles.noRecordText}>No record for today</Text>
-                <Text style={styles.noRecordSubtext}>Check in to start tracking your attendance</Text>
-              </View>
-            )}
-
-            <View style={styles.actions}>
-              {!currentAttendance?.checkInTime ? (
-                <Button
-                  icon="login"
-                  mode="contained"
-                  onPress={() => openCamera(true)}
-                  buttonColor="#22c55e"
-                >
-                  Check In
-                </Button>
-              ) : !currentAttendance?.checkOutTime ? (
-                <Button
-                  icon="logout"
-                  mode="contained"
-                  onPress={() => setShowCheckoutModal(true)}
-                  buttonColor="#ef4444"
-                >
-                  Check Out
-                </Button>
-              ) : (
-                <Chip style={{ backgroundColor: "#16a34a" }} textStyle={{ color: "#fff" }}>
-                  Attendance Completed
-                </Chip>
-              )}
-            </View>
-          </Card>
-
-          <Card style={styles.card}>
-            <Text style={styles.sectionTitle}>Attendance History</Text>
-            <Text style={styles.sectionSubtitle}>Your recent attendance records</Text>
-            {attendanceHistory.length > 0 ? (
-              attendanceHistory.map((item) => (
-                <View key={item.id} style={styles.historyRow}>
-                  <View style={styles.historyDateContainer}>
-                    <Ionicons name="calendar-outline" size={18} color="#2563eb" />
-                    <Text style={styles.historyDate}>
-                      {formatDateToIST(item.date)}
-                    </Text>
-                  </View>
-                  <View style={styles.historyTimes}>
-                    <View style={styles.historyTimeItem}>
-                      <Text style={styles.historyTimeLabel}>In:</Text>
-                      <Text style={styles.historyTimeValue}>{formatTime(item.checkInTime)}</Text>
-                    </View>
-                    <View style={styles.historyTimeItem}>
-                      <Text style={styles.historyTimeLabel}>Out:</Text>
-                      <Text style={styles.historyTimeValue}>{formatTime(item.checkOutTime)}</Text>
-                    </View>
+                  <View style={styles.selfieCard}>
+                    <Text style={styles.selfieLabel}>Check-out</Text>
+                    {currentAttendance.checkOutSelfie && buildSelfieUrl(currentAttendance.checkOutSelfie) ? (
+                      <RNImage source={{ uri: buildSelfieUrl(currentAttendance.checkOutSelfie)! }} style={styles.selfieImage} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.selfiePlaceholder}>
+                        <Ionicons name="person" size={24} color="#d1d5db" />
+                        <Text style={styles.selfiePlaceholderText}>{currentAttendance.checkOutTime ? "N/A" : "Pending"}</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
-              ))
-            ) : (
-              <View style={styles.noHistoryContainer}>
-                <Ionicons name="document-text-outline" size={32} color="#9ca3af" />
-                <Text style={styles.noHistoryText}>No attendance history</Text>
               </View>
             )}
-          </Card>
 
-          <Modal visible={showCheckoutModal} transparent animationType="slide">
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                {/* Close Button */}
-                <TouchableOpacity 
-                  style={styles.modalCloseBtn}
-                  onPress={() => {
-                    setShowCheckoutModal(false);
-                    setWorkReportFile(null);
-                  }}
-                >
-                  <Ionicons name="close" size={24} color="#6b7280" />
+            {/* Work Summary */}
+            {currentAttendance?.checkOutTime && currentAttendance.workSummary && (
+              <View style={styles.workSummarySection}>
+                <View style={styles.workSummaryHeader}>
+                  <Ionicons name="document-text" size={18} color="#3b82f6" />
+                  <Text style={styles.workSummaryTitle}>Work Summary</Text>
+                </View>
+                <Text style={styles.workSummaryText}>{currentAttendance.workSummary}</Text>
+                {currentAttendance.workReportFileName && (
+                  <View style={styles.attachmentBadge}>
+                    <Ionicons name="attach" size={14} color="#059669" />
+                    <Text style={styles.attachmentText}>{currentAttendance.workReportFileName}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Action Button */}
+            <View style={styles.actionContainer}>
+              {!currentAttendance?.checkInTime ? (
+                <TouchableOpacity style={styles.checkInButton} onPress={() => openCamera(true)} activeOpacity={0.85}>
+                  <LinearGradient colors={["#22c55e", "#16a34a"]} style={styles.actionButtonGradient}>
+                    <Ionicons name="finger-print" size={24} color="#fff" />
+                    <Text style={styles.actionButtonText}>Check In</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
-                
-                <Text style={styles.modalTitle}>Confirm Check-out</Text>
-                <Text style={styles.modalSubtitle}>
-                  Please provide today's work summary before checking out. You can optionally upload a work report PDF.
-                </Text>
-                
-                {/* Work Summary Input */}
-                <Text style={styles.inputLabel}>Today's Work Summary <Text style={{ color: '#ef4444' }}>*</Text></Text>
+              ) : !currentAttendance?.checkOutTime ? (
+                <TouchableOpacity style={styles.checkOutButton} onPress={() => setShowCheckoutModal(true)} activeOpacity={0.85}>
+                  <LinearGradient colors={["#ef4444", "#dc2626"]} style={styles.actionButtonGradient}>
+                    <Ionicons name="exit" size={24} color="#fff" />
+                    <Text style={styles.actionButtonText}>Check Out</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.completedBadge}>
+                  <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
+                  <Text style={styles.completedText}>Attendance Completed</Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Attendance History */}
+          <View style={styles.historySection}>
+            <View style={styles.historySectionHeader}>
+              <Text style={styles.sectionTitle}>Attendance History</Text>
+              <Text style={styles.historyCount}>{attendanceHistory.length} records</Text>
+            </View>
+            
+            {attendanceHistory.length > 0 ? (
+              <View style={styles.historyList}>
+                {attendanceHistory.slice(0, 10).map((item, index) => (
+                  <View key={item.id} style={[styles.historyItem, index === 0 && styles.historyItemFirst]}>
+                    <View style={styles.historyDateBadge}>
+                      <Text style={styles.historyDateDay}>{formatDateToIST(item.date).split(' ')[0]}</Text>
+                      <Text style={styles.historyDateMonth}>{formatDateToIST(item.date).split(' ')[1]}</Text>
+                    </View>
+                    <View style={styles.historyDetails}>
+                      <View style={styles.historyTimeRow}>
+                        <View style={styles.historyTimeBlock}>
+                          <Ionicons name="enter-outline" size={14} color="#22c55e" />
+                          <Text style={styles.historyTimeText}>{formatTime(item.checkInTime)}</Text>
+                        </View>
+                        <View style={styles.historyTimeDivider} />
+                        <View style={styles.historyTimeBlock}>
+                          <Ionicons name="exit-outline" size={14} color={item.checkOutTime ? "#ef4444" : "#9ca3af"} />
+                          <Text style={[styles.historyTimeText, !item.checkOutTime && styles.pendingText]}>
+                            {item.checkOutTime ? formatTime(item.checkOutTime) : "Pending"}
+                          </Text>
+                        </View>
+                      </View>
+                      {item.workSummary && (
+                        <Text style={styles.historyWorkSummary} numberOfLines={1}>{item.workSummary}</Text>
+                      )}
+                    </View>
+                    <View style={[styles.historyStatusDot, { backgroundColor: item.checkOutTime ? "#22c55e" : "#f59e0b" }]} />
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyHistory}>
+                <Ionicons name="calendar-outline" size={40} color="#d1d5db" />
+                <Text style={styles.emptyHistoryText}>No attendance history yet</Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </Animated.View>
+
+      {/* Checkout Modal */}
+      <Modal visible={showCheckoutModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <LinearGradient colors={["#3b82f6", "#1e40af"]} style={styles.modalHeader}>
+              <TouchableOpacity style={styles.modalCloseBtn} onPress={() => { setShowCheckoutModal(false); setWorkReportFile(null); }}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+              <Ionicons name="exit-outline" size={40} color="#fff" />
+              <Text style={styles.modalTitle}>Check Out</Text>
+              <Text style={styles.modalSubtitle}>Complete your day with a summary</Text>
+            </LinearGradient>
+            
+            <View style={styles.modalBody}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Work Summary <Text style={styles.required}>*</Text></Text>
                 <TextInput
-                  placeholder="Brief description of today's work..."
+                  placeholder="What did you accomplish today?"
+                  placeholderTextColor="#9ca3af"
                   value={todaysWork}
                   onChangeText={setTodaysWork}
                   style={styles.textInput}
@@ -698,474 +661,281 @@ export default function AttendancePage() {
                   numberOfLines={4}
                   textAlignVertical="top"
                 />
-                
-                {/* PDF Upload Section */}
-                <Text style={styles.inputLabel}>Upload Work Report PDF (Optional)</Text>
-                <TouchableOpacity 
-                  style={styles.filePickerBtn}
-                  onPress={pickWorkReportFile}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="cloud-upload-outline" size={20} color="#2563eb" />
-                  <Text style={styles.filePickerText}>
-                    {workReportFile ? workReportFile.name : "Browse... No file selected."}
-                  </Text>
-                </TouchableOpacity>
-                
-                {/* Selected File Preview */}
-                {workReportFile && (
-                  <View style={styles.selectedFile}>
-                    <View style={styles.selectedFileInfo}>
-                      <Ionicons name="document-text" size={20} color="#10b981" />
-                      <Text style={styles.selectedFileName} numberOfLines={1}>
-                        {workReportFile.name}
-                      </Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setWorkReportFile(null)}>
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Attach Report <Text style={styles.optional}>(Optional)</Text></Text>
+                <TouchableOpacity style={styles.fileUploadBtn} onPress={pickWorkReportFile} activeOpacity={0.7}>
+                  <View style={styles.fileUploadIcon}>
+                    <Ionicons name="cloud-upload" size={24} color="#3b82f6" />
+                  </View>
+                  <View style={styles.fileUploadInfo}>
+                    <Text style={styles.fileUploadTitle}>{workReportFile ? "File Selected" : "Upload PDF or Image"}</Text>
+                    <Text style={styles.fileUploadSubtitle}>{workReportFile ? workReportFile.name : "Tap to browse files"}</Text>
+                  </View>
+                  {workReportFile && (
+                    <TouchableOpacity onPress={() => setWorkReportFile(null)} style={styles.fileRemoveBtn}>
                       <Ionicons name="close-circle" size={22} color="#ef4444" />
                     </TouchableOpacity>
-                  </View>
-                )}
-                
-                {/* Action Buttons */}
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity 
-                    style={styles.cancelBtn}
-                    onPress={() => {
-                      setShowCheckoutModal(false);
-                      setWorkReportFile(null);
-                    }}
-                  >
-                    <Text style={styles.cancelBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[
-                      styles.proceedBtn,
-                      !todaysWork.trim() && styles.proceedBtnDisabled
-                    ]}
-                    onPress={confirmCheckOut}
-                    disabled={!todaysWork.trim()}
-                  >
-                    <Text style={styles.proceedBtnText}>Proceed to Check-out</Text>
-                  </TouchableOpacity>
-                </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => { setShowCheckoutModal(false); setWorkReportFile(null); }}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.modalConfirmBtn, !todaysWork.trim() && styles.modalConfirmBtnDisabled]} 
+                  onPress={confirmCheckOut} 
+                  disabled={!todaysWork.trim()}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient colors={todaysWork.trim() ? ["#22c55e", "#16a34a"] : ["#d1d5db", "#9ca3af"]} style={styles.modalConfirmGradient}>
+                    <Ionicons name="checkmark" size={20} color="#fff" />
+                    <Text style={styles.modalConfirmText}>Proceed</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
               </View>
             </View>
-          </Modal>
+          </View>
+        </View>
+      </Modal>
 
-          {isLoading && (
-            <View style={styles.loaderOverlay}>
-              <ActivityIndicator size="large" color="#2563eb" />
-            </View>
-          )}
-        </ScrollView>
-      </View>
-    </SafeAreaView>
+      {/* Loading Overlay */}
+      {isLoading && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="large" color="#3b82f6" />
+            <Text style={styles.loadingText}>Processing...</Text>
+          </View>
+        </View>
+      )}
+      </SafeAreaView>
+    </View>
   );
 }
 
-// 🎨 Styles
+
 const styles = StyleSheet.create({
-  safeAreaContainer: { flex: 1, backgroundColor: "#39549fff" },
-  contentContainer: {
-    flex: 1,
-    backgroundColor: "#f9fafb",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: -20,
+  mainContainer: { flex: 1, backgroundColor: "#3b82f6" },
+  safeArea: { flex: 1 },
+  cameraContainer: { flex: 1, backgroundColor: "#000" },
+  headerGradient: { paddingBottom: 20 },
+  headerContent: { paddingHorizontal: 20, paddingTop: 10 },
+  headerTop: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
+  backButton: {
+    width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center", justifyContent: "center",
   },
-  scrollContent: { padding: 16, paddingBottom: 40 },
-  header: {
-    backgroundColor: "#39549fff",
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 20,
+  headerTitleContainer: { flex: 1, marginLeft: 12 },
+  headerTitle: { fontSize: 24, fontWeight: "700", color: "#fff" },
+  headerSubtitle: { fontSize: 13, color: "rgba(255,255,255,0.7)", marginTop: 2 },
+  headerRight: { alignItems: "flex-end" },
+  statusBadge: {
+    flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 20, gap: 6,
   },
-  heroContentRow: { flexDirection: "row", alignItems: "center" },
-  backCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
+  statusBadgeText: { fontSize: 12, fontWeight: "600" },
+  dateCard: {
+    flexDirection: "row", alignItems: "center", backgroundColor: "#fff",
+    borderRadius: 16, padding: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1, shadowRadius: 12, elevation: 5,
   },
-  heroTitleBlock: { flex: 1 },
-  headerTitle: { color: "#fff", fontSize: 22, fontWeight: "bold" },
-  headerSubtitle: { color: "#e0f2fe", fontSize: 14 },
-  heroDateBadge: {
-    marginTop: 12,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    padding: 12,
-    borderRadius: 12,
-    alignSelf: "flex-start",
+  dateIconContainer: {
+    width: 48, height: 48, borderRadius: 12, backgroundColor: "#eff6ff",
+    alignItems: "center", justifyContent: "center",
   },
-  heroDate: { color: "white", fontWeight: "600", fontSize: 16 },
-  heroDay: { color: "#bfdbfe", marginTop: 2 },
-  locationCard: {
-    padding: 16,
-    marginVertical: 8,
-    marginHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: "#eff6ff",
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
+  dateInfo: { flex: 1, marginLeft: 14 },
+  dateText: { fontSize: 16, fontWeight: "700", color: "#1e293b" },
+  dayText: { fontSize: 13, color: "#64748b", marginTop: 2 },
+  timeDisplay: { flexDirection: "row", alignItems: "baseline" },
+  currentTime: { fontSize: 28, fontWeight: "700", color: "#1e3a8a" },
+  ampm: { fontSize: 14, fontWeight: "600", color: "#64748b", marginLeft: 4 },
+  
+  contentContainer: { flex: 1, backgroundColor: "#fff", marginTop: 0 },
+  scrollContent: { padding: 20, paddingBottom: 40 },
+
+  locationCard: { marginBottom: 16, borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: "#dbeafe" },
+  locationGradient: { padding: 16 },
+  locationHeader: { flexDirection: "row", alignItems: "center" },
+  locationIconBg: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: "#fff",
+    alignItems: "center", justifyContent: "center",
   },
-  locationHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
+  locationInfo: { flex: 1, marginLeft: 12 },
+  locationTitle: { fontSize: 12, fontWeight: "600", color: "#3b82f6", textTransform: "uppercase", letterSpacing: 0.5 },
+  locationAddress: { fontSize: 14, color: "#1e3a8a", fontWeight: "500", marginTop: 2 },
+
+  statusCard: {
+    backgroundColor: "#fff", borderRadius: 16, padding: 20, marginBottom: 16,
+    borderWidth: 1, borderColor: "#e5e7eb",
   },
-  locationTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1e40af",
-    marginLeft: 8,
+  statusCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  sectionTitle: { fontSize: 18, fontWeight: "700", color: "#1e293b" },
+  statusChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, gap: 6 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusChipText: { fontSize: 12, fontWeight: "600" },
+
+  timeCardsContainer: { flexDirection: "row", gap: 12 },
+  timeCard: {
+    flex: 1, padding: 16, borderRadius: 16, alignItems: "center",
+    borderWidth: 1, borderColor: "#e2e8f0",
   },
-  locationText: {
-    fontSize: 14,
-    color: "#1e3a8a",
-    fontWeight: "600",
-    marginBottom: 4,
-    lineHeight: 20,
+  checkInCard: { backgroundColor: "#f0fdf4" },
+  checkOutCard: { backgroundColor: "#fef2f2" },
+  timeCardIcon: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: "#fff",
+    alignItems: "center", justifyContent: "center", marginBottom: 10,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 2,
   },
-  locationCoords: {
-    fontSize: 11,
-    color: "#64748b",
-    fontFamily: "monospace",
-    marginBottom: 6,
+  timeCardLabel: { fontSize: 12, color: "#64748b", fontWeight: "500", marginBottom: 4 },
+  timeCardValue: { fontSize: 18, fontWeight: "700", color: "#1e293b" },
+  pendingText: { color: "#9ca3af", fontStyle: "italic" },
+
+  emptyStateContainer: { alignItems: "center", paddingVertical: 32 },
+  emptyStateIcon: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: "#f1f5f9",
+    alignItems: "center", justifyContent: "center", marginBottom: 16,
   },
-  locationSubtext: {
-    fontSize: 11,
-    color: "#64748b",
-    fontStyle: "italic",
+  emptyStateTitle: { fontSize: 16, fontWeight: "600", color: "#475569" },
+  emptyStateSubtitle: { fontSize: 13, color: "#94a3b8", marginTop: 4, textAlign: "center" },
+
+  selfiesSection: { marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: "#e2e8f0" },
+  selfiesSectionTitle: { fontSize: 14, fontWeight: "600", color: "#475569", marginBottom: 12 },
+  selfiesGrid: { flexDirection: "row", gap: 16 },
+  selfieCard: { flex: 1, alignItems: "center" },
+  selfieLabel: { fontSize: 11, fontWeight: "600", color: "#64748b", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 },
+  selfieImage: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: "#22c55e" },
+  selfiePlaceholder: {
+    width: 72, height: 72, borderRadius: 36, backgroundColor: "#f1f5f9",
+    borderWidth: 2, borderColor: "#e2e8f0", borderStyle: "dashed",
+    alignItems: "center", justifyContent: "center",
   },
-  card: { padding: 16, marginVertical: 8, marginHorizontal: 16, borderRadius: 12 },
-  sectionTitle: { fontWeight: "bold", fontSize: 16, marginBottom: 8 },
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
-    gap: 8,
+  selfiePlaceholderText: { fontSize: 10, color: "#94a3b8", marginTop: 2 },
+
+  workSummarySection: { marginTop: 20, padding: 16, backgroundColor: "#f0f9ff", borderRadius: 12, borderWidth: 1, borderColor: "#bfdbfe" },
+  workSummaryHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
+  workSummaryTitle: { fontSize: 14, fontWeight: "600", color: "#1e40af" },
+  workSummaryText: { fontSize: 14, color: "#334155", lineHeight: 20 },
+  attachmentBadge: {
+    flexDirection: "row", alignItems: "center", gap: 6, marginTop: 12,
+    paddingTop: 12, borderTopWidth: 1, borderTopColor: "#bfdbfe",
   },
-  statusLabel: {
-    fontSize: 14,
-    color: "#6b7280",
-    fontWeight: "500",
-    flex: 1,
+  attachmentText: { fontSize: 12, color: "#059669", fontWeight: "500" },
+
+  actionContainer: { marginTop: 24 },
+  checkInButton: { borderRadius: 16, overflow: "hidden" },
+  checkOutButton: { borderRadius: 16, overflow: "hidden" },
+  actionButtonGradient: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    paddingVertical: 18, gap: 10,
   },
-  statusValue: {
-    fontSize: 14,
-    color: "#111827",
-    fontWeight: "600",
+  actionButtonText: { fontSize: 18, fontWeight: "700", color: "#fff" },
+  completedBadge: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    paddingVertical: 16, backgroundColor: "#f0fdf4", borderRadius: 16,
+    borderWidth: 2, borderColor: "#bbf7d0", gap: 10,
   },
-  noRecordContainer: {
-    alignItems: "center",
-    paddingVertical: 32,
+  completedText: { fontSize: 16, fontWeight: "600", color: "#16a34a" },
+
+  historySection: {
+    backgroundColor: "#fff", borderRadius: 16, padding: 20, marginTop: 8,
+    borderWidth: 1, borderColor: "#e5e7eb",
   },
-  noRecordText: {
-    color: "#6b7280",
-    fontSize: 16,
-    fontWeight: "600",
-    marginTop: 12,
+  historySectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
+  historyCount: { fontSize: 13, color: "#64748b", fontWeight: "500" },
+  historyList: {},
+  historyItem: {
+    flexDirection: "row", alignItems: "center", paddingVertical: 14,
+    borderTopWidth: 1, borderTopColor: "#f1f5f9",
   },
-  noRecordSubtext: {
-    color: "#9ca3af",
-    fontSize: 13,
-    marginTop: 4,
+  historyItemFirst: { borderTopWidth: 0 },
+  historyDateBadge: {
+    width: 48, height: 48, borderRadius: 12, backgroundColor: "#f1f5f9",
+    alignItems: "center", justifyContent: "center",
   },
-  actions: { flexDirection: "row", marginTop: 16, justifyContent: "center" },
-  sectionSubtitle: {
-    fontSize: 13,
-    color: "#6b7280",
-    marginBottom: 12,
-  },
-  historyRow: {
-    borderBottomColor: "#e5e7eb",
-    borderBottomWidth: 1,
-    paddingVertical: 12,
-    marginBottom: 8,
-  },
-  historyDateContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  historyDate: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
-    marginLeft: 8,
-  },
-  historyTimes: {
-    flexDirection: "row",
-    gap: 24,
-    marginLeft: 26,
-  },
-  historyTimeItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  historyTimeLabel: {
-    fontSize: 13,
-    color: "#6b7280",
-    fontWeight: "500",
-  },
-  historyTimeValue: {
-    fontSize: 13,
-    color: "#111827",
-    fontWeight: "600",
-  },
-  noHistoryContainer: {
-    alignItems: "center",
-    paddingVertical: 24,
-  },
-  noHistoryText: {
-    color: "#9ca3af",
-    fontSize: 14,
-    marginTop: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalContent: {
-    width: "100%",
-    maxWidth: 400,
-    backgroundColor: "white",
-    borderRadius: 16,
-    padding: 24,
-    position: "relative",
-  },
-  modalCloseBtn: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    zIndex: 10,
-  },
-  modalTitle: { 
-    fontSize: 20, 
-    fontWeight: "700", 
-    marginBottom: 8,
-    color: "#111827",
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: "#6b7280",
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
-    marginBottom: 8,
-  },
+  historyDateDay: { fontSize: 18, fontWeight: "700", color: "#1e293b" },
+  historyDateMonth: { fontSize: 10, fontWeight: "600", color: "#64748b", textTransform: "uppercase" },
+  historyDetails: { flex: 1, marginLeft: 14 },
+  historyTimeRow: { flexDirection: "row", alignItems: "center" },
+  historyTimeBlock: { flexDirection: "row", alignItems: "center", gap: 4 },
+  historyTimeDivider: { width: 20, height: 1, backgroundColor: "#e2e8f0", marginHorizontal: 8 },
+  historyTimeText: { fontSize: 13, fontWeight: "600", color: "#334155" },
+  historyWorkSummary: { fontSize: 12, color: "#64748b", marginTop: 4 },
+  historyStatusDot: { width: 10, height: 10, borderRadius: 5 },
+  emptyHistory: { alignItems: "center", paddingVertical: 32 },
+  emptyHistoryText: { fontSize: 14, color: "#94a3b8", marginTop: 12 },
+
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 20 },
+  modalContainer: { width: "100%", maxWidth: 400, backgroundColor: "#fff", borderRadius: 24, overflow: "hidden" },
+  modalHeader: { alignItems: "center", paddingVertical: 28, paddingHorizontal: 20, position: "relative" },
+  modalCloseBtn: { position: "absolute", top: 16, right: 16, padding: 4 },
+  modalTitle: { fontSize: 22, fontWeight: "700", color: "#fff", marginTop: 12 },
+  modalSubtitle: { fontSize: 14, color: "rgba(255,255,255,0.8)", marginTop: 4, textAlign: "center" },
+  modalBody: { padding: 24 },
+  inputGroup: { marginBottom: 20 },
+  inputLabel: { fontSize: 14, fontWeight: "600", color: "#334155", marginBottom: 8 },
+  required: { color: "#ef4444" },
+  optional: { color: "#94a3b8", fontWeight: "400" },
   textInput: {
-    borderWidth: 2,
-    borderColor: "#2563eb",
-    borderRadius: 10,
-    padding: 14,
-    minHeight: 100,
-    marginBottom: 20,
-    textAlignVertical: "top",
-    fontSize: 14,
-    color: "#111827",
-    backgroundColor: "#fff",
+    borderWidth: 2, borderColor: "#e2e8f0", borderRadius: 14, padding: 16,
+    minHeight: 100, fontSize: 15, color: "#1e293b", backgroundColor: "#f8fafc",
   },
-  filePickerBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 10,
-    padding: 14,
-    backgroundColor: "#f9fafb",
-    gap: 10,
+  fileUploadBtn: {
+    flexDirection: "row", alignItems: "center", padding: 16,
+    borderWidth: 2, borderColor: "#e2e8f0", borderRadius: 14, borderStyle: "dashed",
+    backgroundColor: "#f8fafc",
   },
-  filePickerText: {
-    fontSize: 14,
-    color: "#6b7280",
-    flex: 1,
+  fileUploadIcon: {
+    width: 48, height: 48, borderRadius: 12, backgroundColor: "#eff6ff",
+    alignItems: "center", justifyContent: "center",
   },
-  selectedFile: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#ecfdf5",
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: "#a7f3d0",
+  fileUploadInfo: { flex: 1, marginLeft: 14 },
+  fileUploadTitle: { fontSize: 14, fontWeight: "600", color: "#334155" },
+  fileUploadSubtitle: { fontSize: 12, color: "#64748b", marginTop: 2 },
+  fileRemoveBtn: { padding: 4 },
+  modalActions: { flexDirection: "row", gap: 12, marginTop: 8 },
+  modalCancelBtn: {
+    flex: 1, paddingVertical: 16, borderRadius: 14, backgroundColor: "#f1f5f9",
+    alignItems: "center", justifyContent: "center",
   },
-  selectedFileInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    gap: 8,
+  modalCancelText: { fontSize: 16, fontWeight: "600", color: "#475569" },
+  modalConfirmBtn: { flex: 1, borderRadius: 14, overflow: "hidden" },
+  modalConfirmBtnDisabled: { opacity: 0.6 },
+  modalConfirmGradient: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    paddingVertical: 16, gap: 8,
   },
-  selectedFileName: {
-    fontSize: 13,
-    color: "#065f46",
-    fontWeight: "500",
-    flex: 1,
+  modalConfirmText: { fontSize: 16, fontWeight: "600", color: "#fff" },
+
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(255,255,255,0.9)",
+    justifyContent: "center", alignItems: "center",
   },
-  modalButtons: { 
-    flexDirection: "row", 
-    justifyContent: "space-between",
-    gap: 12,
-    marginTop: 24,
+  loadingCard: {
+    backgroundColor: "#fff", borderRadius: 20, padding: 32, alignItems: "center",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 8,
   },
-  cancelBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: "#f3f4f6",
-    alignItems: "center",
-  },
-  cancelBtnText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#374151",
-  },
-  proceedBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
-    backgroundColor: "#2563eb",
-    alignItems: "center",
-  },
-  proceedBtnDisabled: {
-    backgroundColor: "#93c5fd",
-  },
-  proceedBtnText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#fff",
-  },
-  loaderOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#0002",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  cameraOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    alignItems: "center",
-    paddingBottom: 40,
-  },
+  loadingText: { fontSize: 16, fontWeight: "600", color: "#475569", marginTop: 16 },
+
+  cameraGradient: { flex: 1, justifyContent: "flex-end" },
+  cameraControls: { alignItems: "center", paddingBottom: 50 },
+  cameraTitle: { fontSize: 22, fontWeight: "700", color: "#fff", marginBottom: 4 },
+  cameraSubtitle: { fontSize: 14, color: "rgba(255,255,255,0.7)", marginBottom: 30 },
+  captureButtonContainer: { marginBottom: 20 },
   captureButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    borderWidth: 5,
-    borderColor: "#fff",
+    width: 80, height: 80, borderRadius: 40, borderWidth: 4, borderColor: "#fff",
+    alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.2)",
   },
   captureInner: {
-    backgroundColor: "#fff",
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 64, height: 64, borderRadius: 32, backgroundColor: "#fff",
+    alignItems: "center", justifyContent: "center",
   },
-  workSummaryCard: {
-    marginTop: 16,
-    padding: 14,
-    backgroundColor: "#f0f9ff",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-  },
-  workSummaryHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-    gap: 8,
-  },
-  workSummaryTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1e40af",
-  },
-  workSummaryText: {
-    fontSize: 14,
-    color: "#374151",
-    lineHeight: 20,
-  },
-  workReportFileInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#bfdbfe",
-    gap: 6,
-  },
-  workReportFileName: {
-    fontSize: 13,
-    color: "#065f46",
-    fontWeight: "500",
-  },
-  selfiesContainer: {
-    marginTop: 16,
-    padding: 14,
-    backgroundColor: "#fefce8",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#fde047",
-  },
-  selfiesHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-    gap: 8,
-  },
-  selfiesTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#854d0e",
-  },
-  selfiesRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    gap: 16,
-  },
-  selfieItem: {
-    alignItems: "center",
-    flex: 1,
-  },
-  selfieLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6b7280",
-    marginBottom: 8,
-  },
-  selfieImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    borderColor: "#10b981",
-  },
-  selfieImagePlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#f3f4f6",
-    borderWidth: 2,
-    borderColor: "#d1d5db",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  selfieImagePlaceholderText: {
-    fontSize: 10,
-    color: "#9ca3af",
-    marginTop: 4,
-  },
+  cameraCancelBtn: { paddingVertical: 12, paddingHorizontal: 32 },
+  cameraCancelText: { fontSize: 16, fontWeight: "600", color: "#fff" },
+
+  pulseContainer: { width: 12, height: 12, alignItems: "center", justifyContent: "center" },
+  pulseOuter: { position: "absolute", width: 12, height: 12, borderRadius: 6 },
+  pulseInner: { width: 8, height: 8, borderRadius: 4 },
 });

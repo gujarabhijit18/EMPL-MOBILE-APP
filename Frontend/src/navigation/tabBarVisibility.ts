@@ -1,9 +1,9 @@
+import { useFocusEffect } from "@react-navigation/native";
 import React from "react";
 import {
-  NativeScrollEvent,
-  NativeSyntheticEvent,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
 
 export const TAB_BAR_HEIGHT = 64;
 
@@ -20,10 +20,14 @@ export const TabBarVisibilityContext =
 export const useTabBarVisibility = () => {
   const context = React.useContext(TabBarVisibilityContext);
 
+  // Return a safe fallback if not within provider (for stack navigation)
   if (!context) {
-    throw new Error(
-      "useTabBarVisibility must be used within a TabBarVisibilityContext provider."
-    );
+    return {
+      showTabBar: () => {},
+      hideTabBar: () => {},
+      tabBarVisible: false,
+      tabBarHeight: TAB_BAR_HEIGHT,
+    };
   }
 
   return context;

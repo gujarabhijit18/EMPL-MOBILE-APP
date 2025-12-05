@@ -244,7 +244,7 @@ const TeamManagement: React.FC = () => {
                         </Button>
                       </View>
                     ))}
-                    <Button mode="outlined" icon="chatbubbles" onPress={() => setSelectedTeam(team)}>
+                    <Button mode="outlined" icon="forum" onPress={() => setSelectedTeam(team)}>
                       Open Chat
                     </Button>
                   </Card.Content>

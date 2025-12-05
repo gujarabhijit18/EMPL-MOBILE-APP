@@ -4,12 +4,16 @@ import { Platform } from "react-native";
 import { useAuth } from "./AuthContext";
 
 // Safe notification import - handle Expo Go limitations
+// NOTE: Expo Go SDK 53+ removed Push Notification support. 
+// We disable this to prevent crashes. Use a Development Build for Push Notifications.
 let Notifications: any = null;
+/*
 try {
   Notifications = require("expo-notifications");
 } catch (error) {
   console.log("⚠️ expo-notifications not available (Expo Go limitation)");
 }
+*/
 
 /**
  * 🔔 Notification Type Definition

@@ -12,14 +12,18 @@ from app.crud.task_crud import (
     get_task_history,
     list_task_notifications,
     list_tasks,
+    list_all_tasks,
     mark_task_notification_as_read,
     pass_task,
     update_task,
     update_task_status,
+    create_task_comment,
+    list_task_comments,
+    delete_task_comment,
 )
 from app.dependencies import get_current_user
 
-from app.schemas.task_schema import TaskCreate, TaskHistoryOut, TaskNotificationOut, TaskOut, TaskPassRequest, TaskUpdate
+from app.schemas.task_schema import TaskCreate, TaskHistoryOut, TaskNotificationOut, TaskOut, TaskPassRequest, TaskUpdate, TaskCommentCreate, TaskCommentOut
 from app.enums import RoleEnum, TaskStatus
 from app.db.models.task import Task, TaskHistory
 from app.db.models.user import User
@@ -61,6 +65,17 @@ def assign_task(task: TaskCreate, db: Session = Depends(get_db), user = Depends(
 @router.get("/", response_model=list[TaskOut])
 def my_tasks(db: Session = Depends(get_db), user = Depends(get_current_user)):
     return list_tasks(db, user.user_id)
+
+
+@router.get("/all", response_model=list[TaskOut])
+def all_tasks(db: Session = Depends(get_db), user = Depends(get_current_user)):
+    if user.role not in [RoleEnum.ADMIN, RoleEnum.HR, RoleEnum.MANAGER]:
+         raise HTTPException(status_code=403, detail="Not authorized")
+    # Admin sees ALL tasks across all departments and roles
+    if user.role == RoleEnum.ADMIN:
+        return list_all_tasks(db)  # No filter - admin sees everything
+    # HR/Manager see only their department's tasks
+    return list_all_tasks(db, department=user.department)
 
 ROLE_HIERARCHY = [
     RoleEnum.ADMIN,
@@ -263,3 +278,100 @@ def mark_task_notification(
     if not notification:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
     return _serialize_task_notification(notification)
+
+
+# ==========================================
+# Task Comments Endpoints
+# ==========================================
+
+@router.get("/{task_id}/comments")
+def get_task_comments(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all comments for a task. Only task participants can view comments."""
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    # Check if user is authorized to view comments (assigned_to, assigned_by, or admin)
+    if (
+        current_user.role != RoleEnum.ADMIN
+        and task.assigned_to != current_user.user_id
+        and task.assigned_by != current_user.user_id
+    ):
+        # Check if user participated in task history
+        participated = (
+            db.query(TaskHistory)
+            .filter(
+                TaskHistory.task_id == task_id,
+                TaskHistory.user_id == current_user.user_id,
+            )
+            .first()
+        )
+        if not participated:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view comments")
+
+    comments = list_task_comments(db, task_id)
+    return comments
+
+
+@router.post("/{task_id}/comments")
+def add_task_comment(
+    task_id: int,
+    payload: TaskCommentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Add a comment to a task. Only task participants can comment."""
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    # Check if user is authorized to comment (assigned_to, assigned_by, or admin)
+    if (
+        current_user.role != RoleEnum.ADMIN
+        and task.assigned_to != current_user.user_id
+        and task.assigned_by != current_user.user_id
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to comment on this task")
+
+    if not payload.message.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Comment message cannot be empty")
+
+    comment = create_task_comment(
+        db,
+        task_id=task_id,
+        user_id=current_user.user_id,
+        message=payload.message.strip(),
+    )
+
+    return {
+        "id": comment.id,
+        "task_id": comment.task_id,
+        "user_id": comment.user_id,
+        "message": comment.message,
+        "created_at": comment.created_at,
+        "user_name": current_user.name,
+    }
+
+
+@router.delete("/{task_id}/comments/{comment_id}")
+def remove_task_comment(
+    task_id: int,
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a comment. Only the comment author can delete it."""
+    success = delete_task_comment(
+        db,
+        comment_id=comment_id,
+        user_id=current_user.user_id,
+    )
+
+    if not success:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found or not authorized")
+
+    return {"message": "Comment deleted successfully"}

@@ -172,14 +172,21 @@ def delete_leave_request(
 # NEW ROLE-BASED ENDPOINTS WITH STRICT DEPARTMENT ISOLATION
 # ============================================================================
 
-# Get all leaves (Admin only - all departments, all roles)
+# Get all leaves (Admin only - all roles)
 @router.get("/all", response_model=list[LeaveWithUserOut])
 def get_all_leaves(
     db: Session = Depends(get_db),
     user=Depends(require_roles("Admin"))
 ):
-    """Admin only: View all leave requests from all departments and roles"""
-    all_leaves = db.query(Leave).order_by(Leave.created_at.desc()).all()
+    """Admin only: View leave requests from all roles (HR, Manager, TeamLead, Employee)"""
+    # Admin can see all leave requests from all roles
+    all_leaves = (
+        db.query(Leave)
+        .join(User, User.user_id == Leave.user_id)
+        .filter(User.role.in_([RoleEnum.HR, RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]))
+        .order_by(Leave.created_at.desc())
+        .all()
+    )
     
     results = []
     for leave in all_leaves:
@@ -282,11 +289,11 @@ def approvals_inbox(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
-    # Admin sees HR/Manager requests from ALL departments
+    # Admin sees all roles requests from ALL departments
     role_value = getattr(user.role, "value", str(user.role))
     if role_value == RoleEnum.ADMIN.value:
-        # Admin approves HR and Manager leave requests (all departments)
-        pending = list_pending_by_requester_roles(db, [RoleEnum.HR.value, RoleEnum.MANAGER.value])
+        # Admin approves all leave requests (HR, Manager, TeamLead, Employee)
+        pending = list_pending_by_requester_roles(db, [RoleEnum.HR.value, RoleEnum.MANAGER.value, RoleEnum.TEAM_LEAD.value, RoleEnum.EMPLOYEE.value])
     elif role_value in (RoleEnum.HR.value, RoleEnum.MANAGER.value):
         if not user.department:
             return []
@@ -332,17 +339,17 @@ def approvals_history(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
-    # Admin sees decided HR/Manager leaves from all departments
+    # Admin sees decided leaves from all roles and all departments
     # HR/Manager see decided Employee/TeamLead leaves from their department
     role_value = getattr(user.role, "value", str(user.role))
     if role_value == RoleEnum.ADMIN.value:
-        # Get decided HR/Manager leaves (all departments)
+        # Get decided leaves from all roles (all departments)
         decided = (
             db.query(Leave)
             .join(User, User.user_id == Leave.user_id)
             .filter(
                 Leave.status != "Pending",
-                User.role.in_([RoleEnum.HR, RoleEnum.MANAGER])
+                User.role.in_([RoleEnum.HR, RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE])
             )
             .order_by(Leave.end_date.desc())
             .all()

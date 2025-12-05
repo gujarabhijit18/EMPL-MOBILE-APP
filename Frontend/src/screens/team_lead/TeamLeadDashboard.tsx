@@ -3,48 +3,55 @@ import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { useNavigation } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    Activity,
-    AlertCircle,
-    Calendar,
-    CheckCircle2,
-    ClipboardList,
-    Clock,
-    Users
-} from "lucide-react-native";
-import React, { useEffect, useState } from "react";
-import type { ViewStyle } from "react-native";
-import { Alert, Animated, Easing, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    Easing,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import type { TabParamList } from "../../navigation/TabNavigator";
+import { apiService } from "../../lib/api";
 
-// Dummy translation
-const t = {
-  common: { welcome: "Welcome" },
-  dashboard: { quickActions: "Quick Actions" },
-};
+const { width } = Dimensions.get("window");
 
 type RecentActivityType = "success" | "warning" | "info";
 type MemberStatus = "present" | "on-leave";
 
-type RecentActivity = {
-  id: number;
-  type: RecentActivityType;
-  user: string;
-  action: string;
-  time: string;
-};
-
-type AttendanceRecord = {
-  id: number;
-  date: string;
-  checkIn: string;
-  checkOut: string;
-  status: "On Time" | "Late";
-};
+interface TeamStats {
+  teamSize: number;
+  presentToday: number;
+  onLeave: number;
+  tasksInProgress: number;
+  completedToday: number;
+  pendingReviews: number;
+  teamEfficiency: number;
+  recentActivities: Array<{
+    id: string | number;
+    type: string;
+    user: string;
+    time: string;
+    status: string;
+    icon: string;
+  }>;
+  topPerformers: Array<{
+    id: number;
+    name: string;
+    task: string;
+    progress: number;
+    status: MemberStatus;
+  }>;
+}
 
 type TeamLeadNavigationParam = BottomTabNavigationProp<TabParamList>;
 
@@ -53,372 +60,557 @@ const TeamLeadDashboard = () => {
   const { user, logout } = useAuth();
   const { isDarkMode, colors } = useTheme();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
-  const [dropdownVisible, setDropdownVisible] = useState(false);
-  const dropdownOpacity = React.useRef(new Animated.Value(0)).current;
-  const dropdownTranslateY = React.useRef(new Animated.Value(-10)).current;
 
-  const [stats, setStats] = useState({
-    teamSize: 0,
-    presentToday: 0,
-    onLeave: 0,
-    tasksInProgress: 0,
-    completedToday: 0,
-    pendingReviews: 0,
-    teamEfficiency: 0,
-  });
+  const [stats, setStats] = useState<TeamStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
-  const [attendanceHistory] = useState<AttendanceRecord[]>([
-    {
-      id: 1,
-      date: new Date().toISOString(),
-      checkIn: "09:00 AM",
-      checkOut: "05:30 PM",
-      status: "On Time",
-    },
-    {
-      id: 2,
-      date: new Date(Date.now() - 86400000).toISOString(),
-      checkIn: "09:05 AM",
-      checkOut: "05:20 PM",
-      status: "On Time",
-    },
-    {
-      id: 3,
-      date: new Date(Date.now() - 2 * 86400000).toISOString(),
-      checkIn: "09:15 AM",
-      checkOut: "06:15 PM",
-      status: "Late",
-    },
-  ]);
+  // Animation values
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const statsAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Replace with your API
-    setStats({
-      teamSize: 4,
-      presentToday: 3,
-      onLeave: 1,
-      tasksInProgress: 5,
-      completedToday: 2,
-      pendingReviews: 1,
-      teamEfficiency: 80,
-    });
-
-    setRecentActivities([
-      { id: 1, type: "success", user: "John Doe", action: "Completed Feature X", time: "10:30 AM" },
-      { id: 2, type: "warning", user: "Jane Smith", action: "Pending Review", time: "10:50 AM" },
-    ]);
+    fetchTeamData();
   }, []);
+
+  const fetchTeamData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      console.log("🔷 Team Lead: Fetching accessible data...");
+
+      // Get the Team Lead's department
+      const userDepartment = user?.department;
+      
+      if (!userDepartment) {
+        setError("No department assigned to your account");
+        setLoading(false);
+        return;
+      }
+
+      console.log(`📊 Fetching data for department: ${userDepartment}`);
+
+      // 1. Fetch all employees and filter by Team Lead's department AND role
+      const allEmployees = await apiService.getEmployees();
+      
+      // Filter to get only EMPLOYEES from THIS department (exclude admin, hr, manager, team_lead roles)
+      const departmentEmployees = allEmployees.filter((emp: any) => {
+        const role = emp.role?.toLowerCase() || '';
+        const isEmployee = role === 'employee' || role === 'user' || 
+          (!role.includes('admin') && !role.includes('hr') && 
+           !role.includes('manager') && !role.includes('team_lead'));
+        const sameDepartment = emp.department === userDepartment;
+        
+        return isEmployee && sameDepartment;
+      });
+
+      console.log(`📊 Total employees in ${userDepartment}: ${departmentEmployees.length}`);
+
+      // 2. Fetch team leaves (only for employees in this department)
+      let employeeLeaves: any[] = [];
+      let onLeaveToday = 0;
+      let pendingLeaves: any[] = [];
+      
+      try {
+        const teamLeavesResponse = await apiService.getTeamLeaves();
+        // Filter leaves for employees in this department only
+        employeeLeaves = teamLeavesResponse.leaves.filter((leave: any) => {
+          const employee = departmentEmployees.find((emp: any) => emp.employee_id === leave.employee_id);
+          return employee !== undefined;
+        });
+
+        // Calculate on leave today
+        onLeaveToday = employeeLeaves.filter((leave: any) => {
+          const startDate = new Date(leave.start_date);
+          const endDate = new Date(leave.end_date);
+          const now = new Date();
+          return leave.status === 'Approved' && startDate <= now && endDate >= now;
+        }).length;
+
+        // Pending leave requests
+        pendingLeaves = employeeLeaves.filter((leave: any) => leave.status === 'Pending');
+      } catch (leaveError) {
+        console.warn("Leave data not available:", leaveError);
+      }
+
+      // 3. Fetch REAL tasks data (Team Lead's own tasks)
+      let totalTasks = 0;
+      let completedTasks = 0;
+      let pendingTasks = 0;
+      let inProgressTasks = 0;
+      
+      try {
+        // Team Leads can only see their own tasks
+        const myTasks = await apiService.getMyTasks();
+        if (Array.isArray(myTasks)) {
+          totalTasks = myTasks.length;
+          completedTasks = myTasks.filter((t: any) => 
+            t.status?.toLowerCase() === 'completed' || t.status?.toLowerCase() === 'done'
+          ).length;
+          inProgressTasks = myTasks.filter((t: any) => 
+            t.status?.toLowerCase() === 'in progress' || t.status?.toLowerCase() === 'in_progress'
+          ).length;
+          pendingTasks = myTasks.filter((t: any) => 
+            t.status?.toLowerCase() === 'pending' || t.status?.toLowerCase() === 'todo'
+          ).length;
+          console.log(`✅ Loaded ${totalTasks} team lead tasks (${completedTasks} completed, ${inProgressTasks} in progress, ${pendingTasks} pending)`);
+        }
+      } catch (taskError) {
+        console.warn("Tasks endpoint not available:", taskError);
+      }
+
+      // 4. Calculate team stats (without attendance data)
+      const teamSize = departmentEmployees.length;
+      // Estimate present based on people not on leave
+      const estimatedPresent = Math.max(0, teamSize - onLeaveToday);
+      const teamEfficiency = teamSize > 0 ? Math.round(((teamSize - onLeaveToday) / teamSize) * 100) : 0;
+
+      // 5. Create team members list (real employee data from this department)
+      const topPerformers = departmentEmployees.map((emp: any, index: number) => {
+        const isOnLeave = employeeLeaves.some((leave: any) => {
+          if (leave.employee_id !== emp.employee_id) return false;
+          const startDate = new Date(leave.start_date);
+          const endDate = new Date(leave.end_date);
+          const now = new Date();
+          return leave.status === 'Approved' && startDate <= now && endDate >= now;
+        });
+
+        return {
+          id: emp.id || emp.user_id || index,
+          name: emp.name || `Employee ${index + 1}`,
+          task: emp.designation || emp.job_title || 'Team Member',
+          progress: isOnLeave ? 0 : Math.floor(Math.random() * 40) + 60,
+          status: (isOnLeave ? 'on-leave' : 'present') as MemberStatus,
+        };
+      });
+
+      // 6. Create recent activities from leave data only
+      const activities = [
+        ...pendingLeaves.slice(0, 3).map((leave: any, index: number) => ({
+          id: `leave-${leave.leave_id || index}`,
+          type: 'warning',
+          user: leave.name || leave.user?.name || 'Employee',
+          time: formatTime(leave.created_at),
+          status: 'pending',
+          icon: 'time',
+        })),
+        ...employeeLeaves.filter((l: any) => l.status === 'Approved').slice(0, 2).map((leave: any, index: number) => ({
+          id: `approved-${leave.leave_id || index}`,
+          type: 'success',
+          user: leave.name || leave.user?.name || 'Employee',
+          time: formatTime(leave.updated_at || leave.created_at),
+          status: 'completed',
+          icon: 'checkmark-circle',
+        })),
+      ].sort((a, b) => {
+        // Sort by timestamp if available
+        const timeA = new Date(a.time).getTime();
+        const timeB = new Date(b.time).getTime();
+        return isNaN(timeB) || isNaN(timeA) ? 0 : timeB - timeA;
+      }).slice(0, 5);
+
+      setStats({
+        teamSize,
+        presentToday: estimatedPresent,
+        onLeave: onLeaveToday,
+        tasksInProgress: inProgressTasks || totalTasks - completedTasks,
+        completedToday: completedTasks,
+        pendingReviews: pendingLeaves.length,
+        teamEfficiency,
+        recentActivities: activities.length > 0 ? activities : [
+          { id: 1, type: "info", user: "No recent activity", time: "N/A", status: "info", icon: "information-circle" }
+        ],
+        topPerformers,
+      });
+
+      console.log(`✅ Dashboard loaded: ${teamSize} employees, ${totalTasks} tasks, ${pendingLeaves.length} pending leaves`);
+      startAnimations();
+    } catch (err: any) {
+      console.error("Error fetching team data:", err);
+      setError(err.message || "Failed to load team data");
+      
+      // Fallback to basic employee data
+      const mockStats: TeamStats = {
+        teamSize: 0,
+        presentToday: 0,
+        onLeave: 0,
+        tasksInProgress: 0,
+        completedToday: 0,
+        pendingReviews: 0,
+        teamEfficiency: 0,
+        recentActivities: [
+          { id: 1, type: "info", user: "Unable to load data", time: "N/A", status: "info", icon: "alert-circle" },
+        ],
+        topPerformers: [],
+      };
+      setStats(mockStats);
+      startAnimations();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
+    if (!timestamp) return 'Recently';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} mins ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    if (diffHours < 48) return 'Yesterday';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const startAnimations = () => {
+    Animated.timing(headerAnim, {
+      toValue: 1,
+      duration: 800,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+
+    Animated.spring(statsAnim, {
+      toValue: 1,
+      tension: 50,
+      friction: 7,
+      useNativeDriver: true,
+    }).start();
+  };
 
   const goTo = (routeName: string) => {
     try {
       navigation.navigate(routeName as never);
     } catch (_) {
-      // Fallback for nested navigators
       (navigation as any).getParent?.()?.navigate(routeName as never);
     }
   };
 
-  const initials = (() => {
-    const n = (user?.name || "TL").trim();
-    if (!n) return "TL";
-    const parts = n.split(" ").filter(Boolean);
-    const letters = parts.length >= 2 ? parts[0][0] + parts[1][0] : n.slice(0, 2);
-    return letters.toUpperCase();
-  })();
-  const roleLabel = (user?.role || "team_lead").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "completed": return "#10b981";
+      case "pending": return "#f59e0b";
+      case "in_progress": return "#3b82f6";
+      default: return "#6b7280";
+    }
+  };
 
-  const getInitials = (n: string) => {
-    const parts = (n || "").trim().split(" ").filter(Boolean);
+  const getIconBg = (type: string) => {
+    switch (type) {
+      case "success": return "#d1fae5";
+      case "warning": return "#fef3c7";
+      case "info": return "#dbeafe";
+      default: return "#f3f4f6";
+    }
+  };
+
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(" ").filter(Boolean);
     const first = parts[0]?.[0] || "";
     const second = parts[1]?.[0] || "";
-    const letters = (first + second) || first;
-    return letters.toUpperCase();
+    return (first + second).toUpperCase() || "TM";
   };
-
-  const toggleDropdown = () => {
-    const toValue = dropdownVisible ? 0 : 1;
-    setDropdownVisible(!dropdownVisible);
-    Animated.parallel([
-      Animated.timing(dropdownOpacity, {
-        toValue,
-        duration: 200,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(dropdownTranslateY, {
-        toValue: dropdownVisible ? -10 : 0,
-        duration: 200,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
-
-  const handleDropdownItemPress = (action: string) => {
-    toggleDropdown();
-    setTimeout(() => {
-      switch (action) {
-        case "profile":
-          goTo("Profile");
-          break;
-        case "settings":
-          goTo("Settings");
-          break;
-        case "logout":
-          Alert.alert("Logout", "Are you sure you want to logout?", [
-            { text: "Cancel", style: "cancel" },
-            { text: "Logout", style: "destructive", onPress: logout },
-          ]);
-          break;
-      }
-    }, 100);
-  };
-
-  const teamMembers: Array<{ name: string; status: MemberStatus; task: string; progress: number }> = [
-    { name: "John Doe", status: "present", task: "Feature Development", progress: 75 },
-    { name: "Jane Smith", status: "present", task: "Bug Fixes", progress: 90 },
-    { name: "Mike Johnson", status: "on-leave", task: "Code Review", progress: 0 },
-    { name: "Sarah Wilson", status: "present", task: "Testing", progress: 60 },
-  ];
 
   return (
-    <SafeAreaView style={[styles.safeAreaContainer, { backgroundColor: colors.header }]} edges={["top"]}>
-      <StatusBar style={isDarkMode ? "light" : "light"} />
-      <View style={[styles.header, { backgroundColor: colors.header }]}>
-        <View style={[styles.headerCard, { backgroundColor: colors.header }]}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity activeOpacity={0.8} onPress={toggleDropdown} style={styles.avatarTouchable}>
-              <View style={styles.headerAvatar}>
-                <Text style={styles.headerAvatarText}>{(user?.name || "TL").charAt(0).toUpperCase()}</Text>
-                <View style={styles.statusIndicator}>
-                  <View style={styles.onlineStatus} />
-                </View>
-              </View>
-            </TouchableOpacity>
+    <SafeAreaView style={[styles.container, { backgroundColor: "#8b5cf6" }]} edges={["top"]}>
+      <StatusBar style="light" />
 
-            <View style={styles.headerTextContainer}>
-              <Text style={styles.headerTitle}>{user?.name || "Team Lead"}</Text>
-              <Text style={styles.headerRole}>{roleLabel}</Text>
+      {/* Modern Team Lead Header */}
+      <LinearGradient
+        colors={["#8b5cf6", "#7c3aed"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        {/* Background Pattern */}
+        <View style={styles.headerPattern}>
+          <View style={[styles.patternCircle, { top: -20, right: -20, width: 120, height: 120 }]} />
+          <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 150, height: 150 }]} />
+          <View style={[styles.patternCircle, { top: 40, right: 60, width: 80, height: 80 }]} />
+        </View>
+
+        <Animated.View
+          style={[
+            styles.headerContent,
+            {
+              opacity: headerAnim,
+              transform: [
+                {
+                  translateY: headerAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-20, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {/* Header Top Section */}
+          <View style={styles.headerTopSection}>
+            <View style={styles.headerLeft}>
+              <View style={styles.iconBadge}>
+                <LinearGradient
+                  colors={["rgba(255,255,255,0.3)", "rgba(255,255,255,0.1)"]}
+                  style={styles.iconBadgeGradient}
+                >
+                  <Ionicons name="people" size={24} color="#fff" />
+                </LinearGradient>
+              </View>
+              <View style={styles.headerTextSection}>
+                <Text style={styles.headerTitle}>Team Lead</Text>
+                <Text style={styles.headerSubtitle}>Team Management & Leadership</Text>
+              </View>
+            </View>
+            <View style={styles.headerRight}>
+              <View style={styles.dateTimeContainer}>
+                <Text style={styles.timeText}>
+                  {new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+                </Text>
+                <Text style={styles.dateText}>
+                  {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </Text>
+              </View>
             </View>
           </View>
 
-          <View style={styles.headerWelcomeSection}>
-            <Text style={styles.welcomeText}>Welcome back! 👋</Text>
-            <Text style={styles.headerDate}>
-              {new Date().toLocaleDateString("en-US", {
-                weekday: "long",
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </Text>
+          {/* Stats Overview Bar */}
+          <View style={styles.statsOverviewBar}>
+            <View style={styles.miniStatItem}>
+              <Ionicons name="people-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.miniStatValue}>{stats?.teamSize || 0}</Text>
+              <Text style={styles.miniStatLabel}>Team</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.miniStatItem}>
+              <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.miniStatValue}>{stats?.presentToday || 0}</Text>
+              <Text style={styles.miniStatLabel}>Present</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.miniStatItem}>
+              <Ionicons name="clipboard-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.miniStatValue}>{stats?.tasksInProgress || 0}</Text>
+              <Text style={styles.miniStatLabel}>Tasks</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.miniStatItem}>
+              <Ionicons name="speedometer-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.miniStatValue}>{stats?.teamEfficiency || 0}%</Text>
+              <Text style={styles.miniStatLabel}>Efficiency</Text>
+            </View>
           </View>
-        </View>
-      </View>
+        </Animated.View>
+      </LinearGradient>
 
-        {dropdownVisible && (
+      {/* Main Content */}
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: tabBarVisible ? tabBarHeight + 24 : 24 },
+        ]}
+        onScroll={onScroll}
+        scrollEventThrottle={scrollEventThrottle}
+        showsVerticalScrollIndicator={false}
+      >
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#8b5cf6" />
+            <Text style={styles.loadingText}>Loading team data...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={48} color="#ef4444" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={fetchTeamData}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : stats ? (
           <>
-            <TouchableOpacity style={styles.dropdownBackdrop} onPress={toggleDropdown} />
+            {/* Compact Stats Grid */}
             <Animated.View
               style={[
-                styles.dropdownMenu,
-                { opacity: dropdownOpacity, transform: [{ translateY: dropdownTranslateY }] },
+                styles.statsGrid,
+                {
+                  opacity: statsAnim,
+                  transform: [
+                    {
+                      translateY: statsAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [20, 0],
+                      }),
+                    },
+                  ],
+                },
               ]}
             >
-              <LinearGradient colors={["#e9f0ff", "#f6f9ff"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dropdownHeader}>
-                <View style={styles.dropdownAvatar}>
-                  <Text style={styles.dropdownAvatarText}>{initials}</Text>
-                </View>
-                <View style={styles.dropdownUserInfo}>
-                  <Text style={styles.dropdownUserName}>{user?.name || "Team Lead"}</Text>
-                  <Text style={styles.dropdownUserEmail}>{user?.email || "teamlead@example.com"}</Text>
-                  <LinearGradient colors={["#3b82f6", "#2563eb"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dropdownRoleBadge}>
-                    <Text style={styles.dropdownRoleBadgeText}>{roleLabel}</Text>
-                  </LinearGradient>
-                </View>
-              </LinearGradient>
-              <View style={styles.dropdownDivider} />
-              <TouchableOpacity style={styles.dropdownItem} onPress={() => handleDropdownItemPress("profile")} activeOpacity={0.7}>
-                <LinearGradient colors={["#60a5fa", "#2563eb"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dropdownItemIcon}>
-                  <Ionicons name="person-outline" size={18} color="#fff" />
+              {/* Stat Card - Team Size */}
+              <View style={styles.statCard}>
+                <LinearGradient colors={["#8b5cf6", "#7c3aed"]} style={styles.statGradient}>
+                  <Ionicons name="people" size={18} color="#fff" />
                 </LinearGradient>
-                <Text style={styles.dropdownItemText}>Profile</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dropdownItem} onPress={() => handleDropdownItemPress("settings")} activeOpacity={0.7}>
-                <LinearGradient colors={["#a78bfa", "#7c3aed"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dropdownItemIcon}>
-                  <Ionicons name="settings-outline" size={18} color="#fff" />
-                </LinearGradient>
-                <Text style={styles.dropdownItemText}>Settings</Text>
-              </TouchableOpacity>
-              <View style={styles.dropdownDivider} />
-              <TouchableOpacity style={styles.dropdownItem} onPress={() => handleDropdownItemPress("logout")} activeOpacity={0.7}>
-                <View style={[styles.dropdownItemIcon, { backgroundColor: "#ef4444" }]}>
-                  <Ionicons name="log-out-outline" size={18} color="#fff" />
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.teamSize}</Text>
+                  <Text style={styles.statLabel}>Team Size</Text>
                 </View>
-                <Text style={[styles.dropdownItemText, { color: "#ef4444" }]}>Logout</Text>
-              </TouchableOpacity>
+              </View>
+
+              {/* Stat Card - Present Today */}
+              <View style={styles.statCard}>
+                <LinearGradient colors={["#10b981", "#059669"]} style={styles.statGradient}>
+                  <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                </LinearGradient>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.presentToday}</Text>
+                  <Text style={styles.statLabel}>Present</Text>
+                </View>
+              </View>
+
+              {/* Stat Card - Active Tasks */}
+              <View style={styles.statCard}>
+                <LinearGradient colors={["#3b82f6", "#2563eb"]} style={styles.statGradient}>
+                  <Ionicons name="clipboard" size={18} color="#fff" />
+                </LinearGradient>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.tasksInProgress}</Text>
+                  <Text style={styles.statLabel}>Active Tasks</Text>
+                </View>
+              </View>
+
+              {/* Stat Card - Pending Reviews */}
+              <View style={styles.statCard}>
+                <LinearGradient colors={["#f59e0b", "#d97706"]} style={styles.statGradient}>
+                  <Ionicons name="time" size={18} color="#fff" />
+                </LinearGradient>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.pendingReviews}</Text>
+                  <Text style={styles.statLabel}>Reviews</Text>
+                </View>
+              </View>
             </Animated.View>
-          </>
-        )}
 
-        <View style={styles.contentContainer}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: Math.max(24, tabBarVisible ? tabBarHeight + 24 : 24) }}
-          showsVerticalScrollIndicator={false}
-          onScroll={onScroll}
-          scrollEventThrottle={scrollEventThrottle}
-        >
-          {/* QUICK STATS */}
-      <View style={styles.grid}>
-        <View style={[styles.card, styles.cardBase]}>
-          <View style={styles.cardTopRow}>
-            <Text style={styles.cardLabel}>Team Members</Text>
-            <View style={styles.cardIconBubble}><Ionicons name="people" size={18} color="#fff" /></View>
-          </View>
-          <Text style={styles.cardValue}>{stats.teamSize}</Text>
-          <Text style={styles.cardSub}>{stats.presentToday} present today</Text>
-        </View>
+            {/* Team Performance Card */}
+            <View style={styles.sectionContainer}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Team Performance</Text>
+              </View>
 
-        <View style={[styles.cardGreen, styles.cardBase]}>
-          <View style={styles.cardTopRow}>
-            <Text style={styles.cardLabel}>Team Performance</Text>
-            <View style={styles.cardIconBubble}><Ionicons name="speedometer" size={18} color="#fff" /></View>
-          </View>
-          <Text style={styles.cardValue}>{stats.teamEfficiency}%</Text>
-        </View>
-
-        <View style={[styles.cardBlue, styles.cardBase]}>
-          <View style={styles.cardTopRow}>
-            <Text style={styles.cardLabel}>Active Tasks</Text>
-            <View style={styles.cardIconBubble}><Ionicons name="briefcase-outline" size={18} color="#fff" /></View>
-          </View>
-          <Text style={styles.cardValue}>{stats.tasksInProgress}</Text>
-          <Text style={styles.cardSub}>{stats.completedToday} completed today</Text>
-        </View>
-
-        <View style={[styles.cardOrange, styles.cardBase]}>
-          <View style={styles.cardTopRow}>
-            <Text style={styles.cardLabel}>Pending Approvals</Text>
-            <View style={styles.cardIconBubble}><Ionicons name="alert-circle" size={18} color="#fff" /></View>
-          </View>
-          <Text style={styles.cardValue}>{stats.pendingReviews}</Text>
-          <TouchableOpacity onPress={() => navigation.navigate("Tasks")}>
-            <Text style={styles.reviewText}>Review Now</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* TEAM MEMBERS */}
-      <View style={styles.bigCard}>
-        <Text style={styles.bigCardTitle}>
-          <Users size={20} color="#059669" /> Team Members
-        </Text>
-        <Text style={styles.bigCardDesc}>Current status and task progress</Text>
-
-        {teamMembers.map((m) => (
-          <View key={m.name} style={styles.memberItem}>
-            <View style={styles.memberTopRow}>
-              <View style={styles.memberLeft}>
-                <View style={styles.memberAvatar}>
-                  <Text style={styles.memberAvatarText}>{getInitials(m.name)}</Text>
-                  <View style={styles.memberStatusWrap}>
-                    <View style={[styles.memberStatusDot, { backgroundColor: m.status === "present" ? "#22c55e" : "#f59e0b" }]} />
+              <View style={styles.performanceCard}>
+                <LinearGradient colors={["#8b5cf6", "#7c3aed"]} style={styles.performanceIconLarge}>
+                  <Ionicons name="trending-up" size={28} color="#fff" />
+                </LinearGradient>
+                <View style={styles.performanceContent}>
+                  <Text style={styles.performanceName}>Overall Efficiency</Text>
+                  <View style={styles.performanceRow}>
+                    <View style={styles.performanceItem}>
+                      <Ionicons name="speedometer" size={14} color="#6b7280" />
+                      <Text style={styles.performanceText}>{stats.teamEfficiency}% Performance</Text>
+                    </View>
+                    <View style={styles.performanceItem}>
+                      <Ionicons name="checkbox" size={14} color="#10b981" />
+                      <Text style={styles.performanceText}>{stats.completedToday} Tasks Completed</Text>
+                    </View>
+                  </View>
+                  <View style={styles.performanceRow}>
+                    <View style={styles.performanceItem}>
+                      <Ionicons name="alert-circle" size={14} color="#6b7280" />
+                      <Text style={styles.performanceText}>{stats.pendingReviews} Pending Reviews</Text>
+                    </View>
                   </View>
                 </View>
-                <View>
-                  <Text style={styles.memberName}>{m.name}</Text>
-                  <Text style={styles.memberTask}>{m.task}</Text>
+              </View>
+            </View>
+
+            {/* Team Members */}
+            {stats.topPerformers.length > 0 && (
+              <View style={styles.sectionContainer}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Team Members</Text>
+                  <TouchableOpacity onPress={() => navigation.navigate("Teams")}>
+                    <Text style={styles.seeAllText}>View All</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.membersList}>
+                  {stats.topPerformers.map((member) => (
+                    <View key={member.id} style={styles.memberCard}>
+                      <View style={styles.memberLeft}>
+                        <View style={styles.memberAvatar}>
+                          <Text style={styles.memberAvatarText}>{getInitials(member.name)}</Text>
+                          <View
+                            style={[
+                              styles.memberStatusDot,
+                              { backgroundColor: member.status === "present" ? "#10b981" : "#f59e0b" },
+                            ]}
+                          />
+                        </View>
+                        <View style={styles.memberInfo}>
+                          <Text style={styles.memberName}>{member.name}</Text>
+                          <Text style={styles.memberTask}>{member.task}</Text>
+                        </View>
+                      </View>
+                      <View
+                        style={[
+                          styles.memberStatusBadge,
+                          { backgroundColor: member.status === "present" ? "#d1fae5" : "#fed7aa" },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.memberStatusText,
+                            { color: member.status === "present" ? "#059669" : "#d97706" },
+                          ]}
+                        >
+                          {member.status === "present" ? "Active" : "Leave"}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
                 </View>
               </View>
-              <View style={[styles.badgeBase, getBadgeStyle(m.status)]}>
-                <Text style={styles.badgeText}>{m.status === "present" ? "Active" : "On Leave"}</Text>
+            )}
+
+            {/* Recent Activities */}
+            <View style={styles.sectionContainer}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent Activities</Text>
+                <TouchableOpacity>
+                  <Text style={styles.seeAllText}>View All</Text>
+                </TouchableOpacity>
               </View>
+
+              {stats.recentActivities.length > 0 ? (
+                <View style={styles.activitiesList}>
+                  {stats.recentActivities.map((activity) => (
+                    <View key={activity.id} style={styles.compactActivityCard}>
+                      <View style={[styles.activityIconSmall, { backgroundColor: getIconBg(activity.type) }]}>
+                        <Ionicons name={activity.icon as any} size={16} color={getStatusColor(activity.status)} />
+                      </View>
+                      <View style={styles.activityInfo}>
+                        <Text style={styles.activityUserName}>{activity.user}</Text>
+                        <Text style={styles.activityDeptName}>{activity.time}</Text>
+                      </View>
+                      <View style={[styles.activityStatusBadge, { backgroundColor: getStatusColor(activity.status) }]}>
+                        <Text style={styles.activityStatusText}>{activity.status}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="document-text-outline" size={48} color="#9ca3af" />
+                  <Text style={styles.emptyStateText}>No recent activities</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${m.progress}%` }]} /></View>
-          </View>
-        ))}
-      </View>
-
-      {/* RECENT ACTIVITY */}
-      <View style={styles.bigCard}>
-        <Text style={styles.bigCardTitle}>
-          <Activity size={20} color="#6366f1" /> Recent Activity
-        </Text>
-        <Text style={styles.bigCardDesc}>Latest team updates</Text>
-
-        {recentActivities.map((a) => (
-          <View key={a.id} style={styles.activityItem}>
-            <View
-              style={[
-                styles.activityIcon,
-                a.type === "success" ? styles.bgGreen : a.type === "warning" ? styles.bgOrange : styles.bgBlue,
-              ]}
-            >
-              {a.type === "success" && <CheckCircle2 size={18} color="white" />}
-              {a.type === "warning" && <AlertCircle size={18} color="white" />}
-              {a.type === "info" && <Activity size={18} color="white" />}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.activityName}>{a.user}</Text>
-              <Text style={styles.activityText}>{a.action}</Text>
-            </View>
-            <View style={styles.activityRight}>
-              <Text style={styles.activityTime}>{a.time}</Text>
-              <View style={[
-                styles.activityBadge,
-                a.type === "success" ? styles.activityBadgeSuccess : a.type === "warning" ? styles.activityBadgeWarning : styles.activityBadgeInfo,
-              ]}>
-                <Text style={styles.activityBadgeText}>{a.type === "success" ? "Completed" : a.type === "warning" ? "Pending" : "Update"}</Text>
-              </View>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      {/* QUICK ACTIONS */}
-      <View style={styles.quickCard}>
-        <Text style={styles.quickTitle}>{t.dashboard.quickActions}</Text>
-        <Text style={styles.quickDesc}>Frequently used team lead actions</Text>
-
-        <View style={styles.quickGrid}>
-          <TouchableOpacity
-            style={styles.quickBtn}
-            onPress={() => navigation.navigate("Teams")}
-          >
-            <Users size={22} />
-            <Text style={styles.quickText}>View Team</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickBtn}
-            onPress={() => navigation.navigate("Attendance")}
-          >
-            <Clock size={22} />
-            <Text style={styles.quickText}>My Attendance</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickBtn}
-            onPress={() => navigation.navigate("Leaves")}
-          >
-            <Calendar size={22} />
-            <Text style={styles.quickText}>Leave Requests</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickBtn}
-            onPress={() => navigation.navigate("Tasks")}
-          >
-            <ClipboardList size={22} />
-            <Text style={styles.quickText}>Manage Tasks</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-        </ScrollView>
-        </View>
+          </>
+        ) : null}
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -426,251 +618,416 @@ const TeamLeadDashboard = () => {
 export default TeamLeadDashboard;
 
 const styles = StyleSheet.create({
-  safeAreaContainer: { flex: 1, backgroundColor: "#39549fff" },
-  container: { flex: 1 },
-  contentContainer: {
+  container: {
     flex: 1,
-    backgroundColor: "#f9fafb",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: -20,
-    padding: 16,
   },
-
-  /* HEADER */
-  header: {
-    backgroundColor: "#39549fff",
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 20,
-  },
-  headerCard: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 18,
-    padding: 16,
+  headerGradient: {
+    paddingTop: 16,
+    paddingBottom: 24,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
     position: "relative",
+    overflow: "hidden",
   },
-  headerContent: { flexDirection: "row", alignItems: "center", justifyContent: "flex-start" },
-  headerTextContainer: { flex: 1, paddingHorizontal: 16 },
-  headerTitle: { fontSize: 22, fontWeight: "bold", color: "white", marginBottom: 0 },
-  headerRole: { color: "#c7d2fe", fontSize: 13, textTransform: "uppercase", marginTop: 2 },
-  headerDate: { marginTop: 4, color: "#ccfbf1", fontSize: 12 },
-  headerWelcomeSection: { marginTop: 8 },
-  welcomeText: { color: "#ffffff", fontSize: 20, fontWeight: "700" },
-  headerAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.25)",
-  },
-  headerAvatarText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  avatarTouchable: { flexDirection: "row", alignItems: "center" },
-  statusIndicator: { position: "absolute", bottom: 2, right: 2 },
-  onlineStatus: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#10b981" },
-  
-
-  dropdownBackdrop: {
+  // Decorative Pattern
+  headerPattern: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.25)",
-    zIndex: 999,
   },
-  dropdownMenu: {
+  patternCircle: {
     position: "absolute",
-    top: 120,
-    left: 20,
-    right: 20,
+    borderRadius: 9999,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  headerContent: {
+    paddingHorizontal: 20,
+    position: "relative",
+    zIndex: 1,
+  },
+  // Header Top Section
+  headerTopSection: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  iconBadge: {
+    marginRight: 14,
+  },
+  iconBadgeGradient: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  headerTextSection: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: 0.3,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.85)",
+    marginTop: 2,
+    fontWeight: "500",
+    letterSpacing: 0.2,
+  },
+  headerRight: {
+    alignItems: "flex-end",
+  },
+  dateTimeContainer: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  timeText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  dateText: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 2,
+    fontWeight: "600",
+  },
+  // Stats Overview Bar
+  statsOverviewBar: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderRadius: 14,
+    padding: 12,
+    justifyContent: "space-around",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  miniStatItem: {
+    alignItems: "center",
+    flex: 1,
+  },
+  miniStatValue: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#fff",
+    marginTop: 4,
+    letterSpacing: 0.3,
+  },
+  miniStatLabel: {
+    fontSize: 9,
+    color: "rgba(255,255,255,0.75)",
+    marginTop: 2,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  statDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: "rgba(255,255,255,0.2)",
+  },
+  scrollView: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+  },
+  scrollContent: {
+    padding: 16,
+  },
+  // Compact Stats Grid
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: 20,
+    gap: 10,
+  },
+  statCard: {
+    flex: 1,
+    minWidth: (width - 52) / 2,
     backgroundColor: "#fff",
     borderRadius: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    elevation: 15,
-    zIndex: 1000,
-    overflow: "hidden",
-  },
-  dropdownHeader: {
+    padding: 14,
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  dropdownAvatar: {
+  statGradient: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: "#3b82f6",
-    alignItems: "center",
+    borderRadius: 12,
     justifyContent: "center",
+    alignItems: "center",
     marginRight: 12,
   },
-  dropdownAvatarText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  dropdownUserInfo: { flex: 1 },
-  dropdownUserName: { fontSize: 16, fontWeight: "700", color: "#1f2937", marginBottom: 2 },
-  dropdownUserEmail: { fontSize: 13, color: "#6b7280", marginBottom: 6 },
-  dropdownRoleBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, alignSelf: "flex-start" },
-  dropdownRoleBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-  dropdownDivider: { height: 1, backgroundColor: "#e5e7eb", marginHorizontal: 16 },
-  dropdownItem: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12 },
-  dropdownItemIcon: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", marginRight: 12 },
-  dropdownItemText: { fontSize: 15, fontWeight: "500", color: "#374151" },
-
-  /* SMALL CARDS */
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  card: {
-    backgroundColor: "#6366f1",
-    width: "47%",
-    padding: 16,
-    borderRadius: 16,
-    position: "relative",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+  statContent: {
+    flex: 1,
   },
-  cardGreen: {
-    backgroundColor: "#10b981",
-    width: "47%",
-    padding: 16,
-    borderRadius: 16,
-    position: "relative",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+  statValue: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#1f2937",
+    marginBottom: 2,
   },
-  cardBlue: {
-    backgroundColor: "#0ea5e9",
-    width: "47%",
-    padding: 16,
-    borderRadius: 16,
-    position: "relative",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+  statLabel: {
+    fontSize: 11,
+    color: "#6b7280",
+    fontWeight: "600",
   },
-  cardOrange: {
-    backgroundColor: "#f59e0b",
-    width: "47%",
-    padding: 16,
-    borderRadius: 16,
-    position: "relative",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+  // Section Container
+  sectionContainer: {
+    marginBottom: 20,
   },
-  cardBase: { position: "relative" },
-  cardTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cardIconBubble: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardLabel: { fontSize: 12, color: "white" },
-  cardValue: { fontSize: 28, color: "white", fontWeight: "bold" },
-  cardSub: { color: "#e0f2fe", marginTop: 6 },
-
-  /* TEAM CARD */
-  bigCard: {
-    backgroundColor: "white",
-    padding: 16,
-    borderRadius: 16,
-    marginTop: 20,
-  },
-  bigCardTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 4 },
-  bigCardDesc: { color: "#6b7280", marginBottom: 12 },
-
-  memberItem: { marginBottom: 16 },
-  memberTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  memberLeft: { flexDirection: "row", gap: 12, alignItems: "center" },
-  memberAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#e5edff",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
-  memberAvatarText: { color: "#1f2937", fontSize: 14, fontWeight: "700" },
-  memberStatusWrap: { position: "absolute", bottom: 2, right: 2 },
-  memberStatusDot: { width: 8, height: 8, borderRadius: 4 },
-  memberName: { fontWeight: "600" },
-  memberTask: { fontSize: 12, color: "#6b7280" },
-  badgeBase: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  badgeText: { color: "white", fontSize: 12 },
-  progressTrack: { height: 6, backgroundColor: "#e5e7eb", borderRadius: 6, marginTop: 10 },
-  progressFill: { height: 6, backgroundColor: "#6366f1", borderRadius: 6 },
-
-  /* RECENT ACTIVITY */
-  activityItem: {
+  sectionHeader: {
     flexDirection: "row",
-    gap: 12,
-    marginBottom: 14,
+    justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 12,
   },
-  activityIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: "center",
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1f2937",
+  },
+  seeAllText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#8b5cf6",
+  },
+  // Loading & Error States
+  loadingContainer: {
+    flex: 1,
     justifyContent: "center",
+    alignItems: "center",
+    padding: 40,
+    minHeight: 300,
   },
-  bgGreen: { backgroundColor: "#10b981" },
-  bgOrange: { backgroundColor: "#f59e0b" },
-  bgBlue: { backgroundColor: "#6366f1" },
-  activityName: { fontWeight: "600" },
-  activityText: { fontSize: 12, color: "#6b7280" },
-  activityTime: { fontSize: 12, color: "#9ca3af" },
-  activityRight: { alignItems: "flex-end" },
-  activityBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, marginTop: 6 },
-  activityBadgeText: { color: "#fff", fontSize: 11, fontWeight: "600" },
-  activityBadgeSuccess: { backgroundColor: "#10b981" },
-  activityBadgeWarning: { backgroundColor: "#f59e0b" },
-  activityBadgeInfo: { backgroundColor: "#6366f1" },
-
-  /* QUICK ACTIONS */
-  quickCard: {
-    backgroundColor: "white",
-    padding: 16,
-    borderRadius: 16,
+  loadingText: {
+    marginTop: 16,
+    fontSize: 14,
+    color: "#6b7280",
+    fontWeight: "600",
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 40,
+    minHeight: 300,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 14,
+    color: "#ef4444",
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  retryButton: {
     marginTop: 20,
-    marginBottom: 30,
+    backgroundColor: "#8b5cf6",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
-  quickTitle: { fontSize: 18, fontWeight: "bold" },
-  quickDesc: { color: "#6b7280", marginBottom: 14 },
-  quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  quickBtn: {
-    width: "47%",
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#d1d5db",
+  retryText: {
+    fontSize: 14,
+    color: "#fff",
+    fontWeight: "700",
+  },
+  // Performance Card
+  performanceCard: {
+    backgroundColor: "#fff",
     borderRadius: 16,
+    padding: 20,
+    flexDirection: "row",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  performanceIconLarge: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
+  },
+  performanceContent: {
+    flex: 1,
+  },
+  performanceName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginBottom: 8,
+  },
+  performanceRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginBottom: 4,
+  },
+  performanceItem: {
+    flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
-  quickText: { fontSize: 12, color: "#374151" },
-  reviewText: { marginTop: 8, color: "white", fontWeight: "600" },
-});
-
-const getBadgeStyle = (status: MemberStatus): ViewStyle => ({
-  backgroundColor: status === "present" ? "#059669" : "#475569",
+  performanceText: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontWeight: "500",
+  },
+  // Team Members
+  membersList: {
+    gap: 10,
+  },
+  memberCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  memberLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  memberAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#e0e7ff",
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
+  },
+  memberAvatarText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#5b21b6",
+  },
+  memberStatusDot: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginBottom: 2,
+  },
+  memberTask: {
+    fontSize: 11,
+    color: "#6b7280",
+  },
+  memberStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  memberStatusText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  // Activities
+  activitiesList: {
+    gap: 8,
+  },
+  compactActivityCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  activityIconSmall: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  activityInfo: {
+    flex: 1,
+  },
+  activityUserName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginBottom: 2,
+  },
+  activityDeptName: {
+    fontSize: 11,
+    color: "#6b7280",
+  },
+  activityStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  activityStatusText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#fff",
+    textTransform: "capitalize",
+  },
+  emptyState: {
+    alignItems: "center",
+    padding: 32,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+  },
+  emptyStateText: {
+    marginTop: 12,
+    fontSize: 13,
+    color: "#9ca3af",
+    fontWeight: "500",
+  },
 });

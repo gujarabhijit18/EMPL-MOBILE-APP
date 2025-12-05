@@ -88,3 +88,79 @@ def get_department_managers(
     ]
 
 
+@router.post("/sync-from-users", status_code=status.HTTP_200_OK)
+def sync_departments_from_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Automatically create departments based on unique department names from existing users.
+    Only creates departments that don't already exist.
+    """
+    # Only Admin can sync departments
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Admin can sync departments from users"
+        )
+    
+    # Get all unique department names from users (excluding None/empty)
+    user_departments = (
+        db.query(User.department)
+        .filter(User.department.isnot(None))
+        .filter(User.department != "")
+        .distinct()
+        .all()
+    )
+    
+    # Get existing department names
+    existing_departments = {dept.name.lower() for dept in list_departments(db)}
+    
+    created_count = 0
+    created_departments = []
+    
+    for (dept_name,) in user_departments:
+        if dept_name and dept_name.lower() not in existing_departments:
+            # Count employees in this department
+            employee_count = (
+                db.query(User)
+                .filter(User.department == dept_name)
+                .count()
+            )
+            
+            # Find a manager for this department (if any)
+            manager = (
+                db.query(User)
+                .filter(User.department == dept_name)
+                .filter(User.role.in_([RoleEnum.MANAGER, RoleEnum.HR]))
+                .filter(User.is_active.is_(True))
+                .first()
+            )
+            
+            # Generate a code from department name
+            code = "".join(word[0].upper() for word in dept_name.split()[:3]) or dept_name[:3].upper()
+            
+            # Create the department
+            from app.schemas.department_schema import DepartmentCreate
+            dept_in = DepartmentCreate(
+                name=dept_name,
+                code=code,
+                manager_id=manager.user_id if manager else None,
+                description=f"Auto-created from user data",
+                status="active",
+                employee_count=employee_count,
+            )
+            
+            new_dept = create_department(db, dept_in)
+            created_departments.append(new_dept.name)
+            created_count += 1
+            existing_departments.add(dept_name.lower())
+    
+    return {
+        "success": True,
+        "message": f"Synced {created_count} new departments from users",
+        "created_departments": created_departments,
+        "total_departments": len(existing_departments),
+    }
+
+

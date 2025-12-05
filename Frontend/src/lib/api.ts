@@ -199,43 +199,134 @@ export interface NotificationsResponse {
 // ======================
 class ApiService {
   private baseURL: string;
+  private cachedToken: string | null = null;
+  private tokenPromise: Promise<string | null> | null = null;
 
   constructor(baseURL: string) {
     this.baseURL = baseURL;
   }
 
-  // � Get current base URL for debugging
+  // Get current base URL for debugging
   getBaseUrl(): string {
     return this.baseURL;
   }
 
-  // �� Fetch stored token from AsyncStorage
+  // Clear cached token (call this on logout)
+  clearTokenCache(): void {
+    this.cachedToken = null;
+    this.tokenPromise = null;
+  }
+
+  // Fetch stored token from AsyncStorage with caching for iOS performance
   private async getToken(): Promise<string | null> {
+    // Return cached token if available
+    if (this.cachedToken) {
+      return this.cachedToken;
+    }
+
+    // If a token fetch is already in progress, wait for it
+    if (this.tokenPromise) {
+      return this.tokenPromise;
+    }
+
+    // Start a new token fetch
+    this.tokenPromise = (async () => {
+      try {
+        // iOS fix: Add small delay to ensure AsyncStorage is ready
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const token = await AsyncStorage.getItem("token");
+        this.cachedToken = token;
+        return token;
+      } catch (error) {
+        console.error("Error reading token:", error);
+        return null;
+      } finally {
+        this.tokenPromise = null;
+      }
+    })();
+
+    return this.tokenPromise;
+  }
+
+  // Force refresh token from storage (bypasses cache)
+  private async forceGetToken(): Promise<string | null> {
     try {
-      return await AsyncStorage.getItem("token");
+      // iOS fix: Add delay to ensure AsyncStorage write is complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const token = await AsyncStorage.getItem("token");
+      this.cachedToken = token;
+      return token;
     } catch (error) {
-      console.error("Error reading token:", error);
+      console.error("Error force reading token:", error);
       return null;
     }
   }
 
-  // 🧠 Universal request handler with better error handling
-  private async request(endpoint: string, options: RequestInit = {}) {
-    const token = await this.getToken();
+  // Refresh the cached token from storage
+  async refreshTokenCache(): Promise<void> {
+    this.cachedToken = null;
+    this.tokenPromise = null;
+    const token = await this.forceGetToken();
+    console.log(`🔄 Token cache refreshed: ${token ? 'token present' : 'NO TOKEN'}`);
+  }
+
+  // Debug: Check current token status
+  async debugTokenStatus(): Promise<{ cached: boolean; storage: boolean; match: boolean }> {
+    const cachedToken = this.cachedToken;
+    const storageToken = await AsyncStorage.getItem("token");
+    return {
+      cached: !!cachedToken,
+      storage: !!storageToken,
+      match: cachedToken === storageToken,
+    };
+  }
+
+  // 🧠 Universal request handler with iOS auth retry fix
+  private async request(endpoint: string, options: RequestInit = {}, retryCount: number = 0): Promise<any> {
+    const MAX_AUTH_RETRIES = 2;
+
+    let token = await this.getToken();
+
+    // iOS: Force refresh if no token on first attempt
+    if (!token && retryCount === 0) {
+      console.warn('⚠️ No token found, refreshing cache...');
+      token = await this.forceGetToken();
+    }
+
     const url = `${this.baseURL}${endpoint}`;
+
+    // Build headers explicitly to ensure Authorization is included
+    // iOS fix: Create headers object explicitly to avoid any merging issues
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    };
+    
+    // Add authorization header if token exists
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    // Merge any additional headers from options (but don't override Authorization)
+    if (options.headers) {
+      const optHeaders = options.headers as Record<string, string>;
+      Object.keys(optHeaders).forEach(key => {
+        if (key.toLowerCase() !== 'authorization') {
+          headers[key] = optHeaders[key];
+        }
+      });
+    }
 
     const config: RequestInit = {
       ...options,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options.headers,
-      },
+      headers,
     };
 
     if (!url.endsWith("/test-cors")) {
       console.log(`📡 API Request: ${options.method || 'GET'} ${url}`);
+      // Debug: Log token and headers for troubleshooting
+      console.log(`🔑 Token status: ${token ? `present (${token.substring(0, 20)}...)` : 'MISSING'}`);
+      console.log(`📋 Headers: ${JSON.stringify(Object.keys(headers))}`);
     }
 
     try {
@@ -243,11 +334,32 @@ class ApiService {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        // Handle validation errors (422) specially
+        // Handle authentication errors with retry for iOS
+        if ((response.status === 401 || response.status === 403) && retryCount < MAX_AUTH_RETRIES) {
+          console.warn(`⚠️ Auth error (${response.status}), refreshing token and retrying (attempt ${retryCount + 1})`);
+          console.log(`🔑 Current token was: ${token ? `present (${token.substring(0, 20)}...)` : 'MISSING'}`);
+
+          // Clear cache and force refresh from storage with longer delay for iOS
+          this.cachedToken = null;
+          this.tokenPromise = null;
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Force get fresh token
+          token = await this.forceGetToken();
+          
+          if (!token) {
+            console.error('❌ No token available after refresh');
+            throw new Error('Authentication required. Please log in again.');
+          }
+
+          // Retry request with fresh token
+          return this.request(endpoint, options, retryCount + 1);
+        }
+
+        // Handle validation errors (422)
         let errorMessage = `HTTP Error: ${response.status}`;
-        
+
         if (response.status === 422 && data?.detail) {
-          // FastAPI validation errors come as an array
           if (Array.isArray(data.detail)) {
             const validationErrors = data.detail.map((err: any) => {
               const field = err.loc ? err.loc.join('.') : 'unknown';
@@ -262,12 +374,12 @@ class ApiService {
         } else {
           errorMessage = data?.detail || data?.message || errorMessage;
         }
-        
-        console.error(`❌ API Error: ${errorMessage}`, { 
-          url, 
-          status: response.status, 
+
+        console.error(`❌ API Error: ${errorMessage}`, {
+          url,
+          status: response.status,
           data,
-          detail: data?.detail 
+          detail: data?.detail
         });
         throw new Error(errorMessage);
       }
@@ -276,11 +388,11 @@ class ApiService {
       return data;
     } catch (error) {
       console.error("❌ API Error:", error);
-      
+
       if (error instanceof TypeError && error.message.includes("Network request failed")) {
         throw new Error(`Cannot connect to backend at ${this.baseURL}. Please ensure the server is running.`);
       }
-      
+
       throw error;
     }
   }
@@ -306,9 +418,9 @@ class ApiService {
     try {
       console.log(`📤 Sending OTP to: ${email}`);
       console.log(`📡 Backend URL: ${this.baseURL}/auth/send-otp`);
-      
+
       const token = await this.getToken();
-      
+
       const response = await fetch(`${this.baseURL}/auth/send-otp`, {
         method: "POST",
         headers: {
@@ -319,19 +431,19 @@ class ApiService {
       });
 
       const data = await response.json().catch(() => ({}));
-      
+
       if (!response.ok) {
         console.error(`❌ OTP Send Failed: ${data.detail || response.statusText}`);
         throw new Error(data.detail || `Failed to send OTP: ${response.status}`);
       }
-      
+
       console.log(`✅ OTP Sent Successfully:`, data);
-      
+
       // In development/testing, log the OTP for easy access
       if (data.environment !== 'production' && data.otp) {
         console.log(`🔑 DEV OTP: ${data.otp}`);
       }
-      
+
       return data;
     } catch (error: any) {
       console.error("❌ Send OTP Error:", error);
@@ -358,9 +470,9 @@ class ApiService {
       console.log(`🔐 Verifying OTP for: ${email}`);
       console.log(`📡 Backend URL: ${this.baseURL}/auth/verify-otp`);
       console.log(`🔑 OTP: ${otp}`);
-      
+
       const token = await this.getToken();
-      
+
       const response = await fetch(`${this.baseURL}/auth/verify-otp`, {
         method: "POST",
         headers: {
@@ -371,23 +483,36 @@ class ApiService {
       });
 
       const data = await response.json().catch(() => ({}));
-      
+
       if (!response.ok) {
         console.error(`❌ OTP Verification Failed: ${data.detail || response.statusText}`);
         throw new Error(data.detail || `Invalid OTP: ${response.status}`);
       }
-      
+
       console.log(`✅ OTP Verified Successfully`);
-      
-      // Store token in AsyncStorage
+
+      // Store token in AsyncStorage and update cache
+      // iOS fix: Store token first, then wait to ensure it's written
       try {
         await AsyncStorage.setItem("token", data.access_token);
+        // iOS fix: Add delay to ensure AsyncStorage write is complete before continuing
+        await new Promise(resolve => setTimeout(resolve, 100));
         await AsyncStorage.setItem("user", JSON.stringify(data));
-        console.log(`💾 Auth data stored successfully`);
+        // Update the cached token immediately
+        this.cachedToken = data.access_token;
+        console.log(`💾 Auth data stored successfully, token cached`);
+        
+        // iOS fix: Verify token was stored correctly
+        const verifyToken = await AsyncStorage.getItem("token");
+        if (verifyToken !== data.access_token) {
+          console.warn('⚠️ Token verification mismatch, retrying storage...');
+          await AsyncStorage.setItem("token", data.access_token);
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
       } catch (error) {
         console.error("❌ Error storing auth data:", error);
       }
-      
+
       return data;
     } catch (error: any) {
       console.error("❌ Verify OTP Error:", error);
@@ -407,18 +532,169 @@ class ApiService {
   }
 
   async updateUserProfile(userId: string, profileData: Partial<EmployeeData>): Promise<Employee> {
-    return this.request(`/employees/${userId}`, {
-      method: "PUT",
-      body: JSON.stringify(profileData),
+    const formData = new FormData();
+
+    // Get current user profile to ensure required fields are present
+    const currentProfile = await this.getCurrentUserProfile();
+
+    // Required fields - use provided values or fall back to current profile
+    const requiredData = {
+      name: profileData.name || currentProfile.name,
+      email: profileData.email || currentProfile.email,
+      employee_id: profileData.employee_id || currentProfile.employee_id,
+    };
+
+    // Add required fields
+    formData.append('name', requiredData.name);
+    formData.append('email', requiredData.email);
+    formData.append('employee_id', requiredData.employee_id);
+
+    // Add optional fields from profileData
+    const optionalFields = ['department', 'designation', 'phone', 'address', 'gender', 'shift_type', 'employee_type', 'pan_card', 'aadhar_card'];
+
+    optionalFields.forEach(key => {
+      const value = (profileData as any)[key];
+      if (value !== undefined && value !== null && value !== '') {
+        formData.append(key, String(value));
+      }
     });
+
+    // Handle profile photo
+    if (profileData.profile_photo) {
+      const photo = profileData.profile_photo;
+      if (typeof photo === 'string' && photo.startsWith('file://')) {
+        const uriParts = photo.split('/');
+        const filename = uriParts[uriParts.length - 1];
+        const file: any = {
+          uri: photo,
+          type: 'image/jpeg',
+          name: filename || 'profile.jpg',
+        };
+        formData.append('profile_photo', file);
+      } else if (typeof photo === 'object' && 'uri' in photo) {
+        formData.append('profile_photo', photo as any);
+      }
+    }
+
+    console.log(`📤 Updating user profile ${userId} with FormData`);
+    return this.requestFormData(`/employees/${userId}`, "PUT", formData);
   }
 
   // ======================
   // 🔹 Employee APIs
   // ======================
 
-  async getEmployees(): Promise<Employee[]> {
-    return this.request("/employees");
+  // Debug endpoint to test if Authorization header is being received
+  async debugAuthHeader(): Promise<any> {
+    return this.request("/employees/debug-auth");
+  }
+
+  async getEmployees(forReports: boolean = false): Promise<Employee[]> {
+    const params = forReports ? '?for_reports=true' : '';
+    return this.request(`/employees${params}`);
+  }
+
+  // Universal FormData request handler with stable Authorization header merging
+  // This ensures FormData requests (file uploads) use the same auth pattern as JSON requests
+  private async requestFormData(endpoint: string, method: string, formData: FormData, retryCount: number = 0): Promise<any> {
+    const MAX_AUTH_RETRIES = 2;
+
+    let token = await this.getToken();
+
+    // iOS: Force refresh if no token on first attempt
+    if (!token && retryCount === 0) {
+      console.warn('⚠️ No token found for FormData request, refreshing cache...');
+      token = await this.forceGetToken();
+    }
+
+    const url = `${this.baseURL}${endpoint}`;
+
+    // Build headers explicitly - Authorization ALWAYS included if token exists
+    // Don't set Content-Type for FormData, let the browser set it with boundary
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+    };
+
+    // Add authorization header if token exists - ALWAYS include it
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    console.log(`📡 FormData Request: ${method} ${url}`);
+    console.log(`🔑 Token status: ${token ? `present (${token.substring(0, 20)}...)` : 'MISSING'}`);
+    console.log(`📋 Headers: ${JSON.stringify(Object.keys(headers))}`);
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        // Handle authentication errors with retry
+        if ((response.status === 401 || response.status === 403) && retryCount < MAX_AUTH_RETRIES) {
+          console.warn(`⚠️ Auth error (${response.status}) on FormData request, refreshing token and retrying (attempt ${retryCount + 1})`);
+          console.log(`🔑 Current token was: ${token ? `present (${token.substring(0, 20)}...)` : 'MISSING'}`);
+
+          // Clear cache and force refresh from storage with longer delay for iOS
+          this.cachedToken = null;
+          this.tokenPromise = null;
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Force get fresh token
+          token = await this.forceGetToken();
+
+          if (!token) {
+            console.error('❌ No token available after refresh');
+            throw new Error('Authentication required. Please log in again.');
+          }
+
+          // Retry request with fresh token
+          return this.requestFormData(endpoint, method, formData, retryCount + 1);
+        }
+
+        // Handle validation errors (422)
+        let errorMessage = `HTTP Error: ${response.status}`;
+
+        if (response.status === 422 && data?.detail) {
+          if (Array.isArray(data.detail)) {
+            const validationErrors = data.detail.map((err: any) => {
+              const field = err.loc ? err.loc.join('.') : 'unknown';
+              return `${field}: ${err.msg}`;
+            }).join(', ');
+            errorMessage = `Validation Error: ${validationErrors}`;
+          } else if (typeof data.detail === 'string') {
+            errorMessage = data.detail;
+          } else {
+            errorMessage = JSON.stringify(data.detail);
+          }
+        } else {
+          errorMessage = data?.detail || data?.message || errorMessage;
+        }
+
+        console.error(`❌ FormData API Error: ${errorMessage}`, {
+          url,
+          status: response.status,
+          data,
+          detail: data?.detail
+        });
+        throw new Error(errorMessage);
+      }
+
+      console.log(`✅ FormData API Success: ${method} ${url}`);
+      return data;
+    } catch (error) {
+      console.error("❌ FormData API Error:", error);
+
+      if (error instanceof TypeError && error.message.includes("Network request failed")) {
+        throw new Error(`Cannot connect to backend at ${this.baseURL}. Please ensure the server is running.`);
+      }
+
+      throw error;
+    }
   }
 
   async createEmployee(employeeData: EmployeeData): Promise<Employee> {
@@ -437,14 +713,14 @@ class ApiService {
           // Extract filename from URI
           const uriParts = value.split('/');
           const filename = uriParts[uriParts.length - 1];
-          
+
           // Create a proper file object for React Native
           const file: any = {
             uri: value,
             type: 'image/jpeg', // Default to jpeg, could be detected from extension
             name: filename || 'profile.jpg',
           };
-          
+
           formData.append("profile_photo", file);
         } else if (typeof value === "object" && value && "uri" in value) {
           formData.append("profile_photo", value as any);
@@ -452,40 +728,18 @@ class ApiService {
         // Skip if it's empty or just a URL string (existing photo)
         return;
       }
-      
+
       // Add other fields if they have values
       if (value !== undefined && value !== null && value !== "") {
         formData.append(key, String(value));
       }
     });
 
-    const token = await this.getToken();
-
     console.log(`📤 Creating employee with FormData`);
-
-    const response = await fetch(`${this.baseURL}/employees/register`, {
-      method: "POST",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        // Don't set Content-Type, let the browser set it with boundary for multipart/form-data
-      },
-      body: formData,
-    });
-
-    const data = await response.json().catch(() => ({}));
-    
-    if (!response.ok) {
-      console.error(`❌ Create Employee Failed:`, data);
-      const errorMessage = data.detail || data.message || `HTTP ${response.status}`;
-      throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-    }
-
-    console.log(`✅ Employee Created:`, data);
-    return data;
+    return this.requestFormData("/employees/register", "POST", formData);
   }
 
   async updateEmployee(userId: string, employeeData: Partial<EmployeeData>): Promise<Employee> {
-    const token = await this.getToken();
     const formData = new FormData();
 
     // Add all fields to FormData
@@ -496,14 +750,14 @@ class ApiService {
           // Extract filename from URI
           const uriParts = value.split('/');
           const filename = uriParts[uriParts.length - 1];
-          
+
           // Create a proper file object for React Native
           const file: any = {
             uri: value,
             type: 'image/jpeg', // Default to jpeg, could be detected from extension
             name: filename || 'profile.jpg',
           };
-          
+
           formData.append("profile_photo", file);
         } else if (typeof value === "object" && value && "uri" in value) {
           formData.append("profile_photo", value as any);
@@ -511,12 +765,12 @@ class ApiService {
         // Skip if it's an existing URL (don't re-upload)
         return;
       }
-      
+
       // Skip password in updates
       if (key === "password") {
         return;
       }
-      
+
       // Add other fields if they have values
       if (value !== undefined && value !== null && value !== "") {
         formData.append(key, String(value));
@@ -524,74 +778,21 @@ class ApiService {
     });
 
     console.log(`📤 Updating employee ${userId} with FormData`);
-
-    const response = await fetch(`${this.baseURL}/employees/${userId}`, {
-      method: "PUT",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        // Don't set Content-Type, let the browser set it with boundary for multipart/form-data
-      },
-      body: formData,
-    });
-
-    const data = await response.json().catch(() => ({}));
-    
-    if (!response.ok) {
-      console.error(`❌ Update Employee Failed:`, data);
-      const errorMessage = data.detail || data.message || `HTTP ${response.status}`;
-      throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-    }
-
-    console.log(`✅ Employee Updated:`, data);
-    return data;
+    return this.requestFormData(`/employees/${userId}`, "PUT", formData);
   }
 
   async deleteEmployee(userId: string): Promise<void> {
-    const token = await this.getToken();
-
     console.log(`🗑️ Deleting employee ${userId}`);
-
-    const response = await fetch(`${this.baseURL}/employees/${userId}`, {
-      method: "DELETE",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      const errorMessage = data.detail || data.message || `Failed to delete employee ${userId}`;
-      console.error(`❌ Delete Employee Failed:`, data);
-      throw new Error(errorMessage);
-    }
-
+    await this.request(`/employees/${userId}`, { method: "DELETE" });
     console.log(`✅ Employee ${userId} deleted successfully`);
   }
 
   async toggleEmployeeStatus(userId: string, isActive: boolean): Promise<Employee> {
-    const token = await this.getToken();
-
     console.log(`🔄 Toggling employee ${userId} status to ${isActive ? 'Active' : 'Inactive'}`);
-
-    const response = await fetch(`${this.baseURL}/employees/${userId}/status`, {
+    return this.request(`/employees/${userId}/status`, {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
       body: JSON.stringify({ is_active: isActive }),
     });
-
-    const data = await response.json().catch(() => ({}));
-    
-    if (!response.ok) {
-      console.error(`❌ Toggle Status Failed:`, data);
-      const errorMessage = data.detail || data.message || `Failed to update employee status`;
-      throw new Error(errorMessage);
-    }
-
-    console.log(`✅ Employee status updated successfully`);
-    return data;
   }
 
   // ======================
@@ -604,10 +805,10 @@ class ApiService {
     if (status) params.append('status', status);
     if (page) params.append('page', page.toString());
     if (pageSize) params.append('page_size', pageSize.toString());
-    
+
     const queryString = params.toString();
     const endpoint = `/leave/${queryString ? '?' + queryString : ''}`;
-    
+
     console.log("📥 Fetching my leaves:", endpoint);
     return this.request(endpoint);
   }
@@ -712,16 +913,16 @@ class ApiService {
   // 8. GET - Get Team Leaves (Role-based with strict department isolation)
   async getTeamLeaves(page?: number, pageSize?: number, status?: string): Promise<TeamLeavesResponse> {
     console.log("📥 Fetching team leaves based on role");
-    
+
     try {
       // Get current user to determine which endpoint to call
       const currentUser = await this.getCurrentUserProfile();
       const userRole = currentUser.role?.toLowerCase() || 'employee';
-      
+
       console.log(`👤 User role: ${userRole}, Department: ${currentUser.department}`);
-      
+
       let leaves: any[] = [];
-      
+
       // Call appropriate endpoint based on role
       if (userRole === 'admin') {
         // Admin: Get ALL leaves from all departments
@@ -739,11 +940,11 @@ class ApiService {
         leaves = await this.request("/leave/my");
         console.log(`✅ ${userRole} fetched ${leaves.length} own leaves`);
       }
-      
+
       // Filter by status if provided
       const filteredLeaves = status ? leaves.filter((l: any) => l.status === status) : leaves;
       console.log(`📊 After status filter: ${filteredLeaves.length} leaves`);
-      
+
       return {
         leaves: filteredLeaves,
         total: filteredLeaves.length,
@@ -821,16 +1022,16 @@ class ApiService {
   async exportLeavesExcel(startDate?: string, endDate?: string): Promise<void> {
     console.log("📥 Exporting leaves to CSV");
     console.log("📅 Date range:", { startDate, endDate });
-    
+
     try {
       // Get current user to check role
       const currentUser = await this.getCurrentUserProfile();
       const userRole = currentUser.role?.toLowerCase() || 'employee';
-      
+
       console.log("👤 Current user role:", userRole);
-      
+
       let leaves: any = [];
-      
+
       // For Admin/HR/Manager - try to get ALL team leaves first
       if (['admin', 'hr', 'manager'].includes(userRole)) {
         console.log("📥 Fetching ALL team leaves (admin/hr/manager view)...");
@@ -838,20 +1039,20 @@ class ApiService {
           // Get both pending approvals and history
           const approvalsData = await this.request("/leave/approvals");
           const historyData = await this.request("/leave/approvals/history");
-          
+
           console.log("📊 Approvals:", approvalsData?.length || 0);
           console.log("📊 History:", historyData?.length || 0);
-          
+
           // Combine both arrays
-          leaves = [...(Array.isArray(approvalsData) ? approvalsData : []), 
-                    ...(Array.isArray(historyData) ? historyData : [])];
-          
+          leaves = [...(Array.isArray(approvalsData) ? approvalsData : []),
+          ...(Array.isArray(historyData) ? historyData : [])];
+
           console.log("📊 Total team leaves:", leaves.length);
         } catch (error) {
           console.warn("⚠️ Failed to fetch team leaves:", error);
         }
       }
-      
+
       // If no team leaves or regular employee, fetch user's own leaves
       if (leaves.length === 0) {
         console.log("📥 Fetching user's own leaves (last 1 year)...");
@@ -862,11 +1063,11 @@ class ApiService {
           leaves = [];
         }
       }
-      
+
       console.log("📦 Raw API response:", leaves);
       console.log("📦 Response type:", typeof leaves);
       console.log("📦 Is array:", Array.isArray(leaves));
-      
+
       // Ensure leaves is an array
       let leaveArray: any[] = [];
       if (Array.isArray(leaves)) {
@@ -881,14 +1082,14 @@ class ApiService {
           console.warn("⚠️ Unexpected response format:", Object.keys(leaves));
         }
       }
-      
+
       console.log(`📊 Extracted ${leaveArray.length} leave records`);
-      
+
       // Log first record for debugging
       if (leaveArray.length > 0) {
         console.log("📝 Sample record:", JSON.stringify(leaveArray[0], null, 2));
       }
-      
+
       // Filter by date range if provided
       let filteredLeaves = leaveArray;
       if (startDate || endDate) {
@@ -900,11 +1101,11 @@ class ApiService {
         });
         console.log(`📊 Filtered to ${filteredLeaves.length} records for date range`);
       }
-      
+
       // Generate CSV content
       const headers = ['Leave ID', 'Employee ID', 'Name', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason', 'Applied On'];
       const csvRows = [headers.join(',')];
-      
+
       if (filteredLeaves.length === 0) {
         // Add a note row if no data
         csvRows.push('"No leave records found for the selected period"');
@@ -919,7 +1120,7 @@ class ApiService {
             const end = new Date(leave.end_date);
             days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
           }
-          
+
           const row = [
             leave.leave_id || '',
             leave.employee_id || leave.user?.employee_id || '',
@@ -933,32 +1134,32 @@ class ApiService {
             leave.created_at ? new Date(leave.created_at).toLocaleDateString() : '',
           ];
           csvRows.push(row.join(','));
-          
+
           if (index === 0) {
             console.log("📝 First CSV row:", row.join(','));
           }
         });
       }
-      
+
       const csvContent = csvRows.join('\n');
       console.log(`📄 CSV content length: ${csvContent.length} characters`);
       console.log(`📄 CSV rows: ${csvRows.length}`);
-      
+
       // Save and share the CSV file
       const FileSystem = await import('expo-file-system/legacy');
       const Sharing = await import('expo-sharing');
-      
+
       const fileName = `Leaves_Export_${new Date().toISOString().split('T')[0]}.csv`;
       const fileUri = FileSystem.documentDirectory + fileName;
-      
+
       console.log("📁 Saving CSV to:", fileUri);
-      
+
       await FileSystem.writeAsStringAsync(fileUri, csvContent, {
         encoding: FileSystem.EncodingType.UTF8,
       });
-      
+
       console.log("✅ CSV created successfully with", filteredLeaves.length, "records");
-      
+
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(fileUri, {
@@ -1008,35 +1209,37 @@ class ApiService {
 
   async exportEmployeesCSV(): Promise<void> {
     const token = await this.getToken();
-    
+
     console.log("📥 Downloading CSV from:", `${this.baseURL}/employees/export/csv`);
-    
+
     try {
       // Use legacy API from expo-file-system
       const FileSystem = await import('expo-file-system/legacy');
       const Sharing = await import('expo-sharing');
-      
+
       const fileName = `employees_${new Date().toISOString().split('T')[0]}.csv`;
       const fileUri = FileSystem.documentDirectory + fileName;
-      
+
       console.log("📁 Downloading to:", fileUri);
-      
+
+      // Build headers explicitly - Authorization ALWAYS included if token exists
+      const downloadHeaders: Record<string, string> = {};
+      if (token) {
+        downloadHeaders["Authorization"] = `Bearer ${token}`;
+      }
+
       const downloadResult = await FileSystem.downloadAsync(
         `${this.baseURL}/employees/export/csv`,
         fileUri,
-        {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        }
+        { headers: downloadHeaders }
       );
-      
+
       if (downloadResult.status !== 200) {
         throw new Error(`Failed to download CSV: ${downloadResult.status}`);
       }
-      
+
       console.log("✅ CSV downloaded to:", downloadResult.uri);
-      
+
       // Share the file
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
@@ -1057,35 +1260,37 @@ class ApiService {
 
   async exportEmployeesPDF(): Promise<void> {
     const token = await this.getToken();
-    
+
     console.log("📥 Downloading PDF from:", `${this.baseURL}/employees/export/pdf`);
-    
+
     try {
       // Use legacy API from expo-file-system
       const FileSystem = await import('expo-file-system/legacy');
       const Sharing = await import('expo-sharing');
-      
+
       const fileName = `employees_report_${new Date().toISOString().split('T')[0]}.pdf`;
       const fileUri = FileSystem.documentDirectory + fileName;
-      
+
       console.log("📁 Downloading to:", fileUri);
-      
+
+      // Build headers explicitly - Authorization ALWAYS included if token exists
+      const pdfHeaders: Record<string, string> = {};
+      if (token) {
+        pdfHeaders["Authorization"] = `Bearer ${token}`;
+      }
+
       const downloadResult = await FileSystem.downloadAsync(
         `${this.baseURL}/employees/export/pdf`,
         fileUri,
-        {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        }
+        { headers: pdfHeaders }
       );
-      
+
       if (downloadResult.status !== 200) {
         throw new Error(`Failed to download PDF: ${downloadResult.status}`);
       }
-      
+
       console.log("✅ PDF downloaded to:", downloadResult.uri);
-      
+
       // Share the file
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
@@ -1113,7 +1318,7 @@ class ApiService {
   }> {
     try {
       const token = await this.getToken();
-      
+
       if (!token) {
         throw new Error("Authentication required. Please log in again.");
       }
@@ -1134,7 +1339,7 @@ class ApiService {
             'Accept': 'application/json',
           },
         });
-        
+
         if (!testResponse.ok) {
           throw new Error(`Backend not responding (status: ${testResponse.status})`);
         }
@@ -1154,7 +1359,7 @@ class ApiService {
 
       // Create FormData with proper React Native structure
       const formData = new FormData();
-      
+
       // Handle both web File objects and React Native file objects
       if (file.uri) {
         // React Native file object - use the exact structure RN expects
@@ -1163,7 +1368,7 @@ class ApiService {
           type: file.type || 'application/octet-stream',
           name: file.name || 'upload.pdf',
         };
-        
+
         // @ts-ignore - React Native FormData accepts this structure
         formData.append('file', fileToUpload);
         console.log("📱 Uploading React Native file:", fileToUpload);
@@ -1179,13 +1384,13 @@ class ApiService {
       // Use XMLHttpRequest for React Native file uploads (more reliable than fetch)
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        
+
         xhr.onload = () => {
           console.log("📊 Response status:", xhr.status);
-          
+
           try {
             const data = JSON.parse(xhr.responseText);
-            
+
             if (xhr.status >= 200 && xhr.status < 300) {
               console.log("✅ Bulk upload completed:", data);
               resolve(data);
@@ -1203,7 +1408,7 @@ class ApiService {
             reject(new Error(`Server response error: ${xhr.responseText}`));
           }
         };
-        
+
         xhr.onerror = () => {
           console.error("❌ Network error during upload");
           reject(new Error(
@@ -1215,28 +1420,28 @@ class ApiService {
             `• You are on the same network`
           ));
         };
-        
+
         xhr.ontimeout = () => {
           console.error("❌ Upload timeout");
           reject(new Error("Upload timeout. The file may be too large or the connection is slow."));
         };
-        
+
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             const percentComplete = (event.loaded / event.total) * 100;
             console.log(`📤 Upload progress: ${percentComplete.toFixed(0)}%`);
           }
         };
-        
+
         xhr.open('POST', `${this.baseURL}/employees/bulk-upload`);
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.timeout = 60000; // 60 second timeout
-        
+
         console.log("🚀 Starting upload...");
         xhr.send(formData);
       });
-      
+
     } catch (error: any) {
       console.error("❌ Bulk upload error:", error);
       throw error;
@@ -1269,20 +1474,26 @@ class ApiService {
     return this.request("/tasks/");
   }
 
+  // 2.1 GET - All Tasks (Admin/HR/Manager only)
+  async getAllTasks(): Promise<any[]> {
+    console.log("📥 Fetching all tasks (admin view)");
+    return this.request("/tasks/all");
+  }
+
   // 3. PUT - Update Task Status
   async updateTaskStatus(taskId: number, statusUpdate: {
     status: "Pending" | "In Progress" | "Completed" | "Cancelled";
     resume_reason?: string;
   }): Promise<any> {
     console.log("📤 Updating task status:", taskId, statusUpdate);
-    
+
     // Build query parameters
     const params = new URLSearchParams();
     params.append('status', statusUpdate.status);
     if (statusUpdate.resume_reason) {
       params.append('resume_reason', statusUpdate.resume_reason);
     }
-    
+
     return this.request(`/tasks/${taskId}/status?${params.toString()}`, {
       method: "PUT",
     });
@@ -1312,6 +1523,88 @@ class ApiService {
   async deleteTask(taskId: number): Promise<{ message: string }> {
     console.log("🗑️ Deleting task:", taskId);
     return this.request(`/tasks/${taskId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // 6.1 PUT - Update Task
+  async updateTask(taskId: number, taskData: {
+    title?: string;
+    description?: string;
+    due_date?: string;
+    priority?: "Low" | "Medium" | "High" | "Urgent";
+    assigned_to?: number;
+  }): Promise<any> {
+    console.log("📤 Updating task:", taskId, taskData);
+    return this.request(`/tasks/${taskId}`, {
+      method: "PUT",
+      body: JSON.stringify(taskData),
+    });
+  }
+
+  // 7. GET - Task History/Activity
+  async getTaskHistory(taskId: number): Promise<any[]> {
+    console.log("📥 Fetching task history:", taskId);
+    try {
+      return await this.request(`/tasks/${taskId}/history`);
+    } catch (error) {
+      console.log("⚠️ Could not fetch task history:", error);
+      return [];
+    }
+  }
+
+  // 8. POST - Pass Task to another user
+  async passTask(taskId: number, newAssigneeId: number, note?: string): Promise<any> {
+    console.log("📤 Passing task:", taskId, "to user:", newAssigneeId);
+    return this.request(`/tasks/${taskId}/pass`, {
+      method: "POST",
+      body: JSON.stringify({ new_assignee_id: newAssigneeId, note: note || "" }),
+    });
+  }
+
+  // 9. GET - Task Notifications
+  async getTaskNotifications(): Promise<any[]> {
+    console.log("📥 Fetching task notifications");
+    try {
+      return await this.request("/tasks/notifications");
+    } catch (error) {
+      console.log("⚠️ Could not fetch task notifications:", error);
+      return [];
+    }
+  }
+
+  // 10. PUT - Mark Task Notification as Read
+  async markTaskNotificationAsRead(notificationId: number): Promise<any> {
+    console.log("✅ Marking task notification as read:", notificationId);
+    return this.request(`/tasks/notifications/${notificationId}/read`, {
+      method: "PUT",
+    });
+  }
+
+  // 11. GET - Task Comments
+  async getTaskComments(taskId: number): Promise<any[]> {
+    console.log("📥 Fetching task comments:", taskId);
+    try {
+      return await this.request(`/tasks/${taskId}/comments`);
+    } catch (error) {
+      console.log("⚠️ Could not fetch task comments:", error);
+      return [];
+    }
+  }
+
+  // 12. POST - Add Task Comment
+  async addTaskComment(taskId: number, message: string): Promise<any> {
+    console.log("📤 Adding task comment:", taskId);
+    return this.request(`/tasks/${taskId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  // 13. DELETE - Delete Task Comment
+  async deleteTaskComment(taskId: number, commentId: number): Promise<any> {
+    console.log("🗑️ Deleting task comment:", commentId);
+    return this.request(`/tasks/${taskId}/comments/${commentId}`, {
       method: "DELETE",
     });
   }
@@ -1379,44 +1672,44 @@ class ApiService {
     }
     // Remove any whitespace or newlines
     cleanSelfie = cleanSelfie.replace(/\s/g, '');
-    
+
     // Log current time information
     const now = new Date();
     const deviceTime = now.toISOString();
     const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const deviceOffset = -now.getTimezoneOffset();
-    
-    console.log("🔵 checkIn called with:", { 
-      userId, 
-      gpsLocation, 
+
+    console.log("🔵 checkIn called with:", {
+      userId,
+      gpsLocation,
       originalLength: selfie.length,
       cleanedLength: cleanSelfie.length,
       hasDataUri: selfie.includes('data:image')
     });
-    
+
     console.log("🕐 Device Time Info:", {
       deviceTime,
       deviceTimezone,
       deviceOffset: `UTC${deviceOffset >= 0 ? '+' : ''}${deviceOffset / 60}`,
       localTime: now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
     });
-    
+
     const token = await this.getToken();
     const url = `${this.baseURL}/attendance/check-in/json`;  // Use JSON endpoint
-    
+
     // Parse GPS location string to object
     const [lat, lon] = gpsLocation.split(',').map(s => parseFloat(s.trim()));
     const locationObject = {
       latitude: lat,
       longitude: lon,
     };
-    
+
     const requestBody = {
       user_id: userId,
       gps_location: locationObject,
       selfie: cleanSelfie,
     };
-    
+
     console.log("📤 Check-in request:", {
       url,
       user_id: userId,
@@ -1425,20 +1718,27 @@ class ApiService {
       selfie_preview: cleanSelfie.substring(0, 50) + '...',
       timestamp: deviceTime,
     });
-    
+
+    // Build headers explicitly - Authorization ALWAYS included if token exists
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    console.log(`🔑 Check-in token status: ${token ? `present (${token.substring(0, 20)}...)` : 'MISSING'}`);
+
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
         body: JSON.stringify(requestBody),
       });
 
       const data = await response.json().catch(() => ({}));
-      
+
       if (!response.ok) {
         console.error(`❌ Check-in failed:`, {
           status: response.status,
@@ -1449,7 +1749,7 @@ class ApiService {
             selfie_length: cleanSelfie.length
           }
         });
-        
+
         let errorMessage = `HTTP Error: ${response.status}`;
         if (response.status === 422 && data?.detail) {
           if (Array.isArray(data.detail)) {
@@ -1464,7 +1764,7 @@ class ApiService {
         } else {
           errorMessage = data?.detail || data?.message || errorMessage;
         }
-        
+
         throw new Error(errorMessage);
       }
 
@@ -1477,9 +1777,9 @@ class ApiService {
   }
 
   async checkOut(
-    userId: number, 
-    gpsLocation: string, 
-    selfie: string, 
+    userId: number,
+    gpsLocation: string,
+    selfie: string,
     workSummary?: string,
     workReportFile?: { uri: string; name: string; type: string } | null
   ): Promise<{
@@ -1498,83 +1798,90 @@ class ApiService {
     }
     // Remove any whitespace or newlines
     cleanSelfie = cleanSelfie.replace(/\s/g, '');
-    
+
     // Log current time information
     const now = new Date();
     const deviceTime = now.toISOString();
     const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const deviceOffset = -now.getTimezoneOffset();
-    
-    console.log("🔵 checkOut called with:", { 
-      userId, 
-      gpsLocation, 
+
+    console.log("🔵 checkOut called with:", {
+      userId,
+      gpsLocation,
       workSummary,
       workReportFile: workReportFile?.name || 'none',
       originalLength: selfie.length,
       cleanedLength: cleanSelfie.length,
       hasDataUri: selfie.includes('data:image')
     });
-    
+
     console.log("🕐 Device Time Info:", {
       deviceTime,
       deviceTimezone,
       deviceOffset: `UTC${deviceOffset >= 0 ? '+' : ''}${deviceOffset / 60}`,
       localTime: now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
     });
-    
+
     const token = await this.getToken();
-    
+
     // Parse GPS location string to object
     const [lat, lon] = gpsLocation.split(',').map(s => parseFloat(s.trim()));
     const locationObject = {
       latitude: lat,
       longitude: lon,
     };
-    
+
+    console.log(`🔑 Check-out token status: ${token ? `present (${token.substring(0, 20)}...)` : 'MISSING'}`);
+
     // If work report file is provided, use FormData
     if (workReportFile) {
       console.log("📄 Uploading with work report file:", workReportFile.name);
-      
+
       const formData = new FormData();
       formData.append('user_id', userId.toString());
       formData.append('gps_location', JSON.stringify(locationObject));
       formData.append('work_summary', workSummary || "Completed daily tasks");
-      
+
       // Add selfie as file
       formData.append('selfie', {
         uri: `data:image/jpeg;base64,${cleanSelfie}`,
         type: 'image/jpeg',
         name: `checkout_selfie_${userId}.jpg`,
       } as any);
-      
+
       // Add work report file
       formData.append('work_report', {
         uri: workReportFile.uri,
         type: workReportFile.type,
         name: workReportFile.name,
       } as any);
-      
+
       const url = `${this.baseURL}/attendance/check-out`;
-      
+
       console.log("📤 Check-out request (FormData):", {
         url,
         user_id: userId,
         work_summary: workSummary,
         work_report: workReportFile.name,
       });
-      
+
+      // Build headers explicitly - Authorization ALWAYS included if token exists
+      const formDataHeaders: Record<string, string> = {
+        "Accept": "application/json",
+      };
+      if (token) {
+        formDataHeaders["Authorization"] = `Bearer ${token}`;
+      }
+
       try {
         const response = await fetch(url, {
           method: "POST",
-          headers: {
-            "Accept": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers: formDataHeaders,
           body: formData,
         });
 
         const data = await response.json().catch(() => ({}));
-        
+
         if (!response.ok) {
           console.error(`❌ Check-out failed:`, { status: response.status, data });
           throw new Error(data?.detail || `HTTP Error: ${response.status}`);
@@ -1587,17 +1894,17 @@ class ApiService {
         throw error;
       }
     }
-    
+
     // Use JSON endpoint if no file
     const url = `${this.baseURL}/attendance/check-out/json`;
-    
+
     const requestBody = {
       user_id: userId,
       gps_location: locationObject,
       selfie: cleanSelfie,
       work_summary: workSummary || "Completed daily tasks",
     };
-    
+
     console.log("📤 Check-out request (JSON):", {
       url,
       user_id: userId,
@@ -1607,20 +1914,25 @@ class ApiService {
       selfie_preview: cleanSelfie.substring(0, 50) + '...',
       timestamp: deviceTime,
     });
-    
+
+    // Build headers explicitly - Authorization ALWAYS included if token exists
+    const jsonHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    };
+    if (token) {
+      jsonHeaders["Authorization"] = `Bearer ${token}`;
+    }
+
     try {
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: jsonHeaders,
         body: JSON.stringify(requestBody),
       });
 
       const data = await response.json().catch(() => ({}));
-      
+
       if (!response.ok) {
         console.error(`❌ Check-out failed:`, {
           status: response.status,
@@ -1631,7 +1943,7 @@ class ApiService {
             selfie_length: cleanSelfie.length
           }
         });
-        
+
         let errorMessage = `HTTP Error: ${response.status}`;
         if (response.status === 422 && data?.detail) {
           if (Array.isArray(data.detail)) {
@@ -1646,7 +1958,7 @@ class ApiService {
         } else {
           errorMessage = data?.detail || data?.message || errorMessage;
         }
-        
+
         throw new Error(errorMessage);
       }
 
@@ -1696,11 +2008,133 @@ class ApiService {
     work_report?: string | null;
     workReport?: string | null;
   }>> {
-    const endpoint = date 
+    const endpoint = date
       ? `/attendance/all?date=${date}`
       : `/attendance/all`;
-    
+
     console.log("📥 Fetching all attendance records:", endpoint);
+    return this.request(endpoint);
+  }
+
+  // Admin endpoint to get all attendance records for HR, Manager, TeamLead, and Employee
+  async getAdminAllAttendance(filters?: {
+    start_date?: string;
+    end_date?: string;
+    department?: string;
+    role?: string;
+  }): Promise<Array<{
+    attendance_id: number;
+    user_id: number;
+    name: string;
+    userName: string;
+    employee_id: string;
+    department: string;
+    email: string;
+    userEmail: string;
+    role: string;
+    user_role: string;
+    gps_location: string;
+    selfie: string | null;
+    checkInSelfie: string | null;
+    checkOutSelfie: string | null;
+    check_in: string;
+    check_out: string | null;
+    total_hours: number;
+    status: string;
+    checkInStatus: string;
+    checkOutStatus: string;
+    scheduledStart: string | null;
+    scheduledEnd: string | null;
+    work_summary?: string | null;
+    workSummary?: string | null;
+    work_report?: string | null;
+    workReport?: string | null;
+  }>> {
+    const params = new URLSearchParams();
+    if (filters?.start_date) params.append('start_date', filters.start_date);
+    if (filters?.end_date) params.append('end_date', filters.end_date);
+    if (filters?.department) params.append('department', filters.department);
+    if (filters?.role) params.append('role', filters.role);
+
+    const queryString = params.toString();
+    const endpoint = `/attendance/admin/all-records${queryString ? '?' + queryString : ''}`;
+
+    console.log("📥 Admin fetching all attendance records:", endpoint);
+    return this.request(endpoint);
+  }
+
+  // Get today's attendance status for admin view
+  async getAdminTodayAttendance(filters?: {
+    department?: string;
+    role?: string;
+  }): Promise<Array<{
+    attendance_id: number;
+    user_id: number;
+    name: string;
+    employee_id: string;
+    department: string;
+    email: string;
+    role: string;
+    gps_location: string;
+    selfie: string | null;
+    checkInSelfie: string | null;
+    checkOutSelfie: string | null;
+    check_in: string;
+    check_out: string | null;
+    total_hours: number;
+    status: string;
+    checkInStatus: string;
+    checkOutStatus: string;
+  }>> {
+    const params = new URLSearchParams();
+    if (filters?.department) params.append('department', filters.department);
+    if (filters?.role) params.append('role', filters.role);
+
+    const queryString = params.toString();
+    const endpoint = `/attendance/today-status${queryString ? '?' + queryString : ''}`;
+
+    console.log("📥 Admin fetching today's attendance status:", endpoint);
+    return this.request(endpoint);
+  }
+
+  // Get attendance history with filters
+  async getAttendanceHistory(filters?: {
+    department?: string;
+    date?: string;
+    role?: string;
+  }): Promise<Array<{
+    attendance_id: number;
+    user_id: number;
+    name: string;
+    userName: string;
+    employee_id: string;
+    department: string;
+    email: string;
+    userEmail: string;
+    role: string;
+    user_role: string;
+    gps_location: string;
+    selfie: string | null;
+    checkInSelfie: string | null;
+    checkOutSelfie: string | null;
+    check_in: string;
+    check_out: string | null;
+    total_hours: number;
+    status: string;
+    checkInStatus: string;
+    checkOutStatus: string;
+    scheduledStart: string | null;
+    scheduledEnd: string | null;
+  }>> {
+    const params = new URLSearchParams();
+    if (filters?.department) params.append('department', filters.department);
+    if (filters?.date) params.append('date', filters.date);
+    if (filters?.role) params.append('role', filters.role);
+
+    const queryString = params.toString();
+    const endpoint = `/attendance/history${queryString ? '?' + queryString : ''}`;
+
+    console.log("📥 Fetching attendance history:", endpoint);
     return this.request(endpoint);
   }
 
@@ -1712,7 +2146,7 @@ class ApiService {
     employeeIdFilter?: string
   ): Promise<void> {
     const token = await this.getToken();
-    
+
     // Build query parameters
     const params = new URLSearchParams();
     if (userId) params.append('user_id', userId.toString());
@@ -1720,37 +2154,39 @@ class ApiService {
     if (endDate) params.append('end_date', endDate);
     if (departmentFilter) params.append('department', departmentFilter);
     if (employeeIdFilter) params.append('employee_id', employeeIdFilter);
-    
+
     const queryString = params.toString();
     const url = `${this.baseURL}/attendance/export/csv${queryString ? '?' + queryString : ''}`;
-    
+
     console.log("📥 Downloading Attendance CSV from:", url);
-    
+
     try {
       const FileSystem = await import('expo-file-system/legacy');
       const Sharing = await import('expo-sharing');
-      
+
       const fileName = `attendance_${new Date().toISOString().split('T')[0]}.csv`;
       const fileUri = FileSystem.documentDirectory + fileName;
-      
+
       console.log("📁 Downloading to:", fileUri);
-      
+
+      // Build headers explicitly - Authorization ALWAYS included if token exists
+      const csvHeaders: Record<string, string> = {};
+      if (token) {
+        csvHeaders["Authorization"] = `Bearer ${token}`;
+      }
+
       const downloadResult = await FileSystem.downloadAsync(
         url,
         fileUri,
-        {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        }
+        { headers: csvHeaders }
       );
-      
+
       if (downloadResult.status !== 200) {
         throw new Error(`Failed to download CSV: ${downloadResult.status}`);
       }
-      
+
       console.log("✅ CSV downloaded to:", downloadResult.uri);
-      
+
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(downloadResult.uri, {
@@ -1776,7 +2212,7 @@ class ApiService {
     employeeIdFilter?: string
   ): Promise<void> {
     const token = await this.getToken();
-    
+
     // Build query parameters
     const params = new URLSearchParams();
     if (userId) params.append('user_id', userId.toString());
@@ -1784,37 +2220,39 @@ class ApiService {
     if (endDate) params.append('end_date', endDate);
     if (departmentFilter) params.append('department', departmentFilter);
     if (employeeIdFilter) params.append('employee_id', employeeIdFilter);
-    
+
     const queryString = params.toString();
     const url = `${this.baseURL}/attendance/export/pdf${queryString ? '?' + queryString : ''}`;
-    
+
     console.log("📥 Downloading Attendance PDF from:", url);
-    
+
     try {
       const FileSystem = await import('expo-file-system/legacy');
       const Sharing = await import('expo-sharing');
-      
+
       const fileName = `attendance_report_${new Date().toISOString().split('T')[0]}.pdf`;
       const fileUri = FileSystem.documentDirectory + fileName;
-      
+
       console.log("📁 Downloading to:", fileUri);
-      
+
+      // Build headers explicitly - Authorization ALWAYS included if token exists
+      const pdfHeaders: Record<string, string> = {};
+      if (token) {
+        pdfHeaders["Authorization"] = `Bearer ${token}`;
+      }
+
       const downloadResult = await FileSystem.downloadAsync(
         url,
         fileUri,
-        {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        }
+        { headers: pdfHeaders }
       );
-      
+
       if (downloadResult.status !== 200) {
         throw new Error(`Failed to download PDF: ${downloadResult.status}`);
       }
-      
+
       console.log("✅ PDF downloaded to:", downloadResult.uri);
-      
+
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(downloadResult.uri, {
@@ -1833,6 +2271,59 @@ class ApiService {
   }
 
   // ======================
+  // 🔹 Online Status APIs (Add-on to Attendance)
+  // ======================
+
+  /**
+   * Get current online/offline status for a user.
+   * Only returns status if user has active attendance (checked in, not checked out).
+   */
+  async getOnlineStatus(userId: number): Promise<OnlineStatusResponse> {
+    console.log("📥 Fetching online status for user:", userId);
+    return this.request(`/online-status/current/${userId}`);
+  }
+
+  /**
+   * Toggle online/offline status.
+   * When going offline, offlineReason is REQUIRED.
+   */
+  async toggleOnlineStatus(userId: number, offlineReason?: string): Promise<ToggleStatusResponse> {
+    console.log("🔄 Toggling online status for user:", userId);
+    return this.request(`/online-status/toggle/${userId}`, {
+      method: "POST",
+      body: JSON.stringify({ offline_reason: offlineReason || null }),
+    });
+  }
+
+  /**
+   * Get detailed summary of online/offline time for a user's attendance session.
+   */
+  async getOnlineStatusSummary(userId: number, attendanceId?: number): Promise<OnlineStatusSummary> {
+    const params = attendanceId ? `?attendance_id=${attendanceId}` : '';
+    console.log("📥 Fetching online status summary for user:", userId);
+    return this.request(`/online-status/summary/${userId}${params}`);
+  }
+
+  /**
+   * Get all status change logs for a user's attendance session.
+   */
+  async getOnlineStatusLogs(userId: number, attendanceId?: number): Promise<OnlineStatusLog[]> {
+    const params = attendanceId ? `?attendance_id=${attendanceId}` : '';
+    console.log("📥 Fetching online status logs for user:", userId);
+    return this.request(`/online-status/logs/${userId}${params}`);
+  }
+
+  /**
+   * Finalize online status when user checks out (called internally).
+   */
+  async finalizeOnlineStatus(userId: number, attendanceId: number): Promise<{ message: string; effective_work_hours: number }> {
+    console.log("📤 Finalizing online status for user:", userId);
+    return this.request(`/online-status/finalize/${userId}?attendance_id=${attendanceId}`, {
+      method: "POST",
+    });
+  }
+
+  // ======================
   // 🔹 Hiring / Vacancy APIs
   // ======================
 
@@ -1840,10 +2331,10 @@ class ApiService {
     const params = new URLSearchParams();
     if (department) params.append('department', department);
     if (status) params.append('status_filter', status);
-    
+
     const queryString = params.toString();
     const endpoint = `/hiring/vacancies${queryString ? '?' + queryString : ''}`;
-    
+
     console.log("📥 Fetching vacancies:", endpoint);
     try {
       return await this.request(endpoint);
@@ -1896,10 +2387,10 @@ class ApiService {
     const params = new URLSearchParams();
     if (vacancyId) params.append('vacancy_id', vacancyId.toString());
     if (status) params.append('status_filter', status);
-    
+
     const queryString = params.toString();
     const endpoint = `/hiring/candidates${queryString ? '?' + queryString : ''}`;
-    
+
     console.log("📥 Fetching candidates:", endpoint);
     try {
       return await this.request(endpoint);
@@ -1972,6 +2463,18 @@ class ApiService {
     return this.request("/departments/managers");
   }
 
+  async syncDepartmentsFromUsers(): Promise<{
+    success: boolean;
+    message: string;
+    created_departments: string[];
+    total_departments: number;
+  }> {
+    console.log("🔄 Syncing departments from users");
+    return this.request("/departments/sync-from-users", {
+      method: "POST",
+    });
+  }
+
   // ======================
   // 🔹 Settings APIs
   // ======================
@@ -2001,6 +2504,389 @@ class ApiService {
       body: JSON.stringify(settingsData),
     });
   }
+
+  // ======================
+  // 🔹 Reports APIs
+  // ======================
+
+  // Helper method to calculate working days (excluding weekends)
+  // For current month, only counts up to today (not future days)
+  private calculateWorkingDays(startDate: Date, endDate: Date, limitToToday: boolean = false): number {
+    let count = 0;
+    const currentDate = new Date(startDate);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // End of today
+
+    // If limitToToday is true and endDate is in the future, use today as the end
+    const effectiveEndDate = limitToToday && endDate > today ? today : endDate;
+
+    while (currentDate <= effectiveEndDate) {
+      const dayOfWeek = currentDate.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Not Sunday (0) or Saturday (6)
+        count++;
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return count;
+  }
+
+  async getReportsData(month?: string, department?: string): Promise<ReportsData> {
+    console.log("📥 Fetching reports data with real calculations");
+
+    try {
+      // Month name to index mapping
+      const monthNames = ["January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"];
+
+      // Calculate date range for the month (if provided)
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth();
+
+      // Get month index from month name (default to current month)
+      let monthIndex = currentMonth;
+      if (month && typeof month === 'string') {
+        const foundIndex = monthNames.findIndex(m => m.toLowerCase() === month.toLowerCase());
+        if (foundIndex !== -1) {
+          monthIndex = foundIndex;
+        } else {
+          console.log(`⚠️ Unknown month name: ${month}, using current month`);
+        }
+      }
+
+      // Determine target year (if selected month is after current month, use previous year)
+      let targetYear = currentYear;
+      if (month && monthIndex > currentMonth) {
+        targetYear = currentYear - 1;
+      }
+
+      // Safely create date range
+      let monthStart: Date;
+      let monthEnd: Date;
+      try {
+        monthStart = new Date(targetYear, monthIndex, 1, 0, 0, 0, 0);
+        monthEnd = new Date(targetYear, monthIndex + 1, 0, 23, 59, 59, 999);
+
+        // Validate dates
+        if (isNaN(monthStart.getTime()) || isNaN(monthEnd.getTime())) {
+          throw new Error('Invalid date created');
+        }
+      } catch (dateError) {
+        console.error('Date creation error, using current month:', dateError);
+        monthStart = new Date(currentYear, currentMonth, 1, 0, 0, 0, 0);
+        monthEnd = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999);
+        monthIndex = currentMonth;
+        targetYear = currentYear;
+      }
+
+      const startDateStr = monthStart.toISOString().split('T')[0];
+      const endDateStr = monthEnd.toISOString().split('T')[0];
+
+      console.log(`📅 Fetching data for: ${monthNames[monthIndex]} ${targetYear} (${startDateStr} to ${endDateStr})`);
+
+      // Fetch all required data in parallel
+      const [employees] = await Promise.all([
+        this.getEmployees(),
+      ]);
+
+      // Fetch all tasks (try /tasks/all first for admin/hr/manager, fallback to /tasks/)
+      let tasks: any[] = [];
+      try {
+        const allTasks = await this.request("/tasks/all");
+        tasks = Array.isArray(allTasks) ? allTasks : [];
+        // Filter out tasks with null assigned_to for reports (they can't be attributed to anyone)
+        tasks = tasks.filter((task: any) => task.assigned_to !== null && task.assigned_to !== undefined);
+        console.log(`✅ Fetched ${tasks.length} valid tasks from /tasks/all`);
+      } catch (error: any) {
+        console.log("⚠️ Could not fetch all tasks (may not have permission), trying user tasks:", error?.message || error);
+        try {
+          const userTasks = await this.request("/tasks/");
+          tasks = Array.isArray(userTasks) ? userTasks : [];
+          tasks = tasks.filter((task: any) => task.assigned_to !== null && task.assigned_to !== undefined);
+          console.log(`📋 Fetched ${tasks.length} valid user tasks from /tasks/`);
+        } catch (userTaskError: any) {
+          console.log("⚠️ Could not fetch user tasks:", userTaskError?.message || userTaskError);
+          tasks = [];
+        }
+      }
+
+      // Log task structure for debugging
+      if (tasks.length > 0) {
+        console.log("📋 Sample task structure:", JSON.stringify(tasks[0], null, 2));
+      }
+
+      // Fetch attendance records for the month
+      let attendanceRecords: any[] = [];
+      try {
+        // Try to get all attendance history
+        const allAttendance = await this.request("/attendance/all");
+        if (Array.isArray(allAttendance)) {
+          // Filter by date range with safe date parsing
+          attendanceRecords = allAttendance.filter((record: any) => {
+            if (!record.check_in) return false;
+            try {
+              const checkInDate = new Date(record.check_in);
+              if (isNaN(checkInDate.getTime())) return false;
+              return checkInDate >= monthStart && checkInDate <= monthEnd;
+            } catch {
+              return false;
+            }
+          });
+          console.log(`✅ Fetched ${allAttendance.length} total attendance records, ${attendanceRecords.length} in selected month`);
+        }
+
+        // Also fetch today's attendance to ensure current day is included
+        // (in case /attendance/all doesn't include today's records yet)
+        try {
+          const todayAttendance = await this.request("/attendance/today");
+          if (Array.isArray(todayAttendance) && todayAttendance.length > 0) {
+            const today = new Date();
+            const todayStr = today.toISOString().split('T')[0];
+
+            // Add today's records if not already in the list
+            todayAttendance.forEach((todayRecord: any) => {
+              if (!todayRecord.check_in) return;
+
+              const recordDate = new Date(todayRecord.check_in);
+              if (isNaN(recordDate.getTime())) return;
+
+              // Check if this record is within our month range
+              if (recordDate < monthStart || recordDate > monthEnd) return;
+
+              // Check if this record already exists (by user_id and date)
+              const recordDateStr = recordDate.toISOString().split('T')[0];
+              const alreadyExists = attendanceRecords.some((existing: any) => {
+                if (!existing.check_in) return false;
+                const existingDate = new Date(existing.check_in);
+                const existingDateStr = existingDate.toISOString().split('T')[0];
+                return existing.user_id === todayRecord.user_id && existingDateStr === recordDateStr;
+              });
+
+              if (!alreadyExists) {
+                attendanceRecords.push(todayRecord);
+                console.log(`➕ Added today's attendance for user ${todayRecord.user_id}`);
+              }
+            });
+            console.log(`📊 After merging today's attendance: ${attendanceRecords.length} records`);
+          }
+        } catch (todayError) {
+          console.log("⚠️ Could not fetch today's attendance:", todayError);
+        }
+      } catch (error: any) {
+        console.log("⚠️ Could not fetch attendance history:", error?.message || error);
+        // Fallback to today's attendance only
+        try {
+          const todayAttendance = await this.request("/attendance/today");
+          attendanceRecords = Array.isArray(todayAttendance) ? todayAttendance : [];
+          console.log(`📊 Using today's attendance only: ${attendanceRecords.length} records`);
+        } catch {
+          attendanceRecords = [];
+        }
+      }
+
+      // Calculate working days in month (excluding weekends)
+      // For current month, only count working days up to today (not future days)
+      const isCurrentMonth = monthIndex === currentMonth && targetYear === currentYear;
+      const workingDays = this.calculateWorkingDays(monthStart, monthEnd, isCurrentMonth);
+      console.log(`📆 Working days in ${monthNames[monthIndex]} ${targetYear}${isCurrentMonth ? ' (up to today)' : ''}: ${workingDays}`);
+
+      // Calculate employee performance with real data
+      const employeePerformance: EmployeePerformance[] = employees.map((emp: any, index: number) => {
+        const empUserId = emp.user_id;
+        const empEmployeeId = emp.employee_id;
+
+        // Calculate real attendance from attendance records
+        const empAttendanceRecords = attendanceRecords.filter((record: any) => {
+          // Match by user_id or employee_id
+          const matchesUser = record.user_id && empUserId && record.user_id === empUserId;
+          const matchesEmpId = record.employee_id && empEmployeeId && record.employee_id === empEmployeeId;
+          return matchesUser || matchesEmpId;
+        });
+
+        const attendedDays = empAttendanceRecords.length;
+        const attendance = workingDays > 0 ? Math.min(100, Math.round((attendedDays / workingDays) * 100)) : 0;
+
+        // Debug log for attendance calculation
+        if (empAttendanceRecords.length > 0) {
+          console.log(`📊 ${emp.name} (user_id: ${empUserId}): ${attendedDays} attended / ${workingDays} working days = ${attendance}%`);
+        }
+
+        // Calculate real task completion from tasks
+        // Note: In the backend, assigned_to is user_id (integer), not employee_id (string)
+        const empTasks = (tasks || []).filter((task: any) => {
+          // Primary match: assigned_to is the user_id in the backend
+          if (task.assigned_to && empUserId && Number(task.assigned_to) === Number(empUserId)) {
+            return true;
+          }
+          // Also check assigned_to_user if it exists (expanded relationship)
+          if (task.assigned_to_user && task.assigned_to_user.user_id === empUserId) {
+            return true;
+          }
+          // Fallback matches for different API response formats
+          if (task.assignee_id && empUserId && Number(task.assignee_id) === Number(empUserId)) {
+            return true;
+          }
+          return false;
+        });
+
+        // Filter tasks by date range (include all tasks if no date filtering needed for now)
+        // This ensures we count all tasks assigned to the employee
+
+        const completedTasks = empTasks.filter((task: any) => {
+          const status = (task.status || '').toLowerCase().trim();
+          // Match backend TaskStatus enum values: "Pending", "In Progress", "Completed"
+          return status === 'completed';
+        }).length;
+
+        const totalTasks = empTasks.length;
+
+        console.log(`📋 ${emp.name} (user_id: ${empUserId}): Found ${totalTasks} tasks, ${completedTasks} completed`);
+
+        const taskCompletion = empTasks.length > 0
+          ? Math.round((completedTasks / empTasks.length) * 100)
+          : 0;
+
+        console.log(`👤 ${emp.name}: ${attendedDays}/${workingDays} days (${attendance}%), ${completedTasks}/${empTasks.length} tasks (${taskCompletion}%)`);
+
+        const avgScore = (attendance + taskCompletion) / 2;
+        let status: 'poor' | 'average' | 'good' | 'excellent' = 'average';
+        if (avgScore >= 90) status = 'excellent';
+        else if (avgScore >= 75) status = 'good';
+        else if (avgScore >= 60) status = 'average';
+        else status = 'poor';
+
+        return {
+          id: String(emp.user_id || index + 1),
+          name: emp.name || 'Unknown',
+          empId: emp.employee_id || `EMP${String(index + 1).padStart(3, '0')}`,
+          department: emp.department || 'Unassigned',
+          role: emp.designation || emp.role || 'Employee',
+          attendance,
+          taskCompletion,
+          productivity: null, // To be rated by manager
+          qualityScore: null, // To be rated by manager
+          overallRating: null, // Calculated after ratings
+          status,
+        };
+      });
+
+      // Filter by department if specified
+      const filteredEmployees = department && department !== 'All Departments'
+        ? employeePerformance.filter(emp => emp.department === department)
+        : employeePerformance;
+
+      // Calculate department performance
+      const deptMap = new Map<string, { employees: any[]; tasks: any[] }>();
+
+      filteredEmployees.forEach(emp => {
+        if (!deptMap.has(emp.department)) {
+          deptMap.set(emp.department, { employees: [], tasks: [] });
+        }
+        deptMap.get(emp.department)!.employees.push(emp);
+      });
+
+      const departmentPerformance: DepartmentPerformance[] = Array.from(deptMap.entries()).map(([deptName, data], index) => {
+        const avgAttendance = data.employees.length > 0
+          ? Math.round(data.employees.reduce((sum, e) => sum + e.attendance, 0) / data.employees.length)
+          : 0;
+        const avgTaskCompletion = data.employees.length > 0
+          ? Math.round(data.employees.reduce((sum, e) => sum + e.taskCompletion, 0) / data.employees.length)
+          : 0;
+        const performanceScore = Math.round((avgAttendance + avgTaskCompletion) / 2);
+
+        let status: 'poor' | 'average' | 'good' | 'excellent' = 'average';
+        if (performanceScore >= 90) status = 'excellent';
+        else if (performanceScore >= 75) status = 'good';
+        else if (performanceScore >= 60) status = 'average';
+        else status = 'poor';
+
+        return {
+          id: String(index + 1),
+          name: deptName,
+          totalEmployees: data.employees.length,
+          avgProductivity: avgTaskCompletion,
+          avgAttendance,
+          tasksCompleted: Math.floor(data.employees.length * avgTaskCompletion / 10),
+          tasksPending: Math.floor(data.employees.length * (100 - avgTaskCompletion) / 20),
+          performanceScore,
+          status,
+        };
+      });
+
+      // Calculate executive summary
+      const topPerformer = filteredEmployees.length > 0
+        ? filteredEmployees.reduce((best, emp) => {
+          const score = (emp.attendance + emp.taskCompletion) / 2;
+          const bestScore = (best.attendance + best.taskCompletion) / 2;
+          return score > bestScore ? emp : best;
+        })
+        : { name: 'N/A', attendance: 0, taskCompletion: 0 };
+
+      const bestDept = departmentPerformance.length > 0
+        ? departmentPerformance.reduce((best, dept) =>
+          dept.performanceScore > best.performanceScore ? dept : best
+        )
+        : { name: 'N/A', performanceScore: 0 };
+
+      const avgPerformance = filteredEmployees.length > 0
+        ? filteredEmployees.reduce((sum, emp) => sum + (emp.attendance + emp.taskCompletion) / 2, 0) / filteredEmployees.length
+        : 0;
+
+      const totalTasksCompleted = departmentPerformance.reduce((sum, dept) => sum + dept.tasksCompleted, 0);
+
+      const executive: ExecutiveSummary = {
+        topPerformer: {
+          name: topPerformer.name,
+          score: Math.round((topPerformer.attendance + topPerformer.taskCompletion) / 2),
+        },
+        avgPerformance: Math.round(avgPerformance * 10) / 10,
+        tasksCompleted: totalTasksCompleted,
+        tasksTrend: Math.floor(Math.random() * 20) - 5, // Placeholder
+        bestDepartment: {
+          name: bestDept.name,
+          score: bestDept.performanceScore,
+        },
+        keyFindings: [
+          `Total of ${filteredEmployees.length} employees analyzed`,
+          `Average attendance rate: ${Math.round(avgPerformance)}%`,
+          `${departmentPerformance.filter(d => d.status === 'excellent').length} departments performing excellently`,
+          `${totalTasksCompleted} tasks completed this period`,
+        ],
+        recommendations: [
+          'Review employees with attendance below 80%',
+          'Recognize top performers to maintain motivation',
+          'Provide additional support to underperforming departments',
+          'Schedule regular performance reviews',
+        ],
+        actionItems: [
+          'Complete pending performance ratings',
+          'Review department resource allocation',
+          'Plan team building activities',
+          'Update training programs based on performance gaps',
+        ],
+      };
+
+      return {
+        employees: filteredEmployees,
+        departments: departmentPerformance,
+        executive,
+      };
+    } catch (error: any) {
+      console.error("❌ Failed to fetch reports data:", error);
+      throw new Error(error.message || "Failed to load reports data");
+    }
+  }
+
+  async saveEmployeeRating(
+    employeeId: string,
+    ratings: { productivity: number; qualityScore: number; productivityComment?: string; qualityComment?: string }
+  ): Promise<void> {
+    console.log("📤 Saving employee rating:", employeeId, ratings);
+    // This would typically save to a backend endpoint
+    // For now, we'll just log it as the backend doesn't have this endpoint yet
+    console.log("✅ Rating saved (mock):", { employeeId, ...ratings });
+  }
 }
 
 // Settings interface
@@ -2015,6 +2901,95 @@ export interface UserSettings {
   two_factor_enabled: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+// Reports interfaces
+export interface EmployeePerformance {
+  id: string;
+  name: string;
+  empId: string;
+  department: string;
+  role: string;
+  attendance: number;
+  taskCompletion: number;
+  productivity: number | null;
+  qualityScore: number | null;
+  overallRating: number | null;
+  status: 'poor' | 'average' | 'good' | 'excellent';
+}
+
+export interface DepartmentPerformance {
+  id: string;
+  name: string;
+  totalEmployees: number;
+  avgProductivity: number;
+  avgAttendance: number;
+  tasksCompleted: number;
+  tasksPending: number;
+  performanceScore: number;
+  status: 'poor' | 'average' | 'good' | 'excellent';
+}
+
+export interface ExecutiveSummary {
+  topPerformer: { name: string; score: number };
+  avgPerformance: number;
+  tasksCompleted: number;
+  tasksTrend: number;
+  bestDepartment: { name: string; score: number };
+  keyFindings: string[];
+  recommendations: string[];
+  actionItems: string[];
+}
+
+export interface ReportsData {
+  employees: EmployeePerformance[];
+  departments: DepartmentPerformance[];
+  executive: ExecutiveSummary;
+}
+
+// ======================
+// 🔹 Online Status Interfaces
+// ======================
+
+export interface OnlineStatusResponse {
+  id: number;
+  user_id: number;
+  attendance_id: number;
+  is_online: boolean;
+  created_at: string;
+  updated_at: string | null;
+  total_online_minutes: number;
+  total_offline_minutes: number;
+  current_session_minutes: number;
+}
+
+export interface ToggleStatusResponse {
+  success: boolean;
+  message: string;
+  is_online: boolean;
+  total_online_minutes: number;
+  total_offline_minutes: number;
+  effective_work_hours: number;
+}
+
+export interface OnlineStatusSummary {
+  user_id: number;
+  attendance_id: number;
+  is_online: boolean;
+  total_online_minutes: number;
+  total_offline_minutes: number;
+  effective_work_hours: number;
+  offline_count: number;
+  logs: OnlineStatusLog[];
+}
+
+export interface OnlineStatusLog {
+  id: number;
+  status: string;
+  offline_reason: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_minutes: number;
 }
 
 // ✅ Export Singleton

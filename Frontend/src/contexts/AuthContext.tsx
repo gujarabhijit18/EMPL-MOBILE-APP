@@ -19,6 +19,7 @@ export interface User {
   status?: string;
   createdAt?: string;
   updatedAt?: string;
+  profile_photo?: string;
 }
 
 interface AuthContextType {
@@ -50,7 +51,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const loadUser = async () => {
       try {
         const storedUser = await AsyncStorage.getItem("user");
-        if (storedUser) setUser(JSON.parse(storedUser));
+        if (storedUser) {
+          setUser(JSON.parse(storedUser));
+          // Pre-warm the API token cache for faster subsequent requests
+          const { apiService } = await import("../lib/api");
+          await apiService.refreshTokenCache();
+        }
       } catch (error) {
         console.warn("⚠️ Failed to load stored user:", error);
       } finally {
@@ -110,6 +116,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       await AsyncStorage.setItem("user", JSON.stringify(userObj));
       setUser(userObj);
+      
+      // iOS fix: Ensure API service has the latest token after login
+      // Add a small delay to ensure AsyncStorage write is complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const { apiService } = await import("../lib/api");
+      await apiService.refreshTokenCache();
+      
       // Alert is shown in Login.tsx after successful login
       console.log(`✅ Login Successful: ${userObj.name} (${userObj.role})`);
     } catch (error) {
@@ -126,6 +139,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       await AsyncStorage.multiRemove(["user", "token"]);
+      // Clear the API token cache
+      const { apiService } = await import("../lib/api");
+      apiService.clearTokenCache();
       setUser(null);
       Alert.alert("👋 Logged Out", "You have been logged out successfully.");
     } catch (error) {

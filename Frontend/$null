@@ -1,2 +1,2 @@
-'wc' is not recognized as an internal or external command,
-operable program or batch file.
+[33mWARNING: The legacy expo-cli does not support Node +17. Migrate to the new local Expo CLI: https://blog.expo.dev/the-new-expo-cli-f4250d8e3421.[39m
+[33m"generate-assets,if,(-not,(Test-Path,assets)),{,New-Item" is not an expo command. See "expo --help" for the full list of commands.[39m

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional, Union
@@ -54,6 +54,26 @@ def _sanitize_users_response(payload: Union[User, List[User]]) -> Union[dict, Li
 
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
+
+
+# 🔧 Debug endpoint to test Authorization header (no auth required)
+@router.get("/debug-auth", tags=["Debug"])
+def debug_auth_header(request: Request):
+    """
+    Debug endpoint to check if Authorization header is being received.
+    This helps diagnose iOS/Android auth issues.
+    """
+    auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+    all_headers = dict(request.headers)
+    
+    return {
+        "authorization_header": auth_header[:50] + "..." if auth_header and len(auth_header) > 50 else auth_header,
+        "authorization_present": bool(auth_header),
+        "all_header_keys": list(all_headers.keys()),
+        "content_type": request.headers.get("content-type"),
+        "accept": request.headers.get("accept"),
+    }
+
 
 # ✅ Public: Register a new employee
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -199,9 +219,21 @@ def get_all_employees_public(
     db: Session = Depends(get_db),
     search: Optional[str] = Query(None, description="Search by name, email or department"),
     department: Optional[str] = Query(None, description="Filter by department"),
-    role: Optional[RoleEnum] = Query(None, description="Filter by role")
+    role: Optional[RoleEnum] = Query(None, description="Filter by role"),
+    for_reports: Optional[bool] = Query(False, description="If true, returns all employees for reports"),
+    current_user: User = Depends(get_current_user)
 ):
     employees = list_users(db)  # ✅ fetch all users properly (no .query(list_users))
+
+    # For reports or admin, return all employees without role-based filtering
+    # Admin sees ALL employees from all departments (HR, Manager, Team Lead, Employee)
+    if not for_reports and current_user.role != RoleEnum.ADMIN:
+        # HR and Manager can only see employees from their own department
+        if current_user.role in [RoleEnum.HR, RoleEnum.MANAGER] and current_user.department:
+            employees = [
+                emp for emp in employees
+                if emp.department and emp.department.lower() == current_user.department.lower()
+            ]
 
     # Apply search filter
     if search:
@@ -212,7 +244,7 @@ def get_all_employees_public(
             or (emp.department and search.lower() in emp.department.lower())
         ]
 
-    # Apply department filter
+    # Apply department filter (additional filter on top of role-based filtering)
     if department:
         employees = [emp for emp in employees if emp.department == department]
 

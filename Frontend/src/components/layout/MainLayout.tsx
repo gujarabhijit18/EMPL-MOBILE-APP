@@ -120,14 +120,18 @@ const CustomHeader = ({ navigation, user, language, setLanguage }: any) => {
           onDismiss={() => setMenuVisible(false)}
           anchor={
             <TouchableOpacity onPress={() => setMenuVisible(true)}>
-              <Avatar.Image
-                size={36}
-                source={
-                  user.profilePhoto
-                    ? { uri: user.profilePhoto }
-                    : require("../assets/avatar.png") // works in Expo assets folder
-                }
-              />
+              {user.profilePhoto ? (
+                <Avatar.Image
+                  size={36}
+                  source={{ uri: user.profilePhoto }}
+                />
+              ) : (
+                <Avatar.Text
+                  size={36}
+                  label={user.name ? user.name[0].toUpperCase() : "U"}
+                  style={{ backgroundColor: "#2563EB" }}
+                />
+              )}
             </TouchableOpacity>
           }
         >

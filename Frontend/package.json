@@ -24,7 +24,7 @@
     "expo-font": "~14.0.9",
     "expo-haptics": "~15.0.7",
     "expo-image-picker": "^17.0.8",
-    "expo-linear-gradient": "^15.0.7",
+    "expo-linear-gradient": "~15.0.7",
     "expo-linking": "~8.0.9",
     "expo-localization": "^17.0.7",
     "expo-location": "^19.0.7",
@@ -72,6 +72,8 @@
     "web": "expo start --web --port 8081",
     "update-ip": "node update-ip.js",
     "dev": "node update-ip.js && expo start --port 8081",
-    "check": "node check-setup.js"
+    "check": "node check-setup.js",
+    "setup-assets": "node scripts/create-placeholder-assets.js",
+    "prestart": "node scripts/create-placeholder-assets.js"
   }
 }

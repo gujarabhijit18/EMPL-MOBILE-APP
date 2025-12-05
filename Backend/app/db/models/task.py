@@ -24,6 +24,7 @@ class Task(Base):
     assigned_to_user = relationship("User", back_populates="assigned_tasks", foreign_keys="Task.assigned_to")
     history = relationship("TaskHistory", back_populates="task", cascade="all, delete-orphan")
     notifications = relationship("TaskNotification", back_populates="task", cascade="all, delete-orphan")
+    comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
 
 
 class TaskHistory(Base):
@@ -38,3 +39,16 @@ class TaskHistory(Base):
 
     task = relationship("Task", back_populates="history")
     user = relationship("User", back_populates="task_history_entries")
+
+
+class TaskComment(Base):
+    __tablename__ = "task_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.task_id", ondelete="CASCADE"))
+    user_id = Column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"))
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    task = relationship("Task", back_populates="comments")
+    user = relationship("User", back_populates="task_comments")

@@ -10,7 +10,9 @@ class RoleEnum(str, Enum):
 class TaskStatus(str, Enum):
     PENDING = "Pending"
     IN_PROGRESS = "In Progress"
+    REVIEW = "Review"
     COMPLETED = "Completed"
+    CANCELLED = "Cancelled"
 
 class TaskAction(str, Enum):
     CREATED = "created"

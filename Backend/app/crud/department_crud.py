@@ -17,15 +17,13 @@ def get_department(db: Session, dept_id: int) -> Optional[Department]:
 
 
 def create_department(db: Session, dept_in: DepartmentCreate) -> Department:
-    # If employee_count is not provided, derive it from users table by department name
-    employee_count = dept_in.employee_count
-    if employee_count is None:
-        employee_count = (
-            db.query(func.count(User.user_id))
-            .filter(User.department == dept_in.name)
-            .scalar()
-            or 0
-        )
+    # Always auto-calculate employee_count from users table by department name
+    employee_count = (
+        db.query(func.count(User.user_id))
+        .filter(User.department == dept_in.name)
+        .scalar()
+        or 0
+    )
 
     db_dept = Department(
         name=dept_in.name,
@@ -45,17 +43,20 @@ def create_department(db: Session, dept_in: DepartmentCreate) -> Department:
 
 def update_department(db: Session, dept: Department, dept_in: DepartmentUpdate) -> Department:
     data = dept_in.model_dump(exclude_unset=True)
+    
+    # Remove employee_count from data if present - it should always be auto-calculated
+    data.pop('employee_count', None)
+    
     for field, value in data.items():
         setattr(dept, field, value)
 
-    # Optionally re-sync employee_count if not explicitly set but name changed
-    if "name" in data and "employee_count" not in data:
-        dept.employee_count = (
-            db.query(func.count(User.user_id))
-            .filter(User.department == dept.name)
-            .scalar()
-            or 0
-        )
+    # Always re-sync employee_count based on users in this department
+    dept.employee_count = (
+        db.query(func.count(User.user_id))
+        .filter(User.department == dept.name)
+        .scalar()
+        or 0
+    )
 
     db.commit()
     db.refresh(dept)

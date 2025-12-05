@@ -196,9 +196,10 @@ const DepartmentStackNavigator = () => (
 export default function TabNavigator() {
   const { user } = useAuth();
   const role = user?.role || "employee";
+  // Admin role only sees Reports, other roles see their respective dashboards
   const HomeComponent =
     role === "admin"
-      ? AdminDashboard
+      ? Reports // Admin goes directly to Reports
       : role === "hr"
       ? HRDashboard
       : role === "manager"
@@ -208,16 +209,15 @@ export default function TabNavigator() {
       : EmployeeDashboard;
   // Sample notification data - replace with your actual notification state management
   const [notificationData, setNotificationData] = React.useState<NotificationData>({
-    Home: 3,
+    Home: role === "admin" ? 0 : 3, // Admin only sees Reports
     Attendance: 0,
     Leaves: 2,
     Tasks: 5,
     ...((role === "team_lead" || role === "employee") && { TeamShifts: 0 }),
-    ...(role === "admin" && { Departments: 0, Hiring: 0 }),
-    ...(role !== "employee" && { Reports: 0 }),
+    ...(role !== "employee" && role !== "admin" && { Reports: 0 }), // Admin doesn't need separate Reports tab
     ...(role === "manager" && { Shifts: 0, Teams: 0 }),
   });
-  const canAccessEmployeesTab = role === "admin" || role === "hr";
+  const canAccessEmployeesTab = role === "hr"; // Admin only sees Reports
   const translateY = React.useRef(new Animated.Value(0)).current;
   const isHidden = React.useRef(false);
   const [tabBarVisible, setTabBarVisible] = React.useState(true);
@@ -318,30 +318,30 @@ export default function TabNavigator() {
           </Animated.View>
         )}
       >
-        <Tab.Screen name="Home" component={HomeComponent as any} />
-        <Tab.Screen name="Attendance" component={AttendanceWrapper} />
-        <Tab.Screen name="Leaves" component={LeaveManagement} />
-        <Tab.Screen name="Tasks" component={TaskManagement} />
-        {(role === "team_lead" || role === "employee") && (
-          <Tab.Screen name="TeamShifts" component={TeamShifts} />
+        {/* Admin only sees Reports tab */}
+        {role === "admin" ? (
+          <Tab.Screen name="Reports" component={Reports} />
+        ) : (
+          <>
+            <Tab.Screen name="Home" component={HomeComponent as any} />
+            <Tab.Screen name="Attendance" component={AttendanceWrapper} />
+            <Tab.Screen name="Leaves" component={LeaveManagement} />
+            <Tab.Screen name="Tasks" component={TaskManagement} />
+            {(role === "team_lead" || role === "employee") && (
+              <Tab.Screen name="TeamShifts" component={TeamShifts} />
+            )}
+            {(role === "hr") && <Tab.Screen name="Employees" component={EmployeeManagement} />}
+            {role === "hr" && (
+              <Tab.Screen
+                name="Hiring"
+                component={HiringManagement}
+              />
+            )}
+            {role === "manager" && <Tab.Screen name="Shifts" component={ShiftScheduleManagement} />}
+            {role === "manager" && <Tab.Screen name="Teams" component={TeamManagement} />}
+            {role !== "employee" && <Tab.Screen name="Reports" component={Reports} />}
+          </>
         )}
-        {canAccessEmployeesTab && <Tab.Screen name="Employees" component={EmployeeManagement} />}
-        {role === "admin" && (
-          <Tab.Screen
-            name="Departments"
-            component={DepartmentStackNavigator}
-            options={{ headerShown: false }}
-          />
-        )}
-        {(role === "admin" || role === "hr") && (
-          <Tab.Screen
-            name="Hiring"
-            component={HiringManagement}
-          />
-        )}
-        {role === "manager" && <Tab.Screen name="Shifts" component={ShiftScheduleManagement} />}
-        {role === "manager" && <Tab.Screen name="Teams" component={TeamManagement} />}
-        {role !== "employee" && <Tab.Screen name="Reports" component={Reports} />}
         <Tab.Screen 
           name="Profile" 
           component={Profile} 

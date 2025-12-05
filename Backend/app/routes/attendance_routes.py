@@ -8,6 +8,7 @@ from app.db.database import get_db
 from app.db.models.attendance import Attendance
 from app.db.models.user import User
 from app.db.models.office_timing import OfficeTiming
+from app.db.models.online_status import OnlineStatus, OnlineStatusLog
 from app.schemas.attendance_schema import AttendanceOut, LocationData
 from fastapi.responses import StreamingResponse, JSONResponse
 from app.dependencies import get_current_user
@@ -272,6 +273,117 @@ def _sanitize_text(value: Optional[str], *, max_length: int = 250) -> Optional[s
     if len(text) > max_length:
         return text[: max_length - 3] + "..."
     return text
+
+
+def _initialize_online_status_on_checkin(db: Session, user_id: int, attendance_id: int) -> None:
+    """
+    Initialize online status when user checks in.
+    Creates OnlineStatus record with is_online=True and initial log entry.
+    """
+    try:
+        # Check if online status already exists
+        existing = (
+            db.query(OnlineStatus)
+            .filter(
+                OnlineStatus.user_id == user_id,
+                OnlineStatus.attendance_id == attendance_id
+            )
+            .first()
+        )
+        
+        if existing:
+            logger.info(f"📊 Online status already exists for user {user_id}, attendance {attendance_id}")
+            return
+        
+        # Create new online status (default: Online)
+        online_status = OnlineStatus(
+            user_id=user_id,
+            attendance_id=attendance_id,
+            is_online=True
+        )
+        db.add(online_status)
+        db.flush()
+        
+        # Create initial "online" log entry
+        initial_log = OnlineStatusLog(
+            user_id=user_id,
+            attendance_id=attendance_id,
+            online_status_id=online_status.id,
+            status="online",
+            started_at=datetime.utcnow()
+        )
+        db.add(initial_log)
+        
+        logger.info(f"📊 Initialized online status for user {user_id}, attendance {attendance_id}")
+        
+    except Exception as e:
+        logger.error(f"Error initializing online status: {str(e)}")
+
+
+def _finalize_online_status_on_checkout(db: Session, user_id: int, attendance_id: int) -> Dict[str, Any]:
+    """
+    Finalize online status when user checks out.
+    Closes any open status logs and calculates effective work hours.
+    """
+    try:
+        online_status = (
+            db.query(OnlineStatus)
+            .filter(
+                OnlineStatus.user_id == user_id,
+                OnlineStatus.attendance_id == attendance_id
+            )
+            .first()
+        )
+        
+        if not online_status:
+            return {"effective_work_hours": 0, "total_online_minutes": 0, "total_offline_minutes": 0}
+        
+        # Close any open log
+        open_log = (
+            db.query(OnlineStatusLog)
+            .filter(
+                OnlineStatusLog.online_status_id == online_status.id,
+                OnlineStatusLog.ended_at.is_(None)
+            )
+            .first()
+        )
+        
+        if open_log:
+            open_log.ended_at = datetime.utcnow()
+            delta = open_log.ended_at - open_log.started_at
+            open_log.duration_minutes = round(delta.total_seconds() / 60, 2)
+        
+        # Set status to offline (checked out)
+        online_status.is_online = False
+        online_status.updated_at = datetime.utcnow()
+        
+        # Calculate totals
+        logs = (
+            db.query(OnlineStatusLog)
+            .filter(OnlineStatusLog.online_status_id == online_status.id)
+            .all()
+        )
+        
+        total_online = 0.0
+        total_offline = 0.0
+        
+        for log in logs:
+            if log.status == "online":
+                total_online += log.duration_minutes or 0
+            else:
+                total_offline += log.duration_minutes or 0
+        
+        logger.info(f"📊 Finalized online status for user {user_id}: Online={total_online}min, Offline={total_offline}min")
+        
+        return {
+            "effective_work_hours": round(total_online / 60, 2),
+            "total_online_minutes": round(total_online, 2),
+            "total_offline_minutes": round(total_offline, 2)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error finalizing online status: {str(e)}")
+        return {"effective_work_hours": 0, "total_online_minutes": 0, "total_offline_minutes": 0}
 
 
 # ---------------------------------
@@ -568,7 +680,7 @@ def get_today_attendance_records(db: Session, target_date: Optional[date] = None
             today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start + timedelta(days=1)
 
-        # Get only users who have checked in today
+        # Get only users who have checked in today - include role field
         raw_records = (
             db.query(
                 User.user_id,
@@ -576,6 +688,9 @@ def get_today_attendance_records(db: Session, target_date: Optional[date] = None
                 User.name,
                 User.email,
                 User.department,
+                User.role,
+                User.designation,
+                User.profile_photo,
                 Attendance.attendance_id,
                 Attendance.check_in,
                 Attendance.check_out,
@@ -606,6 +721,9 @@ def get_today_attendance_records(db: Session, target_date: Optional[date] = None
                 name,
                 email,
                 department,
+                role,
+                designation,
+                profile_photo,
                 attendance_id,
                 check_in,
                 check_out,
@@ -635,12 +753,20 @@ def get_today_attendance_records(db: Session, target_date: Optional[date] = None
             attendance_obj.work_report = work_report
 
             payload = _prepare_attendance_payload(attendance_obj)
+            
+            # Convert role enum to string
+            role_str = role.value if hasattr(role, 'value') else str(role) if role else "Employee"
+            
             payload.update(
                 {
                     "employee_id": employee_id,
                     "name": name or "Unknown",
                     "email": email or "",
                     "department": department or "N/A",
+                    "role": role_str,
+                    "user_role": role_str,
+                    "designation": designation or "",
+                    "profile_photo": profile_photo,
                 }
             )
 
@@ -892,6 +1018,10 @@ async def employee_check_in_route(
         db.commit()
         db.refresh(attendance)
         
+        # Initialize online status tracking (set to Online by default)
+        _initialize_online_status_on_checkin(db, user_id, attendance.attendance_id)
+        db.commit()
+        
         print(f"Successfully created check-in for user {user_id}, attendance ID: {attendance.attendance_id}")
         logger.info(f"📸 Created attendance with selfie: {selfie_path}")
         
@@ -1014,6 +1144,10 @@ async def employee_check_in_json(
         db.commit()
         db.refresh(attendance)
         
+        # Initialize online status tracking (set to Online by default)
+        _initialize_online_status_on_checkin(db, payload.user_id, attendance.attendance_id)
+        db.commit()
+        
         logger.info(f"✅ Check-in created for user {payload.user_id}, attendance_id: {attendance.attendance_id}")
         logger.info(f"📸 Selfie data after commit: {attendance.selfie}")
         return _prepare_attendance_payload(attendance)
@@ -1108,6 +1242,10 @@ async def employee_check_out_route(
         # Calculate total hours worked
         time_worked = attendance.check_out - attendance.check_in
         attendance.total_hours = round(time_worked.total_seconds() / 3600, 2)  # Convert to hours with 2 decimal places
+        
+        # Finalize online status tracking (close any open sessions)
+        online_status_summary = _finalize_online_status_on_checkout(db, user_id, attendance.attendance_id)
+        logger.info(f"📊 Online status finalized: {online_status_summary}")
         
         db.commit()
         db.refresh(attendance)
@@ -1259,6 +1397,10 @@ async def employee_check_out_json(
         time_worked = attendance.check_out - attendance.check_in
         attendance.total_hours = round(time_worked.total_seconds() / 3600, 2)
         
+        # Finalize online status tracking (close any open sessions)
+        online_status_summary = _finalize_online_status_on_checkout(db, payload.user_id, attendance.attendance_id)
+        logger.info(f"📊 Online status finalized: {online_status_summary}")
+        
         logger.info(f"✅ Check-out completed for user {payload.user_id}, attendance_id: {attendance.attendance_id}, hours: {attendance.total_hours}")
         logger.info(f"📸 Final selfie data before commit: {attendance.selfie}")
         
@@ -1296,6 +1438,7 @@ def attendance_summary(db: Session = Depends(get_db)):
 def get_today_attendance(
     date: Optional[str] = Query(None, description="Date (YYYY-MM-DD) for which to fetch records"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get attendance records for the specified date (defaults to today)."""
     target_date: Optional[date] = None
@@ -1307,7 +1450,211 @@ def get_today_attendance(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid date format. Use YYYY-MM-DD",
             )
-    return get_today_attendance_records(db, target_date)
+    
+    records = get_today_attendance_records(db, target_date)
+    
+    # Filter based on role
+    if current_user.role == RoleEnum.ADMIN:
+        # Admin can see HR, Manager, TeamLead, and Employee attendance across all departments
+        allowed_roles = ["HR", "MANAGER", "TEAMLEAD", "TEAM_LEAD", "EMPLOYEE"]
+        records = [r for r in records if not r.get("role") or r.get("role", "").upper().replace(" ", "_") in allowed_roles or r.get("role", "").upper().replace("_", "") in [ar.replace("_", "") for ar in allowed_roles]]
+    elif current_user.role in [RoleEnum.HR, RoleEnum.MANAGER] and current_user.department:
+        # HR/Manager can only see their department's attendance
+        dept_key = _normalize_department_value(current_user.department)
+        if dept_key:
+            records = [r for r in records if _normalize_department_value(r.get("department")) == dept_key]
+    
+    return records
+
+
+@router.get("/all")
+def get_all_attendance_records(
+    date: Optional[str] = Query(None, description="Date (YYYY-MM-DD) for which to fetch records"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    department: Optional[str] = Query(None, description="Filter by department"),
+    role: Optional[str] = Query(None, description="Filter by role (HR, Manager, TeamLead, Employee)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all attendance records with full user details."""
+    # If date parameter is provided, use get_today_attendance_records for that date
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        
+        records = get_today_attendance_records(db, target_date)
+        
+        # Filter based on role
+        if current_user.role == RoleEnum.ADMIN:
+            # Admin can see HR, Manager, TeamLead, and Employee attendance across all departments
+            allowed_roles = ["HR", "MANAGER", "TEAMLEAD", "TEAM_LEAD", "EMPLOYEE"]
+            records = [r for r in records if not r.get("role") or r.get("role", "").upper().replace(" ", "_") in allowed_roles or r.get("role", "").upper().replace("_", "") in [ar.replace("_", "") for ar in allowed_roles]]
+            # Apply department filter if provided
+            if department:
+                records = [r for r in records if r.get("department") == department]
+            # Apply role filter if provided
+            if role:
+                role_upper = role.upper().replace(" ", "_")
+                records = [r for r in records if r.get("role", "").upper().replace(" ", "_") == role_upper or r.get("role", "").upper().replace("_", "") == role_upper.replace("_", "")]
+        elif current_user.role in [RoleEnum.HR, RoleEnum.MANAGER] and current_user.department:
+            # HR/Manager can only see their department's attendance
+            dept_key = _normalize_department_value(current_user.department)
+            if dept_key:
+                records = [r for r in records if _normalize_department_value(r.get("department")) == dept_key]
+        
+        return records
+    
+    # For date range queries, build a more detailed query
+    query = (
+        db.query(
+            User.user_id,
+            User.employee_id,
+            User.name,
+            User.email,
+            User.department,
+            User.role,
+            User.designation,
+            User.profile_photo,
+            Attendance.attendance_id,
+            Attendance.check_in,
+            Attendance.check_out,
+            Attendance.gps_location,
+            Attendance.selfie,
+            Attendance.total_hours,
+            Attendance.work_summary,
+            Attendance.work_report,
+        )
+        .join(User, Attendance.user_id == User.user_id)
+        .filter(User.is_active == True)
+    )
+    
+    # Check permissions and apply filters
+    if current_user.role not in [RoleEnum.ADMIN, RoleEnum.HR, RoleEnum.MANAGER]:
+        # If not admin/hr/manager, return only own records
+        query = query.filter(User.user_id == current_user.user_id)
+    else:
+        if current_user.role == RoleEnum.ADMIN:
+            # Admin can see HR, Manager, TeamLead, and Employee attendance across all departments
+            query = query.filter(User.role.in_([RoleEnum.HR, RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]))
+            # Apply department filter if provided
+            if department:
+                query = query.filter(User.department == department)
+            # Apply role filter if provided
+            if role:
+                role_upper = role.upper().replace(" ", "_")
+                role_enum = None
+                if role_upper in ["HR"]:
+                    role_enum = RoleEnum.HR
+                elif role_upper in ["MANAGER"]:
+                    role_enum = RoleEnum.MANAGER
+                elif role_upper in ["TEAMLEAD", "TEAM_LEAD"]:
+                    role_enum = RoleEnum.TEAM_LEAD
+                elif role_upper in ["EMPLOYEE"]:
+                    role_enum = RoleEnum.EMPLOYEE
+                if role_enum:
+                    query = query.filter(User.role == role_enum)
+        elif current_user.role in [RoleEnum.HR, RoleEnum.MANAGER] and current_user.department:
+            # HR and Manager can only see their department's attendance
+            query = query.filter(User.department == current_user.department)
+    
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.filter(Attendance.check_in >= start_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_date format")
+            
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            # Include the whole end day
+            end_dt = end_dt.replace(hour=23, minute=59, second=59)
+            query = query.filter(Attendance.check_in <= end_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_date format")
+    
+    query = query.order_by(Attendance.check_in.desc())
+    raw_records = query.all()
+    
+    # Build response with full user details
+    results = []
+    timing_cache = _build_office_timing_cache(db)
+    
+    for row in raw_records:
+        (
+            user_id,
+            employee_id,
+            name,
+            email,
+            dept,
+            user_role,
+            designation,
+            profile_photo,
+            attendance_id,
+            check_in,
+            check_out,
+            gps_location,
+            selfie,
+            total_hours,
+            work_summary,
+            work_report,
+        ) = row
+        
+        # Calculate hours if needed
+        calculated_hours = 0.0
+        if check_in and check_out:
+            duration = check_out - check_in
+            calculated_hours = round(duration.total_seconds() / 3600, 2)
+        
+        # Create attendance object for payload preparation
+        attendance_obj = Attendance(
+            attendance_id=attendance_id,
+            user_id=user_id,
+            check_in=check_in,
+            check_out=check_out,
+            total_hours=total_hours if total_hours is not None else calculated_hours,
+            gps_location=gps_location,
+            selfie=selfie,
+        )
+        attendance_obj.work_summary = work_summary
+        attendance_obj.work_report = work_report
+        
+        payload = _prepare_attendance_payload(attendance_obj)
+        
+        # Convert role enum to string
+        role_str = user_role.value if hasattr(user_role, 'value') else str(user_role) if user_role else "Employee"
+        
+        # Update with user details
+        payload.update({
+            "employee_id": employee_id or "",
+            "name": name or "Unknown",
+            "userName": name or "Unknown",
+            "email": email or "",
+            "userEmail": email or "",
+            "department": dept or "Not Assigned",
+            "role": role_str,
+            "user_role": role_str,
+            "designation": designation or "",
+            "profile_photo": profile_photo,
+        })
+        
+        # Add attendance status evaluation
+        timing = _resolve_office_timing(db, dept, timing_cache)
+        evaluation = _evaluate_attendance_status(check_in, check_out, timing)
+        payload.update({
+            "status": evaluation["status"],
+            "checkInStatus": evaluation["check_in_status"],
+            "checkOutStatus": evaluation["check_out_status"],
+            "scheduledStart": evaluation["scheduled_start"],
+            "scheduledEnd": evaluation["scheduled_end"],
+        })
+        
+        results.append(payload)
+        
+    return results
 @router.get("/download/csv")
 def download_attendance_csv(
     user_id: Optional[int] = Query(None, description="Filter by user ID"),
@@ -1412,12 +1759,14 @@ def download_attendance_pdf(
 # Get Today's Attendance Status (for Admin/HR/Manager)
 @router.get("/today-status")
 def get_today_status(
+    department: Optional[str] = Query(None, description="Filter by department"),
+    role: Optional[str] = Query(None, description="Filter by role (HR, Manager, TeamLead, Employee)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Get today's attendance status for all employees
-    - ADMIN: See all employees
+    - ADMIN: See HR, Manager, TeamLead, and Employee attendance across all departments
     - HR: See only their department employees
     - MANAGER: See only their department employees
     - Others: Not allowed
@@ -1426,8 +1775,15 @@ def get_today_status(
     user_department = current_user.department
     
     if user_role == RoleEnum.ADMIN:
-        # Admin can see all employees
-        return get_today_attendance_status(db)
+        # Admin can see HR, Manager, TeamLead, and Employee attendance across all departments
+        all_records = get_today_attendance_status(db, department=department)
+        allowed_roles = ["HR", "MANAGER", "TEAMLEAD", "TEAM_LEAD", "EMPLOYEE"]
+        filtered_records = [r for r in all_records if not r.get("role") or r.get("role", "").upper().replace(" ", "_") in allowed_roles or r.get("role", "").upper().replace("_", "") in [ar.replace("_", "") for ar in allowed_roles]]
+        # Apply role filter if provided
+        if role:
+            role_upper = role.upper().replace(" ", "_")
+            filtered_records = [r for r in filtered_records if r.get("role", "").upper().replace(" ", "_") == role_upper or r.get("role", "").upper().replace("_", "") == role_upper.replace("_", "")]
+        return filtered_records
     elif user_role == RoleEnum.HR:
         # HR can see only their department
         if not user_department:
@@ -1442,18 +1798,25 @@ def get_today_status(
         raise HTTPException(status_code=403, detail="Not authorized to view attendance")
 
 # Get All Attendance History (for Admin/HR/Manager)
-@router.get("/all")
+@router.get("/history")
 def get_all_attendance_history(
     department: Optional[str] = None,
+    date: Optional[str] = None,
+    role: Optional[str] = Query(None, description="Filter by role (HR, Manager, TeamLead, Employee)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Get all attendance history
-    - ADMIN: See all employees (or filter by department)
+    - ADMIN: See HR, Manager, TeamLead, and Employee attendance across all departments
     - HR: See only their department employees (department filter is automatic)
     - MANAGER: See only their department employees (department filter is automatic)
     - Others: Not allowed
+    
+    Query params:
+    - department: Filter by department
+    - date: Filter by date (format: YYYY-MM-DD)
+    - role: Filter by role (HR, Manager, TeamLead, Employee)
     """
     user_role = current_user.role
     user_department = current_user.department
@@ -1465,14 +1828,46 @@ def get_all_attendance_history(
             User.department,
             User.employee_id,
             User.email,
+            User.role,
         )
         .join(User, Attendance.user_id == User.user_id)
     )
+    
+    # Filter by date if provided
+    if date:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            date_start = datetime.combine(target_date, datetime.min.time())
+            date_end = datetime.combine(target_date, datetime.max.time())
+            records_query = records_query.filter(
+                Attendance.check_in >= date_start,
+                Attendance.check_in <= date_end
+            )
+            logger.info(f"📅 Filtering attendance for date: {date}")
+        except ValueError:
+            logger.warning(f"Invalid date format: {date}")
+            pass
 
     if user_role == RoleEnum.ADMIN:
-        # Admin can see all or filter by department
+        # Admin can see HR, Manager, TeamLead, and Employee attendance across all departments
+        records_query = records_query.filter(User.role.in_([RoleEnum.HR, RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]))
+        # Apply department filter if provided
         if department:
             records_query = records_query.filter(User.department == department)
+        # Apply role filter if provided
+        if role:
+            role_upper = role.upper().replace(" ", "_")
+            role_enum = None
+            if role_upper in ["HR"]:
+                role_enum = RoleEnum.HR
+            elif role_upper in ["MANAGER"]:
+                role_enum = RoleEnum.MANAGER
+            elif role_upper in ["TEAMLEAD", "TEAM_LEAD"]:
+                role_enum = RoleEnum.TEAM_LEAD
+            elif role_upper in ["EMPLOYEE"]:
+                role_enum = RoleEnum.EMPLOYEE
+            if role_enum:
+                records_query = records_query.filter(User.role == role_enum)
     elif user_role == RoleEnum.HR:
         # HR can only see their department's attendance
         if not user_department:
@@ -1495,11 +1890,13 @@ def get_all_attendance_history(
         logger.error(f"Error querying attendance records: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching attendance records: {str(e)}")
 
-    # Format the response - include email and other user details
+    # Format the response - include email, role and other user details
     result = []
     timing_cache = _build_office_timing_cache(db)
-    for att, name, dept, emp_id, email in records:
+    for att, name, dept, emp_id, email, role in records:
         payload = _prepare_attendance_payload(att)
+        # Convert role enum to string if needed
+        role_str = role.value if hasattr(role, 'value') else str(role) if role else "employee"
         payload.update(
             {
                 "name": name,
@@ -1508,6 +1905,8 @@ def get_all_attendance_history(
                 "employee_id": emp_id,
                 "email": email,
                 "userEmail": email,
+                "role": role_str,
+                "user_role": role_str,
             }
         )
         check_in_value = payload.get("check_in")
@@ -1531,6 +1930,131 @@ def get_all_attendance_history(
         result.append(payload)
 
     return result
+
+
+# Admin endpoint to view all attendance records across all departments and roles
+@router.get("/admin/all-records")
+def get_admin_all_attendance_records(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    department: Optional[str] = Query(None, description="Filter by department"),
+    role: Optional[str] = Query(None, description="Filter by role (HR, Manager, TeamLead, Employee)"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin-only endpoint to view all attendance records for HR, Manager, TeamLead, and Employee
+    across all departments with optional filters.
+    
+    Query params:
+    - start_date: Start date filter (YYYY-MM-DD)
+    - end_date: End date filter (YYYY-MM-DD)
+    - department: Filter by department name
+    - role: Filter by role (HR, Manager, TeamLead, Employee)
+    """
+    # Only Admin can access this endpoint
+    if current_user.role != RoleEnum.ADMIN:
+        raise HTTPException(status_code=403, detail="Only Admin can access this endpoint")
+    
+    records_query = (
+        db.query(
+            Attendance,
+            User.name,
+            User.department,
+            User.employee_id,
+            User.email,
+            User.role,
+        )
+        .join(User, Attendance.user_id == User.user_id)
+        .filter(User.is_active == True)
+        # Admin can see HR, Manager, TeamLead, and Employee attendance
+        .filter(User.role.in_([RoleEnum.HR, RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]))
+    )
+    
+    # Apply date filters
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            records_query = records_query.filter(Attendance.check_in >= start_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD")
+    
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            end_dt = end_dt.replace(hour=23, minute=59, second=59)
+            records_query = records_query.filter(Attendance.check_in <= end_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid end_date format. Use YYYY-MM-DD")
+    
+    # Apply department filter
+    if department:
+        records_query = records_query.filter(User.department == department)
+    
+    # Apply role filter
+    if role:
+        role_upper = role.upper().replace(" ", "_")
+        role_enum = None
+        if role_upper in ["HR"]:
+            role_enum = RoleEnum.HR
+        elif role_upper in ["MANAGER"]:
+            role_enum = RoleEnum.MANAGER
+        elif role_upper in ["TEAMLEAD", "TEAM_LEAD"]:
+            role_enum = RoleEnum.TEAM_LEAD
+        elif role_upper in ["EMPLOYEE"]:
+            role_enum = RoleEnum.EMPLOYEE
+        if role_enum:
+            records_query = records_query.filter(User.role == role_enum)
+    
+    try:
+        records = records_query.order_by(Attendance.check_in.desc()).all()
+    except Exception as e:
+        logger.error(f"Error querying admin attendance records: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching attendance records: {str(e)}")
+    
+    # Format the response with full details
+    result = []
+    timing_cache = _build_office_timing_cache(db)
+    
+    for att, name, dept, emp_id, email, user_role in records:
+        payload = _prepare_attendance_payload(att)
+        # Convert role enum to string
+        role_str = user_role.value if hasattr(user_role, 'value') else str(user_role) if user_role else "Employee"
+        
+        payload.update({
+            "name": name,
+            "userName": name,
+            "department": dept,
+            "employee_id": emp_id,
+            "email": email,
+            "userEmail": email,
+            "role": role_str,
+            "user_role": role_str,
+        })
+        
+        # Format datetime fields
+        check_in_value = payload.get("check_in")
+        if isinstance(check_in_value, datetime):
+            payload["check_in"] = check_in_value.isoformat()
+        check_out_value = payload.get("check_out")
+        if isinstance(check_out_value, datetime):
+            payload["check_out"] = check_out_value.isoformat()
+        
+        # Add attendance status evaluation
+        timing = _resolve_office_timing(db, dept, timing_cache)
+        evaluation = _evaluate_attendance_status(att.check_in, att.check_out, timing)
+        payload.update({
+            "status": evaluation["status"],
+            "checkInStatus": evaluation["check_in_status"],
+            "checkOutStatus": evaluation["check_out_status"],
+            "scheduledStart": evaluation["scheduled_start"],
+            "scheduledEnd": evaluation["scheduled_end"],
+        })
+        
+        result.append(payload)
+    
+    return result
+
 
 @router.get("/office-hours", response_model=List[OfficeTimingOut])
 def list_office_timings(
