@@ -26,6 +26,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { API_CONFIG } from "../../config/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService, LeaveRequestResponse, LeaveSummary } from "../../lib/api";
+import { formatDateIST, formatDateShortIST, getDayMonthIST, getMonthYearIST, formatDateWithDayIST } from "../../utils/dateTime";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -554,7 +555,7 @@ export default function LeaveManagement() {
                           <Ionicons name="calendar-outline" size={18} color="#7c3aed" />
                           <View style={styles.dateInputContent}>
                             <Text style={styles.dateInputLabel}>From</Text>
-                            <Text style={styles.dateInputValue}>{format(form.startDate, "MMM dd, yyyy")}</Text>
+                            <Text style={styles.dateInputValue}>{formatDateIST(form.startDate)}</Text>
                           </View>
                         </TouchableOpacity>
                         <View style={styles.dateArrow}>
@@ -564,7 +565,7 @@ export default function LeaveManagement() {
                           <Ionicons name="calendar-outline" size={18} color="#7c3aed" />
                           <View style={styles.dateInputContent}>
                             <Text style={styles.dateInputLabel}>To</Text>
-                            <Text style={styles.dateInputValue}>{format(form.endDate, "MMM dd, yyyy")}</Text>
+                            <Text style={styles.dateInputValue}>{formatDateIST(form.endDate)}</Text>
                           </View>
                         </TouchableOpacity>
                       </View>
@@ -635,7 +636,7 @@ export default function LeaveManagement() {
                           <View style={styles.historyItemContent}>
                             <View style={styles.historyItemTop}>
                               <Text style={styles.historyItemDate}>
-                                {format(parseISO(req.start_date), "MMM dd")} - {format(parseISO(req.end_date), "MMM dd, yyyy")}
+                                {getDayMonthIST(req.start_date)} - {formatDateIST(req.end_date)}
                               </Text>
                               <View style={[styles.statusBadge, { backgroundColor: getStatusColor(req.status) }]}>
                                 <Text style={styles.statusBadgeText}>{req.status}</Text>
@@ -759,12 +760,12 @@ export default function LeaveManagement() {
                             <View style={styles.approvalDateRange}>
                               <View style={styles.approvalDateItem}>
                                 <Text style={styles.approvalDateLabel}>From</Text>
-                                <Text style={styles.approvalDateValue}>{format(startDate, "MMM dd, yyyy")}</Text>
+                                <Text style={styles.approvalDateValue}>{formatDateIST(startDate)}</Text>
                               </View>
                               <Ionicons name="arrow-forward" size={16} color="#d1d5db" />
                               <View style={styles.approvalDateItem}>
                                 <Text style={styles.approvalDateLabel}>To</Text>
-                                <Text style={styles.approvalDateValue}>{format(endDate, "MMM dd, yyyy")}</Text>
+                                <Text style={styles.approvalDateValue}>{formatDateIST(endDate)}</Text>
                               </View>
                             </View>
 
@@ -813,7 +814,7 @@ export default function LeaveManagement() {
                     <View style={styles.holidayForm}>
                       <TouchableOpacity style={styles.holidayDateBtn} onPress={openHolidayDatePicker} activeOpacity={0.8}>
                         <Ionicons name="calendar-outline" size={18} color="#6b7280" />
-                        <Text style={styles.holidayDateText}>{format(holidayForm.date, "MMM dd, yyyy")}</Text>
+                        <Text style={styles.holidayDateText}>{formatDateIST(holidayForm.date)}</Text>
                       </TouchableOpacity>
                       <TextInput
                         style={styles.holidayNameInput}
@@ -833,7 +834,7 @@ export default function LeaveManagement() {
                             <View style={styles.holidayItemLeft}>
                               <View style={styles.holidayDot} />
                               <Text style={styles.holidayItemText}>{h.name}</Text>
-                              <Text style={styles.holidayItemDate}>{format(h.date, "MMM dd")}</Text>
+                              <Text style={styles.holidayItemDate}>{getDayMonthIST(h.date)}</Text>
                             </View>
                             <TouchableOpacity onPress={() => removeHoliday(i)}>
                               <Ionicons name="close-circle" size={20} color="#ef4444" />
@@ -851,7 +852,7 @@ export default function LeaveManagement() {
                     <TouchableOpacity style={styles.calendarNavBtn} onPress={goToPreviousMonth}>
                       <Ionicons name="chevron-back" size={24} color="#7c3aed" />
                     </TouchableOpacity>
-                    <Text style={styles.calendarMonthText}>{format(currentMonth, "MMMM yyyy")}</Text>
+                    <Text style={styles.calendarMonthText}>{getMonthYearIST(currentMonth)}</Text>
                     <TouchableOpacity style={styles.calendarNavBtn} onPress={goToNextMonth}>
                       <Ionicons name="chevron-forward" size={24} color="#7c3aed" />
                     </TouchableOpacity>
@@ -992,7 +993,7 @@ export default function LeaveManagement() {
                   <TouchableOpacity style={styles.calendarNavBtn} onPress={goToModalPreviousMonth}>
                     <Ionicons name="chevron-back" size={24} color="#7c3aed" />
                   </TouchableOpacity>
-                  <Text style={styles.calendarMonthText}>{format(modalCurrentMonth, "MMMM yyyy")}</Text>
+                  <Text style={styles.calendarMonthText}>{getMonthYearIST(modalCurrentMonth)}</Text>
                   <TouchableOpacity style={styles.calendarNavBtn} onPress={goToModalNextMonth}>
                     <Ionicons name="chevron-forward" size={24} color="#7c3aed" />
                   </TouchableOpacity>
@@ -1026,7 +1027,7 @@ export default function LeaveManagement() {
               </View>
               {modalSelectedDate && (
                 <View style={styles.selectedDateCard}>
-                  <Text style={styles.selectedDateTitle}>{format(modalSelectedDate, "EEEE, MMMM dd, yyyy")}</Text>
+                  <Text style={styles.selectedDateTitle}>{formatDateWithDayIST(modalSelectedDate)}</Text>
                   {getHolidayName(modalSelectedDate) && (
                     <View style={styles.selectedDateHoliday}>
                       <Ionicons name="sunny" size={16} color="#f59e0b" />

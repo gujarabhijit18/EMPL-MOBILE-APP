@@ -4,6 +4,22 @@
 
 The attendance system properly handles timezones to ensure accurate time tracking across different devices and locations. The system uses **India Standard Time (IST, UTC+5:30)** as the primary timezone.
 
+## Standardized Display Formats
+
+All date and time displays across the application use the following standardized IST formats:
+
+| Type | Format | Example |
+|------|--------|---------|
+| Date | DD-MM-YYYY | 05-12-2025 |
+| Time | hh:mm A | 09:30 AM |
+| DateTime | DD-MM-YYYY hh:mm A | 05-12-2025 09:30 AM |
+| Short Date | DD Mon YYYY | 05 Dec 2025 |
+| Day + Date | Friday, DD-MM-YYYY | Friday, 05-12-2025 |
+| Month Year | Month YYYY | December 2025 |
+| Day Month | DD Mon | 05 Dec |
+
+**Important:** All timestamps from the backend are converted to IST before rendering, regardless of the device's local timezone.
+
 ## How It Works
 
 ### 1. **Check-In/Check-Out Process**
@@ -72,15 +88,31 @@ const formattedTime = formatAttendanceTime(istTime);
 
 ### 4. **Utility Functions**
 
-The `Frontend/src/utils/dateTime.ts` file provides:
+The `Frontend/src/utils/dateTime.ts` file provides standardized IST formatting:
 
-- `getCurrentISTTime()` - Get current time in IST
+**Primary Display Functions:**
+- `formatDateIST(date)` - Format to DD-MM-YYYY (e.g., "05-12-2025")
+- `formatTimeIST(date)` - Format to hh:mm A (e.g., "09:30 AM")
+- `formatDateTimeIST(date)` - Format to DD-MM-YYYY hh:mm A
+- `formatDateWithDayIST(date)` - Format with day name (e.g., "Friday, 05-12-2025")
+- `formatDateShortIST(date)` - Format to DD Mon YYYY (e.g., "05 Dec 2025")
+- `getDayMonthIST(date)` - Format to DD Mon (e.g., "05 Dec")
+- `getMonthYearIST(date)` - Format to Month YYYY (e.g., "December 2025")
+
+**Helper Functions:**
+- `getCurrentISTTime()` - Get current time
 - `convertUTCToIST(date)` - Convert UTC to IST
-- `formatAttendanceTime(date)` - Format time for display
-- `formatAttendanceDate(date)` - Format date for display
+- `getDayOfWeek(date)` - Get day name (e.g., "Monday")
+- `getDayOfWeekShort(date)` - Get short day name (e.g., "Mon")
+- `getRelativeTime(date)` - Get relative time (e.g., "2 hours ago")
+- `formatDateRangeIST(start, end)` - Format date range
 - `calculateHours(start, end)` - Calculate hours worked
 - `isToday(date)` - Check if date is today in IST
-- And more...
+
+**Legacy Support:**
+- `formatAttendanceTime(date)` - Alias for formatTimeIST
+- `formatAttendanceDate(date)` - Alias for formatDateIST
+- `formatISTDate(date, format)` - Legacy format function
 
 ### 5. **Logging and Debugging**
 
@@ -163,9 +195,10 @@ Backend returns timestamps in ISO format (UTC):
 ```
 
 Frontend converts for display:
-- Check-in: "1:27 PM IST"
-- Check-out: "1:27 PM IST"
-- Date: "27 Nov 2025"
+- Check-in: "01:27 PM"
+- Check-out: "01:27 PM"
+- Date: "27-11-2025"
+- DateTime: "27-11-2025 01:27 PM"
 
 ## Summary
 

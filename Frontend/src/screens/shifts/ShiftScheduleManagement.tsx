@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
 import { useTheme } from '../../contexts/ThemeContext';
+import { formatDateIST, formatTimeIST } from '../../utils/dateTime';
 
 interface Shift {
   shift_id: number;
@@ -243,7 +244,7 @@ export default function ShiftScheduleManagement() {
   };
   const formatTimeDisplay = (time: string) => {
     const d = timeStringToDate(time);
-    return format(d, 'hh : mm a');
+    return formatTimeIST(d);
   };
   const getAvailableUsers = () => {
     const assignedUserIds = new Set(schedule.shifts.flatMap(s => s.assignments.map(a => a.user_id)));
@@ -414,7 +415,7 @@ export default function ShiftScheduleManagement() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View style={{ flex: 1 }}>
                   <PaperTextInput
-                    value={format(new Date(selectedDate), 'dd/MM/yyyy')}
+                    value={formatDateIST(selectedDate)}
                     editable={false}
                     mode="outlined"
                     right={<PaperTextInput.Icon icon="calendar" onPress={() => setShowDatePicker(true)} />}
@@ -528,7 +529,7 @@ export default function ShiftScheduleManagement() {
                 <View style={{ flex: 1 }}>
                   <PaperTextInput
                     label="Start"
-                    value={format(new Date(weekStartDate), 'dd/MM/yyyy')}
+                    value={formatDateIST(weekStartDate)}
                     editable={false}
                     mode="outlined"
                     right={<PaperTextInput.Icon icon="calendar" onPress={() => setShowWeekStartPicker(true)} />}
@@ -537,7 +538,7 @@ export default function ShiftScheduleManagement() {
                 <View style={{ flex: 1 }}>
                   <PaperTextInput
                     label="End"
-                    value={format(new Date(weekEndDate), 'dd/MM/yyyy')}
+                    value={formatDateIST(weekEndDate)}
                     editable={false}
                     mode="outlined"
                     right={<PaperTextInput.Icon icon="calendar" onPress={() => setShowWeekEndPicker(true)} />}

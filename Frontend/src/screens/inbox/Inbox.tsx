@@ -11,8 +11,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe Ionicons
-import { format } from "date-fns";
 import { Avatar, Card, Button, Chip } from "react-native-paper";
+import { formatDateTimeIST, getDayMonthIST, formatTimeIST } from "../utils/dateTime";
 
 // ✅ Message Interface
 interface Message {
@@ -198,7 +198,7 @@ export default function Inbox() {
               {item.subject}
             </Text>
             <View style={styles.metaRow}>
-              <Text style={styles.time}>{format(item.timestamp, "MMM dd, HH:mm")}</Text>
+              <Text style={styles.time}>{getDayMonthIST(item.timestamp)} {formatTimeIST(item.timestamp)}</Text>
               <Chip
                 compact
                 style={[
@@ -225,7 +225,7 @@ export default function Inbox() {
         <Card style={styles.detailsCard}>
           <Card.Title
             title={selected.subject}
-            subtitle={`${selected.from} • ${format(selected.timestamp, "MMM dd, yyyy HH:mm")}`}
+            subtitle={`${selected.from} • ${formatDateTimeIST(selected.timestamp)}`}
             left={(props) => <Avatar.Text {...props} label={selected.from.charAt(0)} />}
             right={() => (
               <View style={{ flexDirection: "row", gap: 6 }}>

@@ -123,15 +123,23 @@ def create_task(db: Session, title: str, description: str, assigned_by: int, ass
     return task
 
 def list_tasks(db: Session, user_id: int):
+    """
+    List tasks for a user.
+    
+    A user sees tasks where they are:
+    1. The current assignee (assigned_to == user_id)
+    2. The original creator (assigned_by == user_id)
+    
+    Note: Previous assignees who passed the task should NOT see it anymore.
+    The task history is preserved for audit purposes but doesn't grant visibility.
+    """
     _ensure_task_pass_columns(db)
     return (
         db.query(Task)
-        .outerjoin(TaskHistory, TaskHistory.task_id == Task.task_id)
         .filter(
             or_(
-                Task.assigned_to == user_id,
-                Task.assigned_by == user_id,
-                TaskHistory.user_id == user_id,
+                Task.assigned_to == user_id,  # Current assignee
+                Task.assigned_by == user_id,  # Original creator
             )
         )
         .distinct()

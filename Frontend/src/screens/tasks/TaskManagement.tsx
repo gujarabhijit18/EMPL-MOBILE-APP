@@ -37,6 +37,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
+import { formatDateIST, formatTimeIST, formatDateTimeIST, getDayMonthIST, formatDateShortIST } from "../../utils/dateTime";
 
 const { width } = Dimensions.get('window');
 
@@ -1851,32 +1852,16 @@ export default function TaskManagement() {
     }
   };
 
-  // Helper function to format date and time properly in local timezone
+  // Helper function to format date and time in IST (DD-MM-YYYY hh:mm A)
   const formatDateTime = (dateString: string) => {
     if (!dateString) return "Unknown date";
-    const date = new Date(dateString);
-    const dateStr = date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: '2-digit', 
-      year: 'numeric' 
-    });
-    const timeStr = date.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
-      minute: '2-digit', 
-      hour12: true 
-    });
-    return `${dateStr} at ${timeStr}`;
+    return formatDateTimeIST(dateString);
   };
 
-  // Helper function to format time only
+  // Helper function to format time only in IST (hh:mm A)
   const formatTime = (dateString: string) => {
     if (!dateString) return "";
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
-      minute: '2-digit', 
-      hour12: true 
-    });
+    return formatTimeIST(dateString);
   };
 
 
@@ -2037,34 +2022,67 @@ export default function TaskManagement() {
         user_id: emp.user_id,
       }));
 
-      // Filter employees based on role
+      // Filter employees based on role - STRICT ROLE-BASED ASSIGNMENT
       const userRole = user?.role?.toLowerCase();
       const userDepartment = user?.department;
-      
-      if (userRole === 'employee') {
-        // Employee can only assign tasks to themselves
-        transformedEmployees = transformedEmployees.filter(
-          (emp: any) => emp.user_id === user?.user_id || emp.email === user?.email
-        );
-      } else if (userRole === 'admin') {
-        // Admin can assign tasks to ALL departments (HR, Manager, Team Lead, Employee)
-        // No filtering needed - admin sees all employees
-      } else if ((userRole === 'hr' || userRole === 'manager') && userDepartment) {
-        // HR and Manager can assign to:
-        // 1. Themselves
-        // 2. Manager, Team Lead, and Employee in their department only
-        transformedEmployees = transformedEmployees.filter(
-          (emp: any) => {
-            // Include self
-            if (emp.user_id === user?.user_id || emp.email === user?.email) {
-              return true;
-            }
-            // Include only employees from the same department
-            return emp.department?.toLowerCase() === userDepartment.toLowerCase();
+      const currentUserId = user?.user_id;
+
+      console.log(`📋 Loading employees for role: ${userRole}, department: ${userDepartment}`);
+
+      if (userRole === 'admin') {
+        // Admin can assign tasks to HR and Manager roles ONLY (all departments)
+        console.log("👤 Admin: Filtering for HR and Manager roles only");
+        transformedEmployees = transformedEmployees.filter((emp: any) => {
+          const empRole = emp.role?.toLowerCase();
+          return empRole === 'hr' || empRole === 'manager';
+        });
+      } else if (userRole === 'hr') {
+        // HR can assign to: Self, Manager, TeamLead, Employee (own department only) - NOT other HR
+        console.log("👤 HR: Filtering for own department (Manager, TeamLead, Employee - NOT other HR)");
+        transformedEmployees = transformedEmployees.filter((emp: any) => {
+          // Include self
+          if (emp.user_id === currentUserId || emp.email === user?.email) {
+            return true;
           }
+          // Include only same department
+          if (emp.department?.toLowerCase() !== userDepartment?.toLowerCase()) {
+            return false;
+          }
+          // Include Manager, TeamLead, Employee roles - EXCLUDE other HR
+          const empRole = emp.role?.toLowerCase();
+          return empRole === 'manager' || empRole === 'team_lead' || empRole === 'teamlead' || empRole === 'employee';
+        });
+      } else if (userRole === 'manager') {
+        // Manager can assign to: Self, TeamLead, Employee (own department only) - NOT other Manager
+        console.log("👤 Manager: Filtering for own department (TeamLead, Employee - NOT other Manager)");
+        transformedEmployees = transformedEmployees.filter((emp: any) => {
+          // Include self
+          if (emp.user_id === currentUserId || emp.email === user?.email) {
+            return true;
+          }
+          // Include only same department
+          if (emp.department?.toLowerCase() !== userDepartment?.toLowerCase()) {
+            return false;
+          }
+          // Include TeamLead, Employee roles - EXCLUDE other Manager
+          const empRole = emp.role?.toLowerCase();
+          return empRole === 'team_lead' || empRole === 'teamlead' || empRole === 'employee';
+        });
+      } else if (userRole === 'team_lead' || userRole === 'teamlead') {
+        // TeamLead can assign to: Self only
+        console.log("👤 TeamLead: Filtering for self only");
+        transformedEmployees = transformedEmployees.filter(
+          (emp: any) => emp.user_id === currentUserId || emp.email === user?.email
+        );
+      } else if (userRole === 'employee') {
+        // Employee can assign to: Self only
+        console.log("👤 Employee: Filtering for self only");
+        transformedEmployees = transformedEmployees.filter(
+          (emp: any) => emp.user_id === currentUserId || emp.email === user?.email
         );
       }
 
+      console.log(`✅ Filtered employees count: ${transformedEmployees.length}`);
       setEmployees(transformedEmployees);
     } catch (error: any) {
       console.error("Error loading employees:", error);
@@ -2409,6 +2427,13 @@ export default function TaskManagement() {
     return employee?.name || `User #${userId}`;
   };
 
+  // Helper function to get user name by ID from employees list
+  const getUserNameById = (userId: number | undefined): string => {
+    if (!userId) return "Unknown";
+    const employee = employees.find(emp => emp.user_id === userId);
+    return employee?.name || `User #${userId}`;
+  };
+
   const createTask = async () => {
     Keyboard.dismiss();
     if (!validateForm()) {
@@ -2602,7 +2627,7 @@ export default function TaskManagement() {
       case 'today': return 'Today';
       case 'week': return 'Last 7 Days';
       case 'month': return 'Last 30 Days';
-      case 'custom': return `${customDateStart.toLocaleDateString()} - ${customDateEnd.toLocaleDateString()}`;
+      case 'custom': return `${formatDateIST(customDateStart)} - ${formatDateIST(customDateEnd)}`;
       default: return 'All Time';
     }
   };
@@ -2627,8 +2652,8 @@ export default function TaskManagement() {
           task.priority,
           formatStatusLabel(task.status),
           task.assignedTo.length > 0 ? task.assignedTo[0] : "",
-          task.deadline || "Not set",
-          new Date(task.createdAt).toLocaleDateString('en-US')
+          task.deadline ? formatDateIST(task.deadline) : "Not set",
+          formatDateIST(task.createdAt)
         ];
         csvRows.push(row.join(","));
       });
@@ -2653,7 +2678,7 @@ export default function TaskManagement() {
       }
 
       if (Share && typeof Share.share === 'function') {
-        const result = await Share.share({ message: csvContent, title: `Task Export - ${new Date().toLocaleDateString()}` });
+        const result = await Share.share({ message: csvContent, title: `Task Export - ${formatDateIST(new Date())}` });
         if (result.action === Share.sharedAction) {
           showToast(`✅ Exported ${tasksToExport.length} tasks`);
           setExportModalVisible(false);
@@ -2671,10 +2696,10 @@ export default function TaskManagement() {
     try {
       setIsExporting(true);
       const tasksToExport = getExportFilteredTasks();
-      const textReport = `TASK REPORT\nGenerated: ${new Date().toLocaleDateString()}\nTotal Tasks: ${tasksToExport.length}\n\n${tasksToExport.map((task, i) => `${i + 1}. ${task.title}\n   Priority: ${task.priority} | Status: ${formatStatusLabel(task.status)}\n   Deadline: ${task.deadline || 'Not set'}`).join('\n\n')}`;
+      const textReport = `TASK REPORT\nGenerated: ${formatDateIST(new Date())}\nTotal Tasks: ${tasksToExport.length}\n\n${tasksToExport.map((task, i) => `${i + 1}. ${task.title}\n   Priority: ${task.priority} | Status: ${formatStatusLabel(task.status)}\n   Deadline: ${task.deadline ? formatDateIST(task.deadline) : 'Not set'}`).join('\n\n')}`;
 
       if (Share && typeof Share.share === 'function') {
-        const result = await Share.share({ message: textReport, title: `Task Report - ${new Date().toLocaleDateString()}` });
+        const result = await Share.share({ message: textReport, title: `Task Report - ${formatDateIST(new Date())}` });
         if (result.action === Share.sharedAction) {
           showToast(`✅ Exported ${tasksToExport.length} tasks`);
           setExportModalVisible(false);
@@ -2748,8 +2773,8 @@ export default function TaskManagement() {
             </View>
             <View style={styles.headerRight}>
               <View style={styles.dateTimeContainer}>
-                <Text style={styles.timeText}>{currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</Text>
-                <Text style={styles.dateText}>{currentTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
+                <Text style={styles.timeText}>{formatTimeIST(currentTime)}</Text>
+                <Text style={styles.dateText}>{getDayMonthIST(currentTime)}</Text>
               </View>
             </View>
           </View>
@@ -2892,7 +2917,7 @@ export default function TaskManagement() {
                           <View style={styles.taskCardMetaRow}>
                             <View style={styles.taskCardMetaItem}>
                               <Ionicons name="calendar-outline" size={14} color="#6B7280" />
-                              <Text style={styles.taskCardMetaText}>{item.deadline ? new Date(item.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : "No deadline"}</Text>
+                              <Text style={styles.taskCardMetaText}>{item.deadline ? getDayMonthIST(item.deadline) : "No deadline"}</Text>
                             </View>
                             <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(item.priority) }]}>
                               <Text style={styles.priorityText}>{item.priority}</Text>
@@ -3005,13 +3030,51 @@ export default function TaskManagement() {
                             </View>
                           </View>
                           <View style={styles.taskCardInfoItem}>
-                            <Text style={styles.taskCardInfoLabel}>Assigned To</Text>
+                            <Text style={styles.taskCardInfoLabel}>Currently Assigned To</Text>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                               <Ionicons name="person" size={18} color="#6B7280" />
-                              <Text style={styles.taskCardInfoValue} numberOfLines={1}>{item.assignedToName || "Unknown"}</Text>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.taskCardInfoValue} numberOfLines={1}>{item.assignedToName || "Unknown"}</Text>
+                                <Text style={[styles.taskCardMetaText, { fontSize: 11 }]} numberOfLines={1}>Current Assignee</Text>
+                              </View>
                             </View>
                           </View>
                         </View>
+                        
+                        {/* Passing History - Show if task has been passed */}
+                        {taskActivity && taskActivity.length > 0 && (
+                          <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' }}>
+                            <Text style={[styles.taskCardInfoLabel, { marginBottom: 8 }]}>Passing History</Text>
+                            {taskActivity
+                              .filter((activity: any) => activity.action?.toLowerCase() === 'passed')
+                              .slice(-2) // Show last 2 passes
+                              .map((activity: any, idx: number) => {
+                                const details = activity.details || {};
+                                return (
+                                  <View key={idx} style={{ 
+                                    flexDirection: 'row', 
+                                    alignItems: 'center', 
+                                    gap: 8, 
+                                    marginBottom: idx === 0 ? 8 : 0,
+                                    paddingVertical: 6,
+                                    paddingHorizontal: 8,
+                                    backgroundColor: '#F9FAFB',
+                                    borderRadius: 8,
+                                  }}>
+                                    <Ionicons name="git-branch-outline" size={14} color="#8B5CF6" />
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={{ fontSize: 12, color: '#6B7280', fontWeight: '500' }} numberOfLines={1}>
+                                        {details.from_name || getUserNameById(details.from)} → {details.to_name || getUserNameById(details.to)}
+                                      </Text>
+                                      <Text style={{ fontSize: 10, color: '#9CA3AF' }}>
+                                        {formatTime(activity.created_at)}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                );
+                              })}
+                          </View>
+                        )}
                       </View>
 
                       {/* Card Footer */}
@@ -3053,7 +3116,7 @@ export default function TaskManagement() {
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tableHeaderText, styles.taskColumn]}>Task</Text>
                   <Text style={[styles.tableHeaderText, styles.assignedByColumn]}>Assigned By</Text>
-                  <Text style={[styles.tableHeaderText, styles.assignedToColumn]}>Assigned To</Text>
+                  <Text style={[styles.tableHeaderText, styles.assignedToColumn]}>Currently Assigned</Text>
                   <Text style={[styles.tableHeaderText, styles.priorityColumn]}>Priority</Text>
                   <Text style={[styles.tableHeaderText, styles.deadlineColumn]}>Deadline</Text>
                   <Text style={[styles.tableHeaderText, styles.statusColumn]}>Status</Text>
@@ -3088,7 +3151,10 @@ export default function TaskManagement() {
                         <View style={[styles.tableCell, styles.assignedToColumn]}>
                           <View style={styles.assignedToContainer}>
                             <Ionicons name="person" size={18} color="#6B7280" />
-                            <Text style={styles.assignedToText} numberOfLines={1}>{item.assignedToName || item.assignedTo[0] || "Unknown"}</Text>
+                            <View style={{ marginLeft: 8, flex: 1 }}>
+                              <Text style={[styles.assignedToText, { fontWeight: '600' }]} numberOfLines={1}>{item.assignedToName || item.assignedTo[0] || "Unknown"}</Text>
+                              <Text style={[styles.taskDescription, { fontSize: 10 }]} numberOfLines={1}>Current</Text>
+                            </View>
                           </View>
                         </View>
                         <View style={[styles.tableCell, styles.priorityColumn]}>
@@ -3099,7 +3165,7 @@ export default function TaskManagement() {
                         <View style={[styles.tableCell, styles.deadlineColumn]}>
                           <View style={styles.deadlineContainer}>
                             <Ionicons name="calendar" size={16} color="#6B7280" />
-                            <Text style={styles.deadlineText} numberOfLines={1}>{item.deadline ? new Date(item.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "Not set"}</Text>
+                            <Text style={styles.deadlineText} numberOfLines={1}>{item.deadline ? formatDateShortIST(item.deadline) : "Not set"}</Text>
                           </View>
                         </View>
                         <View style={[styles.tableCell, styles.statusColumn]}>
@@ -3223,7 +3289,7 @@ export default function TaskManagement() {
                       <Text style={styles.fieldLabel}>Deadline <Text style={styles.required}>*</Text></Text>
                     </View>
                     <TouchableOpacity style={[styles.dateInput, formErrors.deadline && styles.inputError]} activeOpacity={0.7} onPress={handleDatePickerPress}>
-                      <Text style={[styles.dateInputText, !newTask.deadline && { color: '#9ca3af' }]}>{newTask.deadline ? new Date(newTask.deadline).toLocaleDateString('en-US', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'dd / mm / yyyy'}</Text>
+                      <Text style={[styles.dateInputText, !newTask.deadline && { color: '#9ca3af' }]}>{newTask.deadline ? formatDateIST(newTask.deadline) : 'dd-mm-yyyy'}</Text>
                       <Ionicons name="calendar-outline" size={20} color="#8B5CF6" />
                     </TouchableOpacity>
                     {formErrors.deadline && <Text style={styles.errorText}>{formErrors.deadline}</Text>}
@@ -3241,8 +3307,12 @@ export default function TaskManagement() {
                   <View style={[styles.pickerContainer, formErrors.assignedTo && styles.inputError]}>
                     {loadingEmployees ? (
                       <View style={{ padding: 16, alignItems: 'center' }}><ActivityIndicator size="small" color="#8B5CF6" /></View>
+                    ) : employees.length === 0 ? (
+                      <View style={{ padding: 16, alignItems: 'center' }}>
+                        <Text style={{ color: '#9CA3AF', fontSize: 14, fontWeight: '500' }}>No employees available for assignment</Text>
+                      </View>
                     ) : (
-                      <Picker selectedValue={newTask.assignedTo} onValueChange={handleEmployeeSelect} style={styles.picker} dropdownIconColor="#8B5CF6" enabled={!loadingEmployees}>
+                      <Picker selectedValue={newTask.assignedTo} onValueChange={handleEmployeeSelect} style={styles.picker} dropdownIconColor="#8B5CF6" enabled={!loadingEmployees && employees.length > 0}>
                         <Picker.Item label="Select employee" value="" />
                         {employees.map((emp) => <Picker.Item key={emp.id} label={`${emp.name} • ${emp.role || 'N/A'} (${emp.department || 'N/A'})`} value={emp.email} />)}
                       </Picker>
@@ -3345,7 +3415,7 @@ export default function TaskManagement() {
                       <View style={styles.taskDetailGridItem}>
                         <View style={styles.taskDetailFieldHeader}>
                           <Ionicons name="person" size={18} color="#8B5CF6" />
-                          <Text style={styles.taskDetailFieldLabel}>Assigned To</Text>
+                          <Text style={styles.taskDetailFieldLabel}>Currently Assigned To</Text>
                         </View>
                         <Text style={styles.taskDetailFieldValue}>{selectedTask.assignedToName || selectedTask.assignedTo[0] || "Unknown"}</Text>
                       </View>
@@ -3365,7 +3435,7 @@ export default function TaskManagement() {
                           <Ionicons name="calendar" size={18} color="#8B5CF6" />
                           <Text style={styles.taskDetailFieldLabel}>Deadline</Text>
                         </View>
-                        <Text style={styles.taskDetailFieldValue}>{selectedTask.deadline ? new Date(selectedTask.deadline).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) : "Not set"}</Text>
+                        <Text style={styles.taskDetailFieldValue}>{selectedTask.deadline ? formatDateIST(selectedTask.deadline) : "Not set"}</Text>
                       </View>
 
                       <View style={styles.taskDetailGridItem}>
@@ -3379,6 +3449,50 @@ export default function TaskManagement() {
                         </View>
                       </View>
                     </View>
+
+                    {/* Passing History Section */}
+                    {taskActivity && taskActivity.filter((a: any) => a.action?.toLowerCase() === 'passed').length > 0 && (
+                      <View style={styles.taskDetailSection}>
+                        <View style={styles.taskDetailSectionHeader}>
+                          <Ionicons name="git-branch" size={22} color="#8B5CF6" />
+                          <Text style={styles.taskDetailSectionTitle}>Passing History</Text>
+                        </View>
+                        <View style={{ gap: 10 }}>
+                          {taskActivity
+                            .filter((a: any) => a.action?.toLowerCase() === 'passed')
+                            .map((activity: any, idx: number) => {
+                              const details = activity.details || {};
+                              return (
+                                <View key={idx} style={{
+                                  backgroundColor: '#F9FAFB',
+                                  padding: 12,
+                                  borderRadius: 10,
+                                  borderLeftWidth: 3,
+                                  borderLeftColor: '#8B5CF6',
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 10,
+                                }}>
+                                  <Ionicons name="git-branch" size={16} color="#8B5CF6" />
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }}>
+                                      {details.from_name || getUserNameById(details.from)} → {details.to_name || getUserNameById(details.to)}
+                                    </Text>
+                                    <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                                      {formatDateTime(activity.created_at)}
+                                    </Text>
+                                    {details.note && (
+                                      <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 4, fontStyle: 'italic' }}>
+                                        Note: {details.note}
+                                      </Text>
+                                    )}
+                                  </View>
+                                </View>
+                              );
+                            })}
+                        </View>
+                      </View>
+                    )}
 
                     <View style={styles.taskDetailSection}>
                       <View style={styles.taskDetailSectionHeader}>
@@ -3826,7 +3940,7 @@ export default function TaskManagement() {
                     ) : (
                       <Picker selectedValue={passTaskData.assignee} onValueChange={(value) => setPassTaskData(prev => ({ ...prev, assignee: value }))} style={{ height: 56, color: '#111827' }} dropdownIconColor="#6B7280" enabled={!loadingEmployees}>
                         <Picker.Item label="Select employee" value="" />
-                        {employees.filter(emp => emp.email !== user?.email).map((emp) => <Picker.Item key={emp.id} label={`${emp.name} • ${emp.department || 'N/A'} (${emp.employee_id})`} value={emp.email} />)}
+                        {employees.map((emp) => <Picker.Item key={emp.id} label={`${emp.name} • ${emp.department || 'N/A'} (${emp.employee_id})`} value={emp.email} />)}
                       </Picker>
                     )}
                   </View>

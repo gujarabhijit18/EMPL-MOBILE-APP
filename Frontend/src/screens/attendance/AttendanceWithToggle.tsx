@@ -142,17 +142,33 @@ export default function AttendanceWithToggle() {
       if (viewMode === "self") {
         const data = await apiService.getSelfAttendance(parseInt(user.id));
         const today = format(getCurrentISTTime(), "yyyy-MM-dd");
-        const transformedData: AttendanceRecord[] = data.map((record: any) => ({
-          id: record.attendance_id.toString(),
-          userId: record.user_id.toString(),
-          date: getISTDateString(record.check_in),
-          checkInTime: formatTimeToIST(record.check_in),
-          checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
-          status: record.status || "present",
-          location: record.gps_location,
-          selfie: record.checkInSelfie || record.selfie,
-          workHours: record.total_hours,
-        }));
+        const transformedData: AttendanceRecord[] = data.map((record: any) => {
+          // Parse selfie data - handle JSON format with check_in and check_out
+          let checkInSelfie = record.checkInSelfie || null;
+          if (!checkInSelfie && record.selfie) {
+            try {
+              if (typeof record.selfie === "string" && record.selfie.trim().startsWith("{")) {
+                const selfieData = JSON.parse(record.selfie);
+                checkInSelfie = selfieData.check_in || null;
+              } else {
+                checkInSelfie = record.selfie;
+              }
+            } catch {
+              checkInSelfie = record.selfie;
+            }
+          }
+          return {
+            id: record.attendance_id.toString(),
+            userId: record.user_id.toString(),
+            date: getISTDateString(record.check_in),
+            checkInTime: formatTimeToIST(record.check_in),
+            checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
+            status: record.status || "present",
+            location: record.gps_location,
+            selfie: checkInSelfie,
+            workHours: record.total_hours,
+          };
+        });
         setAttendanceHistory(transformedData);
         setCurrentAttendance(transformedData.find((r) => r.date === today) || null);
       } else {
@@ -160,17 +176,33 @@ export default function AttendanceWithToggle() {
         if (user.role === "hr" || user.role === "manager") {
           data = data.filter((record: any) => record.department === user.department);
         }
-        const transformedData: AttendanceRecord[] = data.map((record: any) => ({
-          id: record.attendance_id.toString(),
-          userId: record.user_id.toString(),
-          date: getISTDateString(record.check_in),
-          checkInTime: formatTimeToIST(record.check_in),
-          checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
-          status: record.status || "present",
-          location: record.gps_location,
-          selfie: record.checkInSelfie || record.selfie,
-          workHours: record.total_hours,
-        }));
+        const transformedData: AttendanceRecord[] = data.map((record: any) => {
+          // Parse selfie data - handle JSON format with check_in and check_out
+          let checkInSelfie = record.checkInSelfie || null;
+          if (!checkInSelfie && record.selfie) {
+            try {
+              if (typeof record.selfie === "string" && record.selfie.trim().startsWith("{")) {
+                const selfieData = JSON.parse(record.selfie);
+                checkInSelfie = selfieData.check_in || null;
+              } else {
+                checkInSelfie = record.selfie;
+              }
+            } catch {
+              checkInSelfie = record.selfie;
+            }
+          }
+          return {
+            id: record.attendance_id.toString(),
+            userId: record.user_id.toString(),
+            date: getISTDateString(record.check_in),
+            checkInTime: formatTimeToIST(record.check_in),
+            checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
+            status: record.status || "present",
+            location: record.gps_location,
+            selfie: checkInSelfie,
+            workHours: record.total_hours,
+          };
+        });
         setEmployeeAttendance(transformedData);
       }
     } catch (error: any) {

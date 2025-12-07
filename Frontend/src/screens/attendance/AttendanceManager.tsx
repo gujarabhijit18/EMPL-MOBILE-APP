@@ -27,11 +27,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import OfficeHoursScreen from "../../components/ui/OfficeHoursScreen";
+import OnlineStatusToggle from "../../components/OnlineStatusToggle";
+import AttendanceRecordCard from "../../components/AttendanceRecordCard";
 import { GeoLocation } from "../../types";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { API_CONFIG } from "../../config/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
+import { formatDateIST, formatDateWithDayIST, getDayMonthIST, getDayOfWeek, getMonthYearIST } from "../../utils/dateTime";
 
 const { width } = Dimensions.get("window");
 
@@ -195,16 +198,32 @@ const AttendanceManager: React.FC = () => {
       setIsLoading(true);
       const data = await apiService.getSelfAttendance(parseInt(user.id));
       const today = format(getCurrentISTTime(), "yyyy-MM-dd");
-      const transformedData: SelfAttendanceRecord[] = data.map((record: any) => ({
-        id: record.attendance_id.toString(),
-        date: getISTDateString(record.check_in),
-        checkInTime: formatTimeToIST(record.check_in),
-        checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
-        status: record.status || "present",
-        checkInLocation: record.gps_location,
-        checkOutLocation: record.check_out ? record.gps_location : undefined,
-        selfie: record.selfie,
-      }));
+      const transformedData: SelfAttendanceRecord[] = data.map((record: any) => {
+        // Parse selfie data - handle JSON format with check_in and check_out
+        let checkInSelfie = record.checkInSelfie || null;
+        if (!checkInSelfie && record.selfie) {
+          try {
+            if (typeof record.selfie === "string" && record.selfie.trim().startsWith("{")) {
+              const selfieData = JSON.parse(record.selfie);
+              checkInSelfie = selfieData.check_in || null;
+            } else {
+              checkInSelfie = record.selfie;
+            }
+          } catch {
+            checkInSelfie = record.selfie;
+          }
+        }
+        return {
+          id: record.attendance_id.toString(),
+          date: getISTDateString(record.check_in),
+          checkInTime: formatTimeToIST(record.check_in),
+          checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
+          status: record.status || "present",
+          checkInLocation: record.gps_location,
+          checkOutLocation: record.check_out ? record.gps_location : undefined,
+          selfie: checkInSelfie,
+        };
+      });
       setSelfAttendanceHistory(transformedData);
       setCurrentAttendance(transformedData.find((r) => r.date === today) || null);
     } catch (error: any) {
@@ -224,9 +243,31 @@ const AttendanceManager: React.FC = () => {
       console.log("📊 Raw attendance data:", JSON.stringify(data, null, 2));
 
       const transformedData = data.map((record: any) => {
-        // Process selfie URLs - check all possible field names
-        let checkInSelfie = record.checkInSelfie || record.selfie || null;
-        let checkOutSelfie = record.checkOutSelfie || null;
+        // Process selfie URLs - parse JSON if needed
+        let checkInSelfie = null;
+        let checkOutSelfie = null;
+
+        // First check if checkInSelfie/checkOutSelfie are provided directly
+        if (record.checkInSelfie) {
+          checkInSelfie = record.checkInSelfie;
+        } else if (record.checkOutSelfie) {
+          checkOutSelfie = record.checkOutSelfie;
+        } else if (record.selfie) {
+          // Try to parse selfie as JSON (new format with check_in and check_out)
+          try {
+            if (typeof record.selfie === "string" && record.selfie.trim().startsWith("{")) {
+              const selfieData = JSON.parse(record.selfie);
+              checkInSelfie = selfieData.check_in || null;
+              checkOutSelfie = selfieData.check_out || null;
+            } else {
+              // Legacy format - single path
+              checkInSelfie = record.selfie;
+            }
+          } catch {
+            // If parsing fails, treat as legacy format
+            checkInSelfie = record.selfie;
+          }
+        }
 
         // Build full URL for selfies if they're relative paths
         if (checkInSelfie && typeof checkInSelfie === "string" && !checkInSelfie.startsWith("http") && !checkInSelfie.startsWith("data:")) {
@@ -340,9 +381,9 @@ const AttendanceManager: React.FC = () => {
       let filteredByRole: any[];
 
       if (currentUserRole === "admin") {
-        // Admin can see HR, Manager, Team Lead, and Employee attendance across all departments
+        // Admin can see HR and Manager attendance across all departments
         filteredByRole = transformedData.filter((r: any) => 
-          r.role === "HR" || r.role === "Manager" || r.role === "Team Lead" || r.role === "Employee"
+          r.role === "HR" || r.role === "Manager"
         );
       } else if (currentUserRole === "hr" || currentUserRole === "manager") {
         filteredByRole = transformedData.filter((r: any) => {
@@ -438,32 +479,66 @@ const AttendanceManager: React.FC = () => {
       const base64Image = await FileSystem.readAsStringAsync(photoUri, { encoding: FileSystem.EncodingType.Base64 });
 
       if (isCheckingIn) {
+        // Get office hours for status calculation
+        const officeHours = await apiService.getEffectiveOfficeTiming(user?.department);
+        
         const response = await apiService.checkIn(parseInt(user.id), gpsLocationString, base64Image);
         const istNow = getCurrentISTTime();
+        
+        // Calculate check-in status
+        const { calculateCheckInStatus } = await import("../../utils/attendanceStatus");
+        const statusInfo = calculateCheckInStatus(officeHours);
+        
         const record: SelfAttendanceRecord = {
           id: response.attendance_id.toString(),
           date: format(istNow, "yyyy-MM-dd"),
           checkInTime: formatTimeToIST(istNow),
           checkInLocation: latestGeo || gpsLocationString,
           selfie: photoUri,
-          status: "present",
+          status: statusInfo.checkInStatus,
         };
         setCurrentAttendance(record);
         setSelfAttendanceHistory((prev) => [record, ...prev]);
-        Alert.alert("✅ Checked In", "Successfully marked attendance!");
+        
+        // Show status-specific message
+        const statusEmoji = statusInfo.checkInStatus === "late" ? "⚠️" : statusInfo.checkInStatus === "early" ? "🕐" : "✅";
+        Alert.alert(
+          `${statusEmoji} ${statusInfo.checkInStatus.toUpperCase()}`,
+          statusInfo.message
+        );
       } else if (currentAttendance) {
+        // Get office hours for status calculation
+        const officeHours = await apiService.getEffectiveOfficeTiming(user?.department);
+        
         await apiService.checkOut(parseInt(user.id), gpsLocationString, base64Image, todaysWork || "Completed daily tasks", workReportFile);
         const istNow = getCurrentISTTime();
-        const updated: SelfAttendanceRecord = { ...currentAttendance, checkOutTime: formatTimeToIST(istNow), checkOutLocation: latestGeo || gpsLocationString };
+        
+        // Calculate check-out status
+        const { calculateCheckOutStatus } = await import("../../utils/attendanceStatus");
+        const statusInfo = calculateCheckOutStatus(officeHours);
+        
+        const updated: SelfAttendanceRecord = { 
+          ...currentAttendance, 
+          checkOutTime: formatTimeToIST(istNow), 
+          checkOutLocation: latestGeo || gpsLocationString,
+          status: statusInfo.checkOutStatus,
+        };
         setCurrentAttendance(updated);
         setSelfAttendanceHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
         setTodaysWork("");
         setWorkReportFile(null);
-        Alert.alert("✅ Checked Out", "Great work today!");
+        
+        // Show status-specific message
+        const statusEmoji = statusInfo.checkOutStatus === "late" ? "⏰" : statusInfo.checkOutStatus === "early" ? "⚠️" : "✅";
+        Alert.alert(
+          `${statusEmoji} ${statusInfo.checkOutStatus.toUpperCase()}`,
+          statusInfo.message
+        );
       }
       await loadSelfAttendanceData();
     } catch (error: any) {
       Alert.alert("Attendance Error", error.message || "Unable to submit attendance.");
+      console.error("Attendance submission error:", error);
     } finally {
       setIsLoading(false);
     }
@@ -550,10 +625,6 @@ const AttendanceManager: React.FC = () => {
     }
   };
 
-  const totalEmployees = attendanceRecords.length;
-  const presentToday = attendanceRecords.filter((emp) => emp.check_in && emp.status === "present").length;
-  const lateArrivals = attendanceRecords.filter((emp) => emp.status === "late").length;
-
   // Camera UI
   if (cameraVisible) {
     return (
@@ -625,51 +696,20 @@ const AttendanceManager: React.FC = () => {
         {viewMode === "self" && (
           <View style={styles.dateBadge}>
             <Ionicons name="calendar-outline" size={14} color="#3b82f6" />
-            <Text style={styles.dateBadgeText}>{format(new Date(), "EEEE, MMM d, yyyy")}</Text>
+            <Text style={styles.dateBadgeText}>{formatDateWithDayIST(new Date())}</Text>
           </View>
         )}
 
-        {/* Export Buttons for Admin */}
-        {viewMode === "employee" && user?.role === "admin" && (
-          <View style={styles.exportRow}>
-            <TouchableOpacity style={styles.exportBtn} onPress={() => setExportModalVisible(true)}>
-              <Ionicons name="download-outline" size={16} color="#3b82f6" />
-              <Text style={styles.exportBtnText}>CSV</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.exportBtn} onPress={() => setPdfExportModalVisible(true)}>
-              <Ionicons name="document-text-outline" size={16} color="#3b82f6" />
-              <Text style={styles.exportBtnText}>PDF</Text>
-            </TouchableOpacity>
-          </View>
+        {/* Export Button for Admin */}
+        {viewMode === "employee" && user?.role === "admin" && adminTab === "records" && (
+          <TouchableOpacity style={styles.exportHeaderBtn} onPress={() => setExportModalVisible(true)}>
+            <Ionicons name="download-outline" size={18} color="#fff" />
+            <Text style={styles.exportHeaderBtnText}>Export</Text>
+          </TouchableOpacity>
         )}
       </LinearGradient>
 
-      {/* Stats Cards for Admin */}
-      {viewMode === "employee" && user?.role === "admin" && (
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <LinearGradient colors={["#3b82f6", "#2563eb"]} style={styles.statGradient}>
-              <Ionicons name="people" size={24} color="#fff" />
-              <Text style={styles.statValue}>{totalEmployees}</Text>
-              <Text style={styles.statLabel}>Total</Text>
-            </LinearGradient>
-          </View>
-          <View style={styles.statCard}>
-            <LinearGradient colors={["#10b981", "#059669"]} style={styles.statGradient}>
-              <Ionicons name="checkmark-circle" size={24} color="#fff" />
-              <Text style={styles.statValue}>{presentToday}</Text>
-              <Text style={styles.statLabel}>Present</Text>
-            </LinearGradient>
-          </View>
-          <View style={styles.statCard}>
-            <LinearGradient colors={["#f59e0b", "#d97706"]} style={styles.statGradient}>
-              <Ionicons name="time" size={24} color="#fff" />
-              <Text style={styles.statValue}>{lateArrivals}</Text>
-              <Text style={styles.statLabel}>Late</Text>
-            </LinearGradient>
-          </View>
-        </View>
-      )}
+
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={scrollEventThrottle}>
         {/* Admin Tab Toggle */}
@@ -706,6 +746,18 @@ const AttendanceManager: React.FC = () => {
                 <Text style={styles.locationNote}>📍 Location will be recorded with attendance</Text>
               </LinearGradient>
             </TouchableOpacity>
+
+            {/* Online/Offline Status Toggle - Shows only when checked in and not checked out */}
+            {user?.id && (
+              <OnlineStatusToggle
+                userId={parseInt(user.id)}
+                isCheckedIn={!!currentAttendance?.checkInTime}
+                isCheckedOut={!!currentAttendance?.checkOutTime}
+                onStatusChange={(isOnline, summary) => {
+                  console.log(`Status changed to ${isOnline ? 'Online' : 'Offline'}`, summary);
+                }}
+              />
+            )}
 
             {/* Today's Status Card */}
             <View style={styles.statusCard}>
@@ -776,11 +828,11 @@ const AttendanceManager: React.FC = () => {
               selfAttendanceHistory.slice(0, 7).map((item) => (
                 <View key={item.id} style={styles.historyCard}>
                   <View style={styles.historyDateBadge}>
-                    <Text style={styles.historyDay}>{format(new Date(item.date), "dd")}</Text>
-                    <Text style={styles.historyMonth}>{format(new Date(item.date), "MMM")}</Text>
+                    <Text style={styles.historyDay}>{new Date(item.date).getDate().toString().padStart(2, '0')}</Text>
+                    <Text style={styles.historyMonth}>{getDayMonthIST(item.date).split(' ')[1]}</Text>
                   </View>
                   <View style={styles.historyInfo}>
-                    <Text style={styles.historyDayName}>{format(new Date(item.date), "EEEE")}</Text>
+                    <Text style={styles.historyDayName}>{getDayOfWeek(item.date)}</Text>
                     <View style={styles.historyTimeRow}>
                       <Ionicons name="log-in-outline" size={14} color="#6b7280" />
                       <Text style={styles.historyTimeText}>{item.checkInTime || "-"}</Text>
@@ -824,7 +876,7 @@ const AttendanceManager: React.FC = () => {
 
                 <TouchableOpacity style={styles.filterPill} onPress={() => setDatePickerVisible(true)}>
                   <Ionicons name="calendar-outline" size={14} color="#3b82f6" />
-                  <Text style={styles.filterPillText}>{format(selectedDate, "MMM dd")}</Text>
+                  <Text style={styles.filterPillText}>{getDayMonthIST(selectedDate)}</Text>
                 </TouchableOpacity>
 
                 <View style={styles.countBadge}>
@@ -836,132 +888,24 @@ const AttendanceManager: React.FC = () => {
             {/* Employee Cards */}
             {filteredRecords.length > 0 ? (
               filteredRecords.map((record, index) => {
-                const statusInfo = getStatusColor(record.status, !!record.check_out);
-                const roleColors: Record<string, string> = {
-                  "HR": "#8b5cf6",
-                  "Manager": "#f59e0b",
-                  "Team Lead": "#10b981",
-                  "Employee": "#3b82f6",
-                };
-                const roleColor = roleColors[record.role] || "#6b7280";
                 return (
-                  <View key={record.id} style={styles.employeeCard}>
-                    <View style={styles.employeeTop}>
-                      <View style={[styles.employeeAvatar, { backgroundColor: roleColor }]}>
-                        <Text style={styles.avatarText}>{record.name?.charAt(0).toUpperCase() || "U"}</Text>
-                      </View>
-                      <View style={styles.employeeInfo}>
-                        <Text style={styles.employeeName}>{record.name}</Text>
-                        <View style={styles.employeeMeta}>
-                          <View style={styles.metaChip}>
-                            <Ionicons name="id-card-outline" size={12} color="#3b82f6" />
-                            <Text style={styles.metaText}>{record.employeeId}</Text>
-                          </View>
-                          <View style={styles.metaChip}>
-                            <Ionicons name="business-outline" size={12} color="#8b5cf6" />
-                            <Text style={styles.metaText}>{record.department}</Text>
-                          </View>
-                        </View>
-                        <View style={styles.employeeMeta}>
-                          <View style={[styles.metaChip, { backgroundColor: `${roleColor}15` }]}>
-                            <Ionicons name="person-outline" size={12} color={roleColor} />
-                            <Text style={[styles.metaText, { color: roleColor }]}>{record.role}</Text>
-                          </View>
-                          {record.email && record.email !== "N/A" && (
-                            <View style={styles.metaChip}>
-                              <Ionicons name="mail-outline" size={12} color="#6b7280" />
-                              <Text style={styles.metaText} numberOfLines={1}>{record.email}</Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                      <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
-                        <View style={[styles.statusDot, { backgroundColor: statusInfo.text }]} />
-                        <Text style={[styles.statusBadgeText, { color: statusInfo.text }]}>{statusInfo.label}</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.employeeTimeRow}>
-                      <View style={styles.employeeTimeCard}>
-                        <View style={[styles.timeIconBg, { backgroundColor: "#dcfce7" }]}>
-                          <Ionicons name="log-in" size={16} color="#16a34a" />
-                        </View>
-                        <View>
-                          <Text style={styles.timeCardLabel}>Check In</Text>
-                          <Text style={styles.timeCardValue}>{record.check_in || "--:--"}</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.timeArrow}>
-                        <Ionicons name="arrow-forward" size={14} color="#d1d5db" />
-                      </View>
-
-                      <View style={styles.employeeTimeCard}>
-                        <View style={[styles.timeIconBg, { backgroundColor: "#fee2e2" }]}>
-                          <Ionicons name="log-out" size={16} color="#dc2626" />
-                        </View>
-                        <View>
-                          <Text style={styles.timeCardLabel}>Check Out</Text>
-                          <Text style={styles.timeCardValue}>{record.check_out || "--:--"}</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.hoursChip}>
-                        <Ionicons name="time" size={14} color="#3b82f6" />
-                        <Text style={styles.hoursText}>{record.hours}h</Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.employeeBottom}>
-                      <View style={styles.locationRow}>
-                        <Ionicons name="location" size={14} color="#6b7280" />
-                        <Text style={styles.locationText} numberOfLines={2}>{record.location}</Text>
-                      </View>
-
-                      <View style={styles.photoRow}>
-                        <TouchableOpacity
-                          style={styles.photoBtn}
-                          onPress={() => {
-                            if (record.selfie || record.checkOutSelfie) {
-                              setSelectedRecord(record);
-                              setShowSelfieModal(true);
-                            }
-                          }}
-                          disabled={!record.selfie && !record.checkOutSelfie}
-                        >
-                          {isValidImageUri(record.selfie) ? <Image source={{ uri: record.selfie }} style={styles.photoThumb} onError={() => {}} /> : <View style={styles.photoEmpty}><Ionicons name="camera-outline" size={16} color="#9ca3af" /></View>}
-                          <View style={[styles.photoLabel, { backgroundColor: "#dcfce7" }]}><Text style={[styles.photoLabelText, { color: "#16a34a" }]}>In</Text></View>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={styles.photoBtn}
-                          onPress={() => {
-                            if (isValidImageUri(record.selfie) || isValidImageUri(record.checkOutSelfie)) {
-                              setSelectedRecord(record);
-                              setShowSelfieModal(true);
-                            }
-                          }}
-                          disabled={!isValidImageUri(record.selfie) && !isValidImageUri(record.checkOutSelfie)}
-                        >
-                          {isValidImageUri(record.checkOutSelfie) ? <Image source={{ uri: record.checkOutSelfie }} style={styles.photoThumb} onError={() => {}} /> : <View style={styles.photoEmpty}><Ionicons name="camera-outline" size={16} color="#9ca3af" /></View>}
-                          <View style={[styles.photoLabel, { backgroundColor: "#fee2e2" }]}><Text style={[styles.photoLabelText, { color: "#dc2626" }]}>Out</Text></View>
-                        </TouchableOpacity>
-
-                        {(isValidImageUri(record.selfie) || isValidImageUri(record.checkOutSelfie)) && (
-                          <TouchableOpacity style={styles.viewPhotosBtn} onPress={() => { setSelectedRecord(record); setShowSelfieModal(true); }}>
-                            <Ionicons name="images-outline" size={16} color="#3b82f6" />
-                            <Text style={styles.viewPhotosBtnText}>View</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
-                  </View>
+                  <AttendanceRecordCard
+                    key={record.id}
+                    record={record}
+                    onPhotoPress={(rec) => {
+                      setSelectedRecord(rec);
+                      setShowSelfieModal(true);
+                    }}
+                    onCardPress={(rec) => {
+                      console.log("Card pressed:", rec);
+                    }}
+                  />
                 );
               })
             ) : (
               <View style={styles.emptyState}>
                 <Ionicons name="people-outline" size={48} color="#d1d5db" />
-                <Text style={styles.emptyText}>No attendance records for {format(selectedDate, "MMM dd, yyyy")}</Text>
+                <Text style={styles.emptyText}>No attendance records for {formatDateIST(selectedDate)}</Text>
               </View>
             )}
           </>
@@ -989,7 +933,7 @@ const AttendanceManager: React.FC = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.roleModal}>
             <Text style={styles.roleModalTitle}>Select Role</Text>
-            {(user?.role?.toLowerCase() === "admin" ? ["All Roles", "HR", "Manager", "Team Lead", "Employee"] : ["All Roles", "Team Lead", "Employee"]).map((r) => (
+            {(user?.role?.toLowerCase() === "admin" ? ["All Roles", "HR", "Manager"] : ["All Roles", "Team Lead", "Employee"]).map((r) => (
               <TouchableOpacity key={r} style={[styles.roleOption, filterStatus === r && styles.roleOptionActive]} onPress={() => { setFilterStatus(r); setRoleSheetVisible(false); }}>
                 <Text style={[styles.roleOptionText, filterStatus === r && styles.roleOptionTextActive]}>{r}</Text>
               </TouchableOpacity>
@@ -1063,7 +1007,7 @@ const AttendanceManager: React.FC = () => {
                 </View>
                 <View>
                   <Text style={styles.selfieTitle}>{selectedRecord?.name}'s Photos</Text>
-                  <Text style={styles.selfieDate}>{selectedRecord?.date ? format(new Date(selectedRecord.date), "MMMM dd, yyyy") : ""}</Text>
+                  <Text style={styles.selfieDate}>{selectedRecord?.date ? formatDateIST(selectedRecord.date) : ""}</Text>
                 </View>
               </View>
 
@@ -1138,12 +1082,39 @@ const AttendanceManager: React.FC = () => {
         </View>
       </Modal>
 
-      {/* Export CSV Modal */}
+      {/* Export Modal */}
       <Modal visible={exportModalVisible} transparent animationType="slide">
         <View style={styles.exportModalOverlay}>
           <View style={styles.exportModal}>
-            <Text style={styles.exportModalTitle}>Export CSV Report</Text>
-            <Text style={styles.exportModalSubtitle}>Configure your export preferences</Text>
+            <View style={styles.exportModalHeader}>
+              <Text style={styles.exportModalTitle}>Export Attendance Report</Text>
+              <Text style={styles.exportModalSubtitle}>Configure your export preferences. Select date range and employee filter options.</Text>
+            </View>
+
+            <ScrollView style={styles.exportModalContent} showsVerticalScrollIndicator={false}>
+            
+            {/* Format Selection */}
+            <Text style={styles.exportLabel}>Export Format</Text>
+            <View style={styles.formatSelectionRow}>
+              <TouchableOpacity 
+                style={[styles.formatOption, styles.formatOptionActive]} 
+                onPress={() => {}}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="document-outline" size={24} color="#3b82f6" />
+                <Text style={styles.formatOptionTitle}>CSV</Text>
+                <Text style={styles.formatOptionSubtitle}>Excel compatible</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.formatOption]} 
+                onPress={() => { setExportModalVisible(false); setPdfExportModalVisible(true); }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="document-text-outline" size={24} color="#6b7280" />
+                <Text style={styles.formatOptionTitle}>PDF</Text>
+                <Text style={styles.formatOptionSubtitle}>Print ready</Text>
+              </TouchableOpacity>
+            </View>
 
             <Text style={styles.exportLabel}>Quick Filter</Text>
             <View style={styles.pickerContainer}>
@@ -1171,7 +1142,7 @@ const AttendanceManager: React.FC = () => {
                     setShowStartPicker(true);
                   }
                 }}>
-                  <Text style={styles.dateInputText}>{exportStartDate ? format(exportStartDate, "MMM dd, yyyy") : "Select"}</Text>
+                  <Text style={styles.dateInputText}>{exportStartDate ? formatDateIST(exportStartDate) : "Select"}</Text>
                 </TouchableOpacity>
                 {showStartPicker && Platform.OS === "android" && (
                   <DateTimePicker value={exportStartDate || new Date()} mode="date" onChange={(e, date) => { setShowStartPicker(false); if (date) setExportStartDate(date); }} />
@@ -1188,7 +1159,7 @@ const AttendanceManager: React.FC = () => {
                     setShowEndPicker(true);
                   }
                 }}>
-                  <Text style={styles.dateInputText}>{exportEndDate ? format(exportEndDate, "MMM dd, yyyy") : "Select"}</Text>
+                  <Text style={styles.dateInputText}>{exportEndDate ? formatDateIST(exportEndDate) : "Select"}</Text>
                 </TouchableOpacity>
                 {showEndPicker && Platform.OS === "android" && (
                   <DateTimePicker value={exportEndDate || new Date()} mode="date" onChange={(e, date) => { setShowEndPicker(false); if (date) setExportEndDate(date); }} />
@@ -1196,20 +1167,83 @@ const AttendanceManager: React.FC = () => {
               </View>
             </View>
 
-            <Text style={styles.exportLabel}>Department</Text>
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={selectedDepartment} onValueChange={setSelectedDepartment}>
-                <Picker.Item label="All Departments" value="" />
-                {Array.from(new Set(attendanceRecords.map((r) => r.department))).map((dept) => <Picker.Item key={dept} label={dept} value={dept} />)}
-              </Picker>
+            <Text style={styles.exportLabel}>Employee Filter</Text>
+            <View style={styles.employeeFilterRow}>
+              <TouchableOpacity 
+                style={[styles.filterRadio, employeeFilter === "all" && styles.filterRadioActive]}
+                onPress={() => { setEmployeeFilter("all"); setSelectedEmployeeId(""); }}
+              >
+                <View style={[styles.radioCircle, employeeFilter === "all" && styles.radioCircleActive]} />
+                <Text style={styles.filterRadioText}>All Employees</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.filterRadio, employeeFilter === "specific" && styles.filterRadioActive]}
+                onPress={() => setEmployeeFilter("specific")}
+              >
+                <View style={[styles.radioCircle, employeeFilter === "specific" && styles.radioCircleActive]} />
+                <Text style={styles.filterRadioText}>Specific Employee</Text>
+              </TouchableOpacity>
             </View>
+
+            {employeeFilter === "specific" && (
+              <>
+                <Text style={styles.exportLabel}>Department</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker selectedValue={selectedDepartment} onValueChange={(dept) => { setSelectedDepartment(dept); setSelectedEmployeeId(""); }}>
+                    <Picker.Item label="Select Department" value="" />
+                    {Array.from(new Set(attendanceRecords.map((r) => r.department))).map((dept) => <Picker.Item key={dept} label={dept} value={dept} />)}
+                  </Picker>
+                </View>
+
+                {selectedDepartment && (
+                  <>
+                    <Text style={styles.exportLabel}>Select Employee</Text>
+                    <View style={styles.employeeSearchContainer}>
+                      <Ionicons name="search" size={18} color="#9ca3af" />
+                      <TextInput 
+                        placeholder="Search by name or employee ID..." 
+                        placeholderTextColor="#9ca3af" 
+                        value={employeeSearch}
+                        onChangeText={setEmployeeSearch}
+                        style={styles.employeeSearchInput}
+                      />
+                    </View>
+
+                    <View style={styles.employeeListContainerFlat}>
+                      {attendanceRecords
+                        .filter((r) => r.department === selectedDepartment)
+                        .filter((r) => employeeSearch === "" || r.name.toLowerCase().includes(employeeSearch.toLowerCase()) || r.employeeId.toLowerCase().includes(employeeSearch.toLowerCase()))
+                        .map((emp) => (
+                          <TouchableOpacity 
+                            key={emp.id}
+                            style={[styles.employeeListItem, selectedEmployeeId === emp.id && styles.employeeListItemActive]}
+                            onPress={() => setSelectedEmployeeId(emp.id)}
+                          >
+                            <View style={[styles.employeeListAvatar, { backgroundColor: "#3b82f6" }]}>
+                              <Text style={styles.employeeListAvatarText}>{emp.name?.charAt(0).toUpperCase() || "U"}</Text>
+                            </View>
+                            <View style={styles.employeeListInfo}>
+                              <Text style={styles.employeeListName}>{emp.name}</Text>
+                              <Text style={styles.employeeListId}>ID: {emp.employeeId}</Text>
+                            </View>
+                            {selectedEmployeeId === emp.id && (
+                              <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                    </View>
+                  </>
+                )}
+              </>
+            )}
+            </ScrollView>
 
             <View style={styles.exportActions}>
               <TouchableOpacity style={styles.exportCancelBtn} onPress={() => setExportModalVisible(false)}>
                 <Text style={styles.exportCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.exportConfirmBtn} onPress={async () => { await onExportCsv(); setExportModalVisible(false); }}>
-                <Text style={styles.exportConfirmText}>Export CSV</Text>
+                <Text style={styles.exportConfirmText}>Export as CSV</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1220,68 +1254,157 @@ const AttendanceManager: React.FC = () => {
       <Modal visible={pdfExportModalVisible} transparent animationType="slide">
         <View style={styles.exportModalOverlay}>
           <View style={styles.exportModal}>
-            <Text style={styles.exportModalTitle}>Export PDF Report</Text>
-            <Text style={styles.exportModalSubtitle}>Configure your export preferences</Text>
-
-            <Text style={styles.exportLabel}>Quick Filter</Text>
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={selectedQuickFilter} onValueChange={(val) => {
-                setSelectedQuickFilter(val);
-                const d = new Date();
-                if (val === "Today") { setExportStartDate(d); setExportEndDate(d); }
-                else if (val === "Yesterday") { d.setDate(d.getDate() - 1); setExportStartDate(d); setExportEndDate(d); }
-                else if (val === "Last 7 Days") { const start = new Date(); start.setDate(d.getDate() - 6); setExportStartDate(start); setExportEndDate(d); }
-                else if (val === "This Month") { setExportStartDate(new Date(d.getFullYear(), d.getMonth(), 1)); setExportEndDate(d); }
-              }}>
-                {quickFilterOptions.map((opt) => <Picker.Item key={opt} label={opt} value={opt} />)}
-              </Picker>
+            <View style={styles.exportModalHeader}>
+              <Text style={styles.exportModalTitle}>Export Attendance Report</Text>
+              <Text style={styles.exportModalSubtitle}>Configure your export preferences. Select date range and employee filter options.</Text>
             </View>
 
-            <View style={styles.dateRangeRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.exportLabel}>Start Date</Text>
-                <TouchableOpacity style={styles.dateInput} onPress={() => {
-                  if (Platform.OS === "ios") {
-                    setIosDatePickerField("start");
-                    setTempExportDate(exportStartDate || new Date());
-                    setIosDatePickerVisible(true);
-                  } else {
-                    setShowStartPicker(true);
-                  }
-                }}>
-                  <Text style={styles.dateInputText}>{exportStartDate ? format(exportStartDate, "MMM dd, yyyy") : "Select"}</Text>
+            <ScrollView style={styles.exportModalContent} showsVerticalScrollIndicator={false}>
+              {/* Format Selection */}
+              <Text style={styles.exportLabel}>Export Format</Text>
+              <View style={styles.formatSelectionRow}>
+                <TouchableOpacity 
+                  style={[styles.formatOption]} 
+                  onPress={() => { setPdfExportModalVisible(false); setExportModalVisible(true); }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="document-outline" size={24} color="#6b7280" />
+                  <Text style={styles.formatOptionTitle}>CSV</Text>
+                  <Text style={styles.formatOptionSubtitle}>Excel compatible</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.formatOption, styles.formatOptionActive]} 
+                  onPress={() => {}}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="document-text-outline" size={24} color="#3b82f6" />
+                  <Text style={styles.formatOptionTitle}>PDF</Text>
+                  <Text style={styles.formatOptionSubtitle}>Print ready</Text>
                 </TouchableOpacity>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.exportLabel}>End Date</Text>
-                <TouchableOpacity style={styles.dateInput} onPress={() => {
-                  if (Platform.OS === "ios") {
-                    setIosDatePickerField("end");
-                    setTempExportDate(exportEndDate || new Date());
-                    setIosDatePickerVisible(true);
-                  } else {
-                    setShowEndPicker(true);
-                  }
+
+              <Text style={styles.exportLabel}>Quick Filter</Text>
+              <View style={styles.pickerContainer}>
+                <Picker selectedValue={selectedQuickFilter} onValueChange={(val) => {
+                  setSelectedQuickFilter(val);
+                  const d = new Date();
+                  if (val === "Today") { setExportStartDate(d); setExportEndDate(d); }
+                  else if (val === "Yesterday") { d.setDate(d.getDate() - 1); setExportStartDate(d); setExportEndDate(d); }
+                  else if (val === "Last 7 Days") { const start = new Date(); start.setDate(d.getDate() - 6); setExportStartDate(start); setExportEndDate(d); }
+                  else if (val === "This Month") { setExportStartDate(new Date(d.getFullYear(), d.getMonth(), 1)); setExportEndDate(d); }
                 }}>
-                  <Text style={styles.dateInputText}>{exportEndDate ? format(exportEndDate, "MMM dd, yyyy") : "Select"}</Text>
+                  {quickFilterOptions.map((opt) => <Picker.Item key={opt} label={opt} value={opt} />)}
+                </Picker>
+              </View>
+
+              <View style={styles.dateRangeRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.exportLabel}>Start Date</Text>
+                  <TouchableOpacity style={styles.dateInput} onPress={() => {
+                    if (Platform.OS === "ios") {
+                      setIosDatePickerField("start");
+                      setTempExportDate(exportStartDate || new Date());
+                      setIosDatePickerVisible(true);
+                    } else {
+                      setShowStartPicker(true);
+                    }
+                  }}>
+                    <Text style={styles.dateInputText}>{exportStartDate ? formatDateIST(exportStartDate) : "Select"}</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.exportLabel}>End Date</Text>
+                  <TouchableOpacity style={styles.dateInput} onPress={() => {
+                    if (Platform.OS === "ios") {
+                      setIosDatePickerField("end");
+                      setTempExportDate(exportEndDate || new Date());
+                      setIosDatePickerVisible(true);
+                    } else {
+                      setShowEndPicker(true);
+                    }
+                  }}>
+                    <Text style={styles.dateInputText}>{exportEndDate ? formatDateIST(exportEndDate) : "Select"}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <Text style={styles.exportLabel}>Employee Filter</Text>
+              <View style={styles.employeeFilterRow}>
+                <TouchableOpacity 
+                  style={[styles.filterRadio, employeeFilter === "all" && styles.filterRadioActive]}
+                  onPress={() => { setEmployeeFilter("all"); setSelectedEmployeeId(""); }}
+                >
+                  <View style={[styles.radioCircle, employeeFilter === "all" && styles.radioCircleActive]} />
+                  <Text style={styles.filterRadioText}>All Employees</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.filterRadio, employeeFilter === "specific" && styles.filterRadioActive]}
+                  onPress={() => setEmployeeFilter("specific")}
+                >
+                  <View style={[styles.radioCircle, employeeFilter === "specific" && styles.radioCircleActive]} />
+                  <Text style={styles.filterRadioText}>Specific Employee</Text>
                 </TouchableOpacity>
               </View>
-            </View>
 
-            <Text style={styles.exportLabel}>Department</Text>
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={selectedDepartment} onValueChange={setSelectedDepartment}>
-                <Picker.Item label="All Departments" value="" />
-                {Array.from(new Set(attendanceRecords.map((r) => r.department))).map((dept) => <Picker.Item key={dept} label={dept} value={dept} />)}
-              </Picker>
-            </View>
+              {employeeFilter === "specific" && (
+                <>
+                  <Text style={styles.exportLabel}>Department</Text>
+                  <View style={styles.pickerContainer}>
+                    <Picker selectedValue={selectedDepartment} onValueChange={(dept) => { setSelectedDepartment(dept); setSelectedEmployeeId(""); }}>
+                      <Picker.Item label="Select Department" value="" />
+                      {Array.from(new Set(attendanceRecords.map((r) => r.department))).map((dept) => <Picker.Item key={dept} label={dept} value={dept} />)}
+                    </Picker>
+                  </View>
+
+                  {selectedDepartment && (
+                    <>
+                      <Text style={styles.exportLabel}>Select Employee</Text>
+                      <View style={styles.employeeSearchContainer}>
+                        <Ionicons name="search" size={18} color="#9ca3af" />
+                        <TextInput 
+                          placeholder="Search by name or employee ID..." 
+                          placeholderTextColor="#9ca3af" 
+                          value={employeeSearch}
+                          onChangeText={setEmployeeSearch}
+                          style={styles.employeeSearchInput}
+                        />
+                      </View>
+
+                      <View style={styles.employeeListContainerFlat}>
+                        {attendanceRecords
+                          .filter((r) => r.department === selectedDepartment)
+                          .filter((r) => employeeSearch === "" || r.name.toLowerCase().includes(employeeSearch.toLowerCase()) || r.employeeId.toLowerCase().includes(employeeSearch.toLowerCase()))
+                          .map((emp) => (
+                            <TouchableOpacity 
+                              key={emp.id}
+                              style={[styles.employeeListItem, selectedEmployeeId === emp.id && styles.employeeListItemActive]}
+                              onPress={() => setSelectedEmployeeId(emp.id)}
+                            >
+                              <View style={[styles.employeeListAvatar, { backgroundColor: "#3b82f6" }]}>
+                                <Text style={styles.employeeListAvatarText}>{emp.name?.charAt(0).toUpperCase() || "U"}</Text>
+                              </View>
+                              <View style={styles.employeeListInfo}>
+                                <Text style={styles.employeeListName}>{emp.name}</Text>
+                                <Text style={styles.employeeListId}>ID: {emp.employeeId}</Text>
+                              </View>
+                              {selectedEmployeeId === emp.id && (
+                                <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />
+                              )}
+                            </TouchableOpacity>
+                          ))}
+                      </View>
+                    </>
+                  )}
+                </>
+              )}
+            </ScrollView>
 
             <View style={styles.exportActions}>
               <TouchableOpacity style={styles.exportCancelBtn} onPress={() => setPdfExportModalVisible(false)}>
                 <Text style={styles.exportCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.exportConfirmBtn} onPress={async () => { await onExportPdf(); setPdfExportModalVisible(false); }}>
-                <Text style={styles.exportConfirmText}>Export PDF</Text>
+                <Text style={styles.exportConfirmText}>Export as PDF</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1360,17 +1483,10 @@ const styles = StyleSheet.create({
   dateBadge: { backgroundColor: "#eff6ff", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "#dbeafe" },
   dateBadgeText: { color: "#1e40af", fontSize: 13, fontWeight: "600" },
   
-  // Export Row
-  exportRow: { flexDirection: "row", gap: 10, marginTop: 8 },
-  exportBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, gap: 6, borderWidth: 1, borderColor: "#e5e7eb" },
-  exportBtnText: { color: "#3b82f6", fontSize: 12, fontWeight: "600" },
+  // Export Header Button
+  exportHeaderBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#3b82f6", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, gap: 8, marginTop: 8, alignSelf: "flex-start" },
+  exportHeaderBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" },
   
-  // Stats
-  statsContainer: { flexDirection: "row", paddingHorizontal: 16, paddingVertical: 16, gap: 10, backgroundColor: "#fff", marginTop: 0 },
-  statCard: { flex: 1, borderRadius: 12, overflow: "hidden" },
-  statGradient: { padding: 14, alignItems: "center" },
-  statValue: { fontSize: 24, fontWeight: "800", color: "#fff", marginTop: 6 },
-  statLabel: { fontSize: 11, color: "rgba(255,255,255,0.9)", fontWeight: "600", marginTop: 2 },
   
   // Content
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 20, backgroundColor: "#f8fafc" },
@@ -1533,15 +1649,39 @@ const styles = StyleSheet.create({
   
   // Export Modal
   exportModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 20 },
-  exportModal: { backgroundColor: "#fff", borderRadius: 20, padding: 20 },
+  exportModal: { backgroundColor: "#fff", borderRadius: 20, maxHeight: "90%", flexDirection: "column" },
+  exportModalHeader: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#e5e7eb" },
   exportModalTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
-  exportModalSubtitle: { fontSize: 13, color: "#6b7280", marginTop: 4, marginBottom: 16 },
-  exportLabel: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6, marginTop: 12 },
+  exportModalSubtitle: { fontSize: 13, color: "#6b7280", marginTop: 4 },
+  exportModalContent: { flex: 1, paddingHorizontal: 20, paddingVertical: 16 },
+  exportLabel: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 10, marginTop: 12 },
+  formatSelectionRow: { flexDirection: "row", gap: 12, marginBottom: 20 },
+  formatOption: { flex: 1, borderWidth: 2, borderColor: "#e5e7eb", borderRadius: 14, padding: 16, alignItems: "center", backgroundColor: "#f9fafb" },
+  formatOptionActive: { borderColor: "#3b82f6", backgroundColor: "#eff6ff" },
+  formatOptionTitle: { fontSize: 15, fontWeight: "700", color: "#111827", marginTop: 8 },
+  formatOptionSubtitle: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  employeeFilterRow: { flexDirection: "row", gap: 12, marginBottom: 16 },
+  filterRadio: { flex: 1, flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, backgroundColor: "#f9fafb", borderWidth: 1, borderColor: "#e5e7eb", gap: 8 },
+  filterRadioActive: { backgroundColor: "#eff6ff", borderColor: "#3b82f6" },
+  radioCircle: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: "#d1d5db" },
+  radioCircleActive: { borderColor: "#3b82f6", backgroundColor: "#3b82f6" },
+  filterRadioText: { fontSize: 13, fontWeight: "600", color: "#374151" },
+  employeeSearchContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#f9fafb", borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 10, paddingHorizontal: 12, marginBottom: 12 },
+  employeeSearchInput: { flex: 1, height: 40, fontSize: 14, color: "#111827", marginLeft: 8 },
+  employeeListContainer: { maxHeight: 200, marginBottom: 16, borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 10, backgroundColor: "#f9fafb" },
+  employeeListContainerFlat: { borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 10, backgroundColor: "#f9fafb", marginBottom: 16, maxHeight: 200 },
+  employeeListItem: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#f3f4f6", gap: 10 },
+  employeeListItemActive: { backgroundColor: "#eff6ff" },
+  employeeListAvatar: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  employeeListAvatarText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  employeeListInfo: { flex: 1 },
+  employeeListName: { fontSize: 13, fontWeight: "600", color: "#111827" },
+  employeeListId: { fontSize: 11, color: "#6b7280", marginTop: 2 },
   pickerContainer: { borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 12, overflow: "hidden", backgroundColor: "#f9fafb" },
   dateRangeRow: { flexDirection: "row", gap: 12 },
   dateInput: { borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 12, padding: 14, backgroundColor: "#f9fafb" },
   dateInputText: { color: "#111827", fontSize: 14 },
-  exportActions: { flexDirection: "row", justifyContent: "space-between", marginTop: 20, gap: 12 },
+  exportActions: { flexDirection: "row", justifyContent: "space-between", gap: 12, paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: "#e5e7eb", backgroundColor: "#f9fafb" },
   exportCancelBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: "#f3f4f6", alignItems: "center" },
   exportCancelText: { fontWeight: "600", color: "#374151" },
   exportConfirmBtn: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: "#3b82f6", alignItems: "center" },

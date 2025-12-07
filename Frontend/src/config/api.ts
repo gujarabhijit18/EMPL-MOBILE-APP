@@ -6,7 +6,7 @@ export const API_CONFIG = {
   // 🌐 Your current machine IP (update this when it changes)
   // Find your IP by running: npm run update-ip
   // Or manually: python Backend/get_ip.py
-  MACHINE_IP: "192.168.1.38",
+  MACHINE_IP: "172.20.14.148",
 
   // 🔧 Backend port (FastAPI backend server)
   BACKEND_PORT: 8000,

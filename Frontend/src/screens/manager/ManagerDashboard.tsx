@@ -19,6 +19,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { apiService } from "../../lib/api";
+import { formatTimeIST, getDayMonthIST, getRelativeTime } from "../../utils/dateTime";
 
 const { width } = Dimensions.get('window');
 
@@ -211,17 +212,7 @@ const ManagerDashboard: React.FC = () => {
   };
 
   const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} mins ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours} hours ago`;
-    if (diffHours < 48) return 'Yesterday';
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return getRelativeTime(timestamp);
   };
 
   const startAnimations = () => {
@@ -323,8 +314,8 @@ const ManagerDashboard: React.FC = () => {
             </View>
             <View style={styles.headerRight}>
               <View style={styles.dateTimeContainer}>
-                <Text style={styles.timeText}>{new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</Text>
-                <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
+                <Text style={styles.timeText}>{formatTimeIST(new Date())}</Text>
+                <Text style={styles.dateText}>{getDayMonthIST(new Date())}</Text>
               </View>
             </View>
           </View>

@@ -53,6 +53,49 @@ def _serialize_task_notification(notification: TaskNotificationOut | Task):
 
 @router.post("/", response_model=TaskOut)
 def assign_task(task: TaskCreate, db: Session = Depends(get_db), user = Depends(get_current_user)):
+    # Only Admin, HR, and Manager can assign tasks
+    if user.role not in [RoleEnum.ADMIN, RoleEnum.HR, RoleEnum.MANAGER]:
+        raise HTTPException(status_code=403, detail="Only Admin, HR, and Manager can assign tasks")
+    
+    # Get the assignee to check their role
+    assignee = db.query(User).filter(User.user_id == task.assigned_to).first()
+    if not assignee:
+        raise HTTPException(status_code=404, detail="Assignee not found")
+    
+    # Admin can only assign tasks to HR and Manager roles (not TeamLead or Employee)
+    if user.role == RoleEnum.ADMIN:
+        if assignee.role not in [RoleEnum.HR, RoleEnum.MANAGER]:
+            raise HTTPException(
+                status_code=403, 
+                detail="Admin can only assign tasks to HR and Manager roles"
+            )
+    # HR can assign tasks to Manager, TeamLead, Employee (own department) - NOT other HR
+    elif user.role == RoleEnum.HR:
+        if assignee.role not in [RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]:
+            raise HTTPException(
+                status_code=403, 
+                detail="HR can only assign tasks to Manager, TeamLead, and Employee roles"
+            )
+        # Ensure assignee is in the same department
+        if assignee.department != user.department:
+            raise HTTPException(
+                status_code=403, 
+                detail="Can only assign tasks to employees in your department"
+            )
+    # Manager can assign tasks to TeamLead, Employee (own department) - NOT other Manager
+    elif user.role == RoleEnum.MANAGER:
+        if assignee.role not in [RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]:
+            raise HTTPException(
+                status_code=403, 
+                detail="Manager can only assign tasks to TeamLead and Employee roles"
+            )
+        # Ensure assignee is in the same department
+        if assignee.department != user.department:
+            raise HTTPException(
+                status_code=403, 
+                detail="Can only assign tasks to employees in your department"
+            )
+    
     return create_task(
         db,
         task.title,
@@ -96,7 +139,30 @@ def _ensure_can_pass(current_user: User, new_assignee: User) -> None:
     if target_index <= current_index:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot pass task to same or higher role")
 
-    if current_user.role != RoleEnum.ADMIN:
+    # Admin can only pass tasks to HR and Manager roles
+    if current_user.role == RoleEnum.ADMIN:
+        if new_assignee.role not in [RoleEnum.HR, RoleEnum.MANAGER]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail="Admin can only pass tasks to HR and Manager roles"
+            )
+    # HR can pass tasks to Manager, TeamLead, Employee in their department - NOT other HR
+    elif current_user.role == RoleEnum.HR:
+        if new_assignee.role not in [RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail="HR can only pass tasks to Manager, TeamLead, and Employee roles"
+            )
+        if current_user.department and new_assignee.department:
+            if current_user.department != new_assignee.department:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot pass tasks outside your department")
+    # Manager can pass tasks to TeamLead, Employee in their department - NOT other Manager
+    elif current_user.role == RoleEnum.MANAGER:
+        if new_assignee.role not in [RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, 
+                detail="Manager can only pass tasks to TeamLead and Employee roles"
+            )
         if current_user.department and new_assignee.department:
             if current_user.department != new_assignee.department:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot pass tasks outside your department")

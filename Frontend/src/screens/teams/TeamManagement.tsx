@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 
 // Import tab bar visibility
 import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
+import { formatTimeIST, formatDateIST } from '../../utils/dateTime';
 
 interface TeamMember {
   id: string;
@@ -272,7 +273,7 @@ const TeamManagement: React.FC = () => {
                         >
                           <Text style={styles.sender}>{item.senderName}</Text>
                           <Text>{item.message}</Text>
-                          <Text style={styles.timestamp}>{item.timestamp.toLocaleTimeString()}</Text>
+                          <Text style={styles.timestamp}>{formatTimeIST(item.timestamp)}</Text>
                         </View>
                       )}
                     />
@@ -307,7 +308,7 @@ const TeamManagement: React.FC = () => {
                     <View key={m.id} style={styles.updateCard}>
                       <Text style={styles.sender}>{m.senderName}</Text>
                       <Text>{m.message}</Text>
-                      <Text style={styles.timestamp}>{m.timestamp.toLocaleDateString()}</Text>
+                      <Text style={styles.timestamp}>{formatDateIST(m.timestamp)}</Text>
                     </View>
                   ))}
               </Card.Content>

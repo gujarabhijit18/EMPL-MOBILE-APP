@@ -21,6 +21,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
+import { formatTimeIST, getDayMonthIST } from "../../utils/dateTime";
 
 const { width } = Dimensions.get('window');
 
@@ -286,8 +287,8 @@ const AdminDashboard: React.FC = () => {
             </View>
             <View style={styles.headerRight}>
               <View style={styles.dateTimeContainer}>
-                <Text style={styles.timeText}>{new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</Text>
-                <Text style={styles.dateText}>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</Text>
+                <Text style={styles.timeText}>{formatTimeIST(new Date())}</Text>
+                <Text style={styles.dateText}>{getDayMonthIST(new Date())}</Text>
               </View>
             </View>
           </View>

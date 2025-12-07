@@ -23,6 +23,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../../contexts/ThemeContext";
 import { apiService, DepartmentManager, DepartmentResponse } from "../../lib/api";
+import { formatDateIST } from "../../utils/dateTime";
 
 // Header gradient primary color for status bar
 const HEADER_PRIMARY_COLOR = "#764ba2";
@@ -796,7 +797,7 @@ export default function DepartmentManagement() {
                     </View>
                     <View style={styles.viewDetailContent}>
                       <Text style={styles.viewDetailLabel}>Created</Text>
-                      <Text style={styles.viewDetailValue}>{new Date(selectedDept.created_at).toLocaleDateString()}</Text>
+                      <Text style={styles.viewDetailValue}>{formatDateIST(selectedDept.created_at)}</Text>
                     </View>
                   </View>
                 </View>

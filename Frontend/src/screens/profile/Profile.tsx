@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { format } from "date-fns";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar, setStatusBarBackgroundColor, setStatusBarStyle } from "expo-status-bar";
@@ -28,6 +27,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
+import { getMonthYearIST } from "../../utils/dateTime";
 import { checkCameraPermission } from "../../utils/permissions";
 
 const { width, height } = Dimensions.get("window");
@@ -462,7 +462,7 @@ export default function Profile() {
                 <View style={styles.quickInfoItem}>
                   <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.9)" />
                   <Text style={styles.quickInfoText}>
-                    {user.joiningDate ? format(new Date(user.joiningDate), "MMM yyyy") : "N/A"}
+                    {user.joiningDate ? getMonthYearIST(user.joiningDate) : "N/A"}
                   </Text>
                 </View>
               </View>

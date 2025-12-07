@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
 import { format, addDays, startOfWeek, endOfWeek, isSameDay } from 'date-fns';
+import { formatDateIST, getDayMonthIST, getDayOfWeekShort, getMonthYearIST } from '../../utils/dateTime';
 
 export default function TeamShifts() {
   const navigation = useNavigation();
@@ -225,8 +226,8 @@ export default function TeamShifts() {
           <View style={{ alignItems: 'center' }}>
             <Text style={styles.dateDisplay}>
               {viewMode === 'week'
-                ? `Week of ${format(startOfWeek(currentDate, { weekStartsOn: 1 }), 'MMM dd')}`
-                : format(currentDate, 'MMMM yyyy')}
+                ? `Week of ${getDayMonthIST(startOfWeek(currentDate, { weekStartsOn: 1 }))}`
+                : getMonthYearIST(currentDate)}
             </Text>
             <TouchableOpacity onPress={() => setCurrentDate(new Date())}>
               <Text style={styles.todayButton}>Today</Text>
@@ -283,8 +284,8 @@ export default function TeamShifts() {
                     key={day.toISOString()}
                     style={[styles.dayBox, isToday && styles.todayBox, { width: dayBoxWidth }]}
                   >
-                    <Text style={styles.dayName}>{format(day, 'EEE')}</Text>
-                    <Text style={styles.dayDate}>{format(day, 'MMM dd')}</Text>
+                    <Text style={styles.dayName}>{getDayOfWeekShort(day)}</Text>
+                    <Text style={styles.dayDate}>{getDayMonthIST(day)}</Text>
                     {assignment ? (
                       <>
                         <Text style={styles.shiftName}>{assignment.shift.name}</Text>
@@ -321,7 +322,7 @@ export default function TeamShifts() {
                       key={day.toISOString()}
                       style={[styles.dayBox, isToday && styles.todayBox, { width: dayBoxWidth, minHeight: 80 }]}
                     >
-                      <Text style={styles.dayDateOnly}>{format(day, 'd')}</Text>
+                      <Text style={styles.dayDateOnly}>{new Date(day).getDate()}</Text>
                       {assignment && (
                         <>
                           <Text style={styles.shiftName}>{assignment.shift.name}</Text>
@@ -354,7 +355,7 @@ export default function TeamShifts() {
               {schedule.upcoming_shifts.map((assignment) => (
                 <View key={assignment.assignment_id} style={styles.tableRow}>
                   <Text style={styles.tableCell}>
-                    {format(new Date(assignment.assignment_date), 'MMM dd, yyyy')}
+                    {formatDateIST(assignment.assignment_date)}
                   </Text>
                   <Text style={styles.tableCell}>{assignment.shift.name}</Text>
                   <Text style={styles.tableCell}>
@@ -394,7 +395,7 @@ export default function TeamShifts() {
               {schedule.past_shifts.map((assignment) => (
                 <View key={assignment.assignment_id} style={styles.tableRow}>
                   <Text style={styles.tableCell}>
-                    {format(new Date(assignment.assignment_date), 'MMM dd, yyyy')}
+                    {formatDateIST(assignment.assignment_date)}
                   </Text>
                   <Text style={styles.tableCell}>{assignment.shift.name}</Text>
                   <Text style={styles.tableCell}>

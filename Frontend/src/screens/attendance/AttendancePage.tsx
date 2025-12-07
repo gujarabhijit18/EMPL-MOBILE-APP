@@ -215,15 +215,33 @@ export default function AttendancePage() {
         const checkInDate = new Date(record.check_in);
         const checkInDateIST = checkInDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
         
+        // Parse selfie data - handle JSON format with check_in and check_out
+        let checkInSelfie = record.checkInSelfie || null;
+        let checkOutSelfie = record.checkOutSelfie || null;
+        
+        if (!checkInSelfie && !checkOutSelfie && record.selfie) {
+          try {
+            if (typeof record.selfie === "string" && record.selfie.trim().startsWith("{")) {
+              const selfieData = JSON.parse(record.selfie);
+              checkInSelfie = selfieData.check_in || null;
+              checkOutSelfie = selfieData.check_out || null;
+            } else {
+              checkInSelfie = record.selfie;
+            }
+          } catch {
+            checkInSelfie = record.selfie;
+          }
+        }
+        
         return {
           id: record.attendance_id.toString(),
           date: checkInDateIST,
           checkInTime: formatTimeToIST(record.check_in),
           checkOutTime: record.check_out ? formatTimeToIST(record.check_out) : undefined,
           status: record.status || "present",
-          selfie: record.checkInSelfie || record.selfie,
-          checkInSelfie: record.checkInSelfie,
-          checkOutSelfie: record.checkOutSelfie,
+          selfie: checkInSelfie,
+          checkInSelfie: checkInSelfie,
+          checkOutSelfie: checkOutSelfie,
           workSummary: record.work_summary || record.workSummary,
           workReportFileName,
         };
@@ -459,6 +477,8 @@ export default function AttendancePage() {
           )}
 
           {/* Online/Offline Status Toggle - Shows only when checked in and not checked out */}
+          {/* For regular employees: show their own status */}
+          {/* For HR/Manager: show the status (same logic applies) */}
           {user?.id && (
             <OnlineStatusToggle
               userId={parseInt(user.id)}

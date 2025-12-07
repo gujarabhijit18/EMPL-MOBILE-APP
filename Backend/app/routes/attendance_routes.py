@@ -1,3 +1,13 @@
+"""
+ATTENDANCE DATA PRESERVATION POLICY
+====================================
+All attendance records and selfie photos are preserved indefinitely.
+- Historical attendance data is NEVER deleted
+- Selfie photos are stored with check_in and check_out paths
+- Old attendance records remain accessible for audit and reporting
+- Data integrity is maintained across all operations
+"""
+
 import os
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
 from sqlalchemy.orm import Session
@@ -222,46 +232,18 @@ def _make_selfie_url(path: Optional[str]) -> Optional[str]:
 
 
 def _cleanup_broken_selfie_urls(db: Session) -> None:
-    """Clean up broken selfie references in the database"""
-    try:
-        attendances = db.query(Attendance).filter(Attendance.selfie.isnot(None)).all()
-        cleaned_count = 0
-        
-        for attendance in attendances:
-            if attendance.selfie:
-                selfie_data = _load_selfie_data(attendance.selfie)
-                updated = False
-                
-                # Check check-in selfie
-                if selfie_data.get("check_in"):
-                    check_in_path = os.path.join(os.getcwd(), selfie_data["check_in"].lstrip("/"))
-                    if not os.path.exists(check_in_path):
-                        selfie_data["check_in"] = None
-                        updated = True
-                
-                # Check check-out selfie
-                if selfie_data.get("check_out"):
-                    check_out_path = os.path.join(os.getcwd(), selfie_data["check_out"].lstrip("/"))
-                    if not os.path.exists(check_out_path):
-                        selfie_data["check_out"] = None
-                        updated = True
-                
-                # Update database if changes were made
-                if updated:
-                    attendance.selfie = _dump_selfie_data(
-                        attendance.selfie,
-                        check_in=selfie_data.get("check_in"),
-                        check_out=selfie_data.get("check_out")
-                    )
-                    cleaned_count += 1
-        
-        if cleaned_count > 0:
-            db.commit()
-            print(f"Cleaned up {cleaned_count} broken selfie references")
-            
-    except Exception as e:
-        print(f"Error cleaning up selfie references: {e}")
-        db.rollback()
+    """
+    DISABLED: This function is disabled to preserve all historical attendance data and selfie photos.
+    
+    Previously, this function would delete selfie references from the database if the files
+    didn't exist on disk. This was problematic because:
+    1. It permanently removed historical data
+    2. It assumed all selfie files should exist on disk
+    3. It didn't account for file system issues or migrations
+    
+    All attendance records and selfie data are now preserved indefinitely.
+    """
+    pass
 
 
 def _sanitize_text(value: Optional[str], *, max_length: int = 250) -> Optional[str]:
@@ -1489,8 +1471,8 @@ def get_all_attendance_records(
         
         # Filter based on role
         if current_user.role == RoleEnum.ADMIN:
-            # Admin can see HR, Manager, TeamLead, and Employee attendance across all departments
-            allowed_roles = ["HR", "MANAGER", "TEAMLEAD", "TEAM_LEAD", "EMPLOYEE"]
+            # Admin can see HR and Manager attendance across all departments
+            allowed_roles = ["HR", "MANAGER"]
             records = [r for r in records if not r.get("role") or r.get("role", "").upper().replace(" ", "_") in allowed_roles or r.get("role", "").upper().replace("_", "") in [ar.replace("_", "") for ar in allowed_roles]]
             # Apply department filter if provided
             if department:
@@ -1537,8 +1519,8 @@ def get_all_attendance_records(
         query = query.filter(User.user_id == current_user.user_id)
     else:
         if current_user.role == RoleEnum.ADMIN:
-            # Admin can see HR, Manager, TeamLead, and Employee attendance across all departments
-            query = query.filter(User.role.in_([RoleEnum.HR, RoleEnum.MANAGER, RoleEnum.TEAM_LEAD, RoleEnum.EMPLOYEE]))
+            # Admin can see HR and Manager attendance across all departments
+            query = query.filter(User.role.in_([RoleEnum.HR, RoleEnum.MANAGER]))
             # Apply department filter if provided
             if department:
                 query = query.filter(User.department == department)
@@ -1550,10 +1532,6 @@ def get_all_attendance_records(
                     role_enum = RoleEnum.HR
                 elif role_upper in ["MANAGER"]:
                     role_enum = RoleEnum.MANAGER
-                elif role_upper in ["TEAMLEAD", "TEAM_LEAD"]:
-                    role_enum = RoleEnum.TEAM_LEAD
-                elif role_upper in ["EMPLOYEE"]:
-                    role_enum = RoleEnum.EMPLOYEE
                 if role_enum:
                     query = query.filter(User.role == role_enum)
         elif current_user.role in [RoleEnum.HR, RoleEnum.MANAGER] and current_user.department:

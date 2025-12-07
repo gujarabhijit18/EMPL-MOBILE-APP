@@ -12,6 +12,9 @@ class Attendance(Base):
     check_out = Column(DateTime(timezone=True), nullable=True)
     total_hours = Column(Float, default=0.0)  # Total hours worked today
     gps_location = Column(String(255), nullable=True)
+    # Selfie data stored as JSON with check_in and check_out paths
+    # Format: {"check_in": "path/to/checkin.jpg", "check_out": "path/to/checkout.jpg"}
+    # IMPORTANT: This data is preserved indefinitely for historical records
     selfie = Column(String(1024), nullable=True)
     work_summary = Column(Text, nullable=True)
     work_report = Column(String(1024), nullable=True)

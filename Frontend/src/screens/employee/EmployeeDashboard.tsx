@@ -22,6 +22,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import type { TabParamList } from "../../navigation/TabNavigator";
 import { apiService } from "../../lib/api";
+import { formatTimeIST, getDayMonthIST, getRelativeTime } from "../../utils/dateTime";
 
 const { width } = Dimensions.get("window");
 
@@ -174,7 +175,7 @@ const EmployeeDashboard = () => {
           id: `attendance-${record.attendance_id || index}`,
           type: record.status?.toLowerCase() === 'present' ? 'success' : 'info',
           title: record.status === 'present' ? 'Checked In' : 'Attendance Recorded',
-          description: `${formatDate(record.date || record.check_in)} - ${record.check_in ? new Date(record.check_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}`,
+          description: `${formatDate(record.date || record.check_in)} - ${record.check_in ? formatTimeIST(record.check_in) : 'N/A'}`,
           time: formatTime(record.date || record.check_in),
           status: record.status?.toLowerCase() || 'info',
           icon: 'finger-print',
@@ -242,23 +243,12 @@ const EmployeeDashboard = () => {
 
   const formatTime = (timestamp: string) => {
     if (!timestamp) return 'Recently';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} mins ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    if (diffHours < 48) return 'Yesterday';
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return getRelativeTime(timestamp);
   };
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return 'N/A';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return getDayMonthIST(dateStr);
   };
 
   const formatDateRange = (start: string, end: string) => {
@@ -370,10 +360,10 @@ const EmployeeDashboard = () => {
             <View style={styles.headerRight}>
               <View style={styles.dateTimeContainer}>
                 <Text style={styles.timeText}>
-                  {new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+                  {formatTimeIST(new Date())}
                 </Text>
                 <Text style={styles.dateText}>
-                  {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {getDayMonthIST(new Date())}
                 </Text>
               </View>
             </View>

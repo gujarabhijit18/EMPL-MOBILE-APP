@@ -2,8 +2,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Animated, Easing, FlatList, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Animated, Easing, FlatList, Modal, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Button, Card, ProgressBar } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChevronDown } from "lucide-react-native";
@@ -11,6 +13,8 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { apiService, DepartmentPerformance, EmployeePerformance, ExecutiveSummary, ReportsData } from "../../lib/api";
+import { handleApiError } from "../../utils/errorHandler";
+import { formatDateIST } from "../../utils/dateTime";
 
 type RatingType = "poor" | "average" | "good" | "excellent";
 type TabType = "employee" | "department" | "executive";
@@ -239,9 +243,10 @@ export default function Reports() {
       setReportsData(data);
     } catch (err: any) {
       console.error('Failed to fetch reports data:', err);
-      setError(err.message || 'Failed to load reports data');
+      const errorMsg = await handleApiError(err, navigation);
+      setError(errorMsg);
     }
-  }, [filters.month, filters.department]);
+  }, [filters.month, filters.department, navigation]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -346,10 +351,203 @@ export default function Reports() {
     setYearDropdownOpen(false);
   };
 
-  const handleExport = () => {
-    // TODO: Implement actual export logic
-    console.log('Exporting:', { exportFormat, exportDepartment, exportEmployee, exportTimeRange, exportMonth, exportYear });
-    closeExportModal();
+  const handleExport = async () => {
+    try {
+      if (!reportsData) {
+        Alert.alert('Error', 'No data available to export');
+        return;
+      }
+
+      // Filter employees based on export settings
+      let filteredEmployees = reportsData.employees;
+      
+      if (exportDepartment !== 'all') {
+        filteredEmployees = filteredEmployees.filter(emp => emp.department === exportDepartment);
+      }
+      
+      if (exportEmployee !== 'all') {
+        filteredEmployees = filteredEmployees.filter(emp => emp.id.toString() === exportEmployee);
+      }
+
+      if (filteredEmployees.length === 0) {
+        Alert.alert('Error', 'No employees found with selected filters');
+        return;
+      }
+
+      if (exportFormat === 'csv') {
+        await generateCSVExport(filteredEmployees);
+      } else {
+        await generatePDFExport(filteredEmployees);
+      }
+
+      closeExportModal();
+      Alert.alert('Success', `Report exported as ${exportFormat.toUpperCase()} successfully!`);
+    } catch (error) {
+      console.error('Export error:', error);
+      Alert.alert('Error', 'Failed to export report. Please try again.');
+    }
+  };
+
+  const generateCSVExport = async (employees: EmployeePerformance[]) => {
+    try {
+      console.log("📥 Exporting performance report to CSV");
+      console.log(`📊 Total employees: ${employees.length}`);
+
+      // CSV Headers
+      const headers = ['Employee ID', 'Name', 'Department', 'Role', 'Attendance %', 'Task Completion %', 'Productivity %', 'Quality Score %', 'Overall Rating %', 'Status'];
+      const csvRows = [headers.join(',')];
+
+      if (employees.length === 0) {
+        csvRows.push('"No employee records found for the selected period"');
+        console.log("⚠️ No employee records to export");
+      } else {
+        console.log(`✅ Adding ${employees.length} records to CSV`);
+        employees.forEach((emp: any, index: number) => {
+          const row = [
+            emp.empId || '',
+            emp.name || '',
+            emp.department || '',
+            emp.role || '',
+            emp.attendance || 0,
+            emp.taskCompletion || 0,
+            emp.productivity !== null ? emp.productivity : 'N/A',
+            emp.qualityScore !== null ? emp.qualityScore : 'N/A',
+            emp.overallRating !== null ? emp.overallRating : 'N/A',
+            emp.status || 'average',
+          ];
+          csvRows.push(row.map(cell => `"${cell}"`).join(','));
+
+          if (index === 0) {
+            console.log("📝 First CSV row:", row.join(','));
+          }
+        });
+      }
+
+      const csvContent = csvRows.join('\n');
+      console.log(`📄 CSV content length: ${csvContent.length} characters`);
+      console.log(`📄 CSV rows: ${csvRows.length}`);
+
+      // Save and share the CSV file using FileSystem
+      const fileName = `Performance_Report_${exportMonth}_${exportYear}_${new Date().toISOString().split('T')[0]}.csv`;
+      const fileUri = (FileSystem as any).documentDirectory + fileName;
+
+      console.log("📁 Saving CSV to:", fileUri);
+
+      await (FileSystem as any).writeAsStringAsync(fileUri, csvContent, {
+        encoding: (FileSystem as any).EncodingType?.UTF8,
+      });
+
+      console.log("✅ CSV created successfully with", employees.length, "records");
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Save Performance Report',
+          UTI: 'public.comma-separated-values-text',
+        });
+        console.log("✅ CSV shared successfully");
+      } else {
+        console.log("✅ CSV saved to:", fileUri);
+        Alert.alert('Success', `Report saved to: ${fileUri}`);
+      }
+    } catch (error: any) {
+      console.error("❌ Export Failed:", error);
+      throw new Error(error.message || "Failed to export performance report");
+    }
+  };
+
+  const generatePDFExport = async (employees: EmployeePerformance[]) => {
+    try {
+      console.log("📥 Exporting performance report to TXT");
+      console.log(`📊 Total employees: ${employees.length}`);
+
+      // Create text report (simpler format for better compatibility)
+      const reportLines = [
+        'PERFORMANCE REPORT',
+        `Generated: ${formatDateIST(new Date())}`,
+        `Month: ${exportMonth} ${exportYear}`,
+        `Department: ${exportDepartment === 'all' ? 'All Departments' : exportDepartment}`,
+        `Time Range: ${exportTimeRange.charAt(0).toUpperCase() + exportTimeRange.slice(1)}`,
+        '',
+        '='.repeat(80),
+        'EMPLOYEE PERFORMANCE METRICS',
+        '='.repeat(80),
+        ''
+      ];
+
+      if (employees.length === 0) {
+        reportLines.push('No employee records found for the selected period');
+        console.log("⚠️ No employee records to export");
+      } else {
+        console.log(`✅ Adding ${employees.length} records to report`);
+        // Add employee details
+        employees.forEach((emp, index) => {
+          reportLines.push(`${index + 1}. ${emp.name} (${emp.empId})`);
+          reportLines.push(`   Department: ${emp.department} | Role: ${emp.role}`);
+          reportLines.push(`   Attendance: ${emp.attendance}% | Tasks: ${emp.taskCompletion}%`);
+          reportLines.push(`   Productivity: ${emp.productivity !== null ? emp.productivity + '%' : 'N/A'} | Quality: ${emp.qualityScore !== null ? emp.qualityScore + '%' : 'N/A'}`);
+          reportLines.push(`   Overall Rating: ${emp.overallRating !== null ? emp.overallRating + '%' : 'N/A'} | Status: ${emp.status.toUpperCase()}`);
+          reportLines.push('');
+        });
+      }
+
+      // Add summary
+      reportLines.push('='.repeat(80));
+      reportLines.push('SUMMARY STATISTICS');
+      reportLines.push('='.repeat(80));
+      reportLines.push(`Total Employees: ${employees.length}`);
+      
+      if (employees.length > 0) {
+        reportLines.push(`Average Attendance: ${Math.round(employees.reduce((sum, e) => sum + e.attendance, 0) / employees.length)}%`);
+        reportLines.push(`Average Task Completion: ${Math.round(employees.reduce((sum, e) => sum + e.taskCompletion, 0) / employees.length)}%`);
+        
+        const prodEmployees = employees.filter(e => e.productivity !== null);
+        if (prodEmployees.length > 0) {
+          reportLines.push(`Average Productivity: ${Math.round(prodEmployees.reduce((sum, e) => sum + (e.productivity || 0), 0) / prodEmployees.length)}%`);
+        }
+        
+        const qualityEmployees = employees.filter(e => e.qualityScore !== null);
+        if (qualityEmployees.length > 0) {
+          reportLines.push(`Average Quality: ${Math.round(qualityEmployees.reduce((sum, e) => sum + (e.qualityScore || 0), 0) / qualityEmployees.length)}%`);
+        }
+      }
+
+      reportLines.push('');
+      reportLines.push('This is an automated report generated from the Performance Management System.');
+      reportLines.push('For questions or clarifications, please contact the HR department.');
+
+      const textContent = reportLines.join('\n');
+      console.log(`📄 Report content length: ${textContent.length} characters`);
+
+      // Save and share the TXT file using FileSystem
+      const fileName = `Performance_Report_${exportMonth}_${exportYear}_${new Date().toISOString().split('T')[0]}.txt`;
+      const fileUri = (FileSystem as any).documentDirectory + fileName;
+
+      console.log("📁 Saving report to:", fileUri);
+
+      await (FileSystem as any).writeAsStringAsync(fileUri, textContent, {
+        encoding: (FileSystem as any).EncodingType?.UTF8,
+      });
+
+      console.log("✅ Report created successfully");
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/plain',
+          dialogTitle: 'Save Performance Report',
+          UTI: 'public.plain-text',
+        });
+        console.log("✅ Report shared successfully");
+      } else {
+        console.log("✅ Report saved to:", fileUri);
+        Alert.alert('Success', `Report saved to: ${fileUri}`);
+      }
+    } catch (error: any) {
+      console.error("❌ Export Failed:", error);
+      throw new Error(error.message || "Failed to export performance report");
+    }
   };
 
   const calculateOverallScore = (attendance: number, taskCompletion: number, productivity: number, quality: number): number => {
@@ -435,7 +633,8 @@ export default function Reports() {
         Alert.alert('Success', 'Employee rating saved successfully!');
       } catch (err: any) {
         console.error('Failed to save ratings:', err);
-        Alert.alert('Error', err.message || 'Failed to save ratings');
+        const errorMsg = await handleApiError(err, navigation);
+        Alert.alert('Error', errorMsg);
       }
     }
   };
@@ -1286,175 +1485,180 @@ export default function Reports() {
 
           {/* Dropdown Modals - Rendered outside main container for proper z-index */}
           {departmentDropdownOpen && (
-            <View style={styles.exportDropdownOverlay}>
-              <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setDepartmentDropdownOpen(false)} />
-              <View style={styles.exportDropdownModal}>
-                <View style={styles.exportDropdownHeader}>
-                  <Text style={styles.exportDropdownHeaderText}>Select Department</Text>
-                  <TouchableOpacity onPress={() => setDepartmentDropdownOpen(false)}>
-                    <Ionicons name="close" size={22} color="#6b7280" />
-                  </TouchableOpacity>
-                </View>
-                <FlatList
-                  data={['all', ...departments.filter(d => d !== 'All Departments')]}
-                  keyExtractor={(item) => item}
-                  style={styles.exportDropdownScrollContainer}
-                  contentContainerStyle={styles.exportDropdownScrollContent}
-                  showsVerticalScrollIndicator={true}
-                  bounces={true}
-                  keyboardShouldPersistTaps="handled"
-                  nestedScrollEnabled={true}
-                  renderItem={({ item: dept }) => (
-                    <TouchableOpacity 
-                      style={[styles.exportDropdownOption, exportDepartment === dept && styles.exportDropdownOptionActive]}
-                      onPress={() => { setExportDepartment(dept === 'all' ? 'all' : dept); setExportEmployee('all'); setDepartmentDropdownOpen(false); }}
-                    >
-                      <Ionicons name={dept === 'all' ? "business" : "folder"} size={20} color={exportDepartment === dept ? "#3b82f6" : "#6b7280"} />
-                      <Text style={[styles.exportDropdownOptionText, exportDepartment === dept && styles.exportDropdownOptionTextActive]}>
-                        {dept === 'all' ? 'All Departments' : dept}
-                      </Text>
-                      {exportDepartment === dept && <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />}
+            <Modal visible={true} transparent animationType="fade" onRequestClose={() => setDepartmentDropdownOpen(false)}>
+              <View style={styles.exportDropdownOverlay}>
+                <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setDepartmentDropdownOpen(false)} activeOpacity={1} />
+                <View style={styles.exportDropdownModal}>
+                  <View style={styles.exportDropdownHeader}>
+                    <Text style={styles.exportDropdownHeaderText}>Select Department</Text>
+                    <TouchableOpacity onPress={() => setDepartmentDropdownOpen(false)}>
+                      <Ionicons name="close" size={22} color="#6b7280" />
                     </TouchableOpacity>
-                  )}
-                />
+                  </View>
+                  <FlatList
+                    data={['all', ...departments.filter(d => d !== 'All Departments')]}
+                    keyExtractor={(item) => item}
+                    scrollEnabled={true}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                    renderItem={({ item: dept }) => (
+                      <TouchableOpacity 
+                        style={[styles.exportDropdownOption, exportDepartment === dept && styles.exportDropdownOptionActive]}
+                        onPress={() => { setExportDepartment(dept === 'all' ? 'all' : dept); setExportEmployee('all'); setDepartmentDropdownOpen(false); }}
+                      >
+                        <Ionicons name={dept === 'all' ? "business" : "folder"} size={20} color={exportDepartment === dept ? "#3b82f6" : "#6b7280"} />
+                        <Text style={[styles.exportDropdownOptionText, exportDepartment === dept && styles.exportDropdownOptionTextActive]}>
+                          {dept === 'all' ? 'All Departments' : dept}
+                        </Text>
+                        {exportDepartment === dept && <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />}
+                      </TouchableOpacity>
+                    )}
+                  />
+                </View>
               </View>
-            </View>
+            </Modal>
           )}
 
           {employeeDropdownOpen && (
-            <View style={styles.exportDropdownOverlay}>
-              <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setEmployeeDropdownOpen(false)} />
-              <View style={styles.exportDropdownModal}>
-                <View style={styles.exportDropdownHeader}>
-                  <View>
-                    <Text style={styles.exportDropdownHeaderText}>Select Employee</Text>
-                    <Text style={styles.exportDropdownHeaderSub}>{exportFilteredEmployees.length} employees available</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setEmployeeDropdownOpen(false)}>
-                    <Ionicons name="close" size={22} color="#6b7280" />
-                  </TouchableOpacity>
-                </View>
-                <FlatList
-                  data={[{ id: 'all', name: 'All Employees', empId: '', department: '' }, ...exportFilteredEmployees]}
-                  keyExtractor={(item) => item.id.toString()}
-                  style={styles.exportDropdownScrollContainer}
-                  contentContainerStyle={styles.exportDropdownScrollContent}
-                  showsVerticalScrollIndicator={true}
-                  bounces={true}
-                  keyboardShouldPersistTaps="handled"
-                  nestedScrollEnabled={true}
-                  ListEmptyComponent={
-                    <View style={styles.exportDropdownEmpty}>
-                      <Ionicons name="people-outline" size={36} color="#d1d5db" />
-                      <Text style={styles.exportDropdownEmptyText}>No employees in this department</Text>
+            <Modal visible={true} transparent animationType="fade" onRequestClose={() => setEmployeeDropdownOpen(false)}>
+              <View style={styles.exportDropdownOverlay}>
+                <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setEmployeeDropdownOpen(false)} activeOpacity={1} />
+                <View style={styles.exportDropdownModal}>
+                  <View style={styles.exportDropdownHeader}>
+                    <View>
+                      <Text style={styles.exportDropdownHeaderText}>Select Employee</Text>
+                      <Text style={styles.exportDropdownHeaderSub}>{exportFilteredEmployees.length} employees available</Text>
                     </View>
-                  }
-                  renderItem={({ item: emp }) => (
-                    <TouchableOpacity 
-                      style={[styles.exportDropdownOption, exportEmployee === emp.id.toString() && styles.exportDropdownOptionActive]}
-                      onPress={() => { setExportEmployee(emp.id.toString()); setEmployeeDropdownOpen(false); }}
-                    >
-                      {emp.id === 'all' ? (
-                        <Ionicons name="people" size={20} color={exportEmployee === 'all' ? "#3b82f6" : "#6b7280"} />
-                      ) : (
-                        <View style={styles.exportDropdownAvatar}>
-                          <Text style={styles.exportDropdownAvatarText}>{emp.name.charAt(0)}</Text>
-                        </View>
-                      )}
-                      <View style={styles.exportDropdownOptionInfo}>
-                        <Text style={[styles.exportDropdownOptionText, exportEmployee === emp.id.toString() && styles.exportDropdownOptionTextActive]}>{emp.name}</Text>
-                        {emp.id !== 'all' && <Text style={styles.exportDropdownOptionSub}>{emp.empId} • {emp.department}</Text>}
-                      </View>
-                      {exportEmployee === emp.id.toString() && <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />}
+                    <TouchableOpacity onPress={() => setEmployeeDropdownOpen(false)}>
+                      <Ionicons name="close" size={22} color="#6b7280" />
                     </TouchableOpacity>
-                  )}
-                />
+                  </View>
+                  <FlatList
+                    data={[{ id: 'all', name: 'All Employees', empId: '', department: '' }, ...exportFilteredEmployees]}
+                    keyExtractor={(item) => item.id.toString()}
+                    scrollEnabled={true}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                    ListEmptyComponent={
+                      <View style={styles.exportDropdownEmpty}>
+                        <Ionicons name="people-outline" size={36} color="#d1d5db" />
+                        <Text style={styles.exportDropdownEmptyText}>No employees in this department</Text>
+                      </View>
+                    }
+                    renderItem={({ item: emp }) => (
+                      <TouchableOpacity 
+                        style={[styles.exportDropdownOption, exportEmployee === emp.id.toString() && styles.exportDropdownOptionActive]}
+                        onPress={() => { setExportEmployee(emp.id.toString()); setEmployeeDropdownOpen(false); }}
+                      >
+                        {emp.id === 'all' ? (
+                          <Ionicons name="people" size={20} color={exportEmployee === 'all' ? "#3b82f6" : "#6b7280"} />
+                        ) : (
+                          <View style={styles.exportDropdownAvatar}>
+                            <Text style={styles.exportDropdownAvatarText}>{emp.name.charAt(0)}</Text>
+                          </View>
+                        )}
+                        <View style={styles.exportDropdownOptionInfo}>
+                          <Text style={[styles.exportDropdownOptionText, exportEmployee === emp.id.toString() && styles.exportDropdownOptionTextActive]}>{emp.name}</Text>
+                          {emp.id !== 'all' && <Text style={styles.exportDropdownOptionSub}>{emp.empId} • {emp.department}</Text>}
+                        </View>
+                        {exportEmployee === emp.id.toString() && <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />}
+                      </TouchableOpacity>
+                    )}
+                  />
+                </View>
               </View>
-            </View>
+            </Modal>
           )}
 
           {timeRangeDropdownOpen && (
-            <View style={styles.exportDropdownOverlay}>
-              <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setTimeRangeDropdownOpen(false)} />
-              <View style={[styles.exportDropdownModal, styles.exportDropdownModalSmall]}>
-                <View style={styles.exportDropdownHeader}>
-                  <Text style={styles.exportDropdownHeaderText}>Time Range</Text>
-                  <TouchableOpacity onPress={() => setTimeRangeDropdownOpen(false)}>
-                    <Ionicons name="close" size={20} color="#6b7280" />
-                  </TouchableOpacity>
+            <Modal visible={true} transparent animationType="fade" onRequestClose={() => setTimeRangeDropdownOpen(false)}>
+              <View style={styles.exportDropdownOverlay}>
+                <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setTimeRangeDropdownOpen(false)} activeOpacity={1} />
+                <View style={[styles.exportDropdownModal, styles.exportDropdownModalSmall]}>
+                  <View style={styles.exportDropdownHeader}>
+                    <Text style={styles.exportDropdownHeaderText}>Time Range</Text>
+                    <TouchableOpacity onPress={() => setTimeRangeDropdownOpen(false)}>
+                      <Ionicons name="close" size={20} color="#6b7280" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView scrollEnabled={true} showsVerticalScrollIndicator={true}>
+                    {['monthly', 'quarterly', 'yearly'].map(range => (
+                      <TouchableOpacity 
+                        key={range}
+                        style={[styles.exportDropdownOption, exportTimeRange === range && styles.exportDropdownOptionActive]}
+                        onPress={() => { setExportTimeRange(range as any); setTimeRangeDropdownOpen(false); }}
+                      >
+                        <Ionicons name="calendar" size={18} color={exportTimeRange === range ? "#3b82f6" : "#6b7280"} />
+                        <Text style={[styles.exportDropdownOptionText, exportTimeRange === range && styles.exportDropdownOptionTextActive]}>
+                          {range.charAt(0).toUpperCase() + range.slice(1)}
+                        </Text>
+                        {exportTimeRange === range && <Ionicons name="checkmark-circle" size={18} color="#3b82f6" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
-                {['monthly', 'quarterly', 'yearly'].map(range => (
-                  <TouchableOpacity 
-                    key={range}
-                    style={[styles.exportDropdownOption, exportTimeRange === range && styles.exportDropdownOptionActive]}
-                    onPress={() => { setExportTimeRange(range as any); setTimeRangeDropdownOpen(false); }}
-                  >
-                    <Ionicons name="calendar" size={18} color={exportTimeRange === range ? "#3b82f6" : "#6b7280"} />
-                    <Text style={[styles.exportDropdownOptionText, exportTimeRange === range && styles.exportDropdownOptionTextActive]}>
-                      {range.charAt(0).toUpperCase() + range.slice(1)}
-                    </Text>
-                    {exportTimeRange === range && <Ionicons name="checkmark-circle" size={18} color="#3b82f6" />}
-                  </TouchableOpacity>
-                ))}
               </View>
-            </View>
+            </Modal>
           )}
 
           {monthDropdownOpen && (
-            <View style={styles.exportDropdownOverlay}>
-              <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setMonthDropdownOpen(false)} />
-              <View style={styles.exportDropdownModal}>
-                <View style={styles.exportDropdownHeader}>
-                  <Text style={styles.exportDropdownHeaderText}>Select Month</Text>
-                  <TouchableOpacity onPress={() => setMonthDropdownOpen(false)}>
-                    <Ionicons name="close" size={20} color="#6b7280" />
-                  </TouchableOpacity>
-                </View>
-                <FlatList
-                  data={MONTHS}
-                  keyExtractor={(item) => item}
-                  style={styles.exportDropdownScrollContainer}
-                  contentContainerStyle={styles.exportDropdownScrollContent}
-                  showsVerticalScrollIndicator={true}
-                  bounces={true}
-                  keyboardShouldPersistTaps="handled"
-                  nestedScrollEnabled={true}
-                  renderItem={({ item: month }) => (
-                    <TouchableOpacity 
-                      style={[styles.exportDropdownOption, exportMonth === month && styles.exportDropdownOptionActive]}
-                      onPress={() => { setExportMonth(month); setMonthDropdownOpen(false); }}
-                    >
-                      <Text style={[styles.exportDropdownOptionText, exportMonth === month && styles.exportDropdownOptionTextActive]}>{month}</Text>
-                      {exportMonth === month && <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />}
+            <Modal visible={true} transparent animationType="fade" onRequestClose={() => setMonthDropdownOpen(false)}>
+              <View style={styles.exportDropdownOverlay}>
+                <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setMonthDropdownOpen(false)} activeOpacity={1} />
+                <View style={styles.exportDropdownModal}>
+                  <View style={styles.exportDropdownHeader}>
+                    <Text style={styles.exportDropdownHeaderText}>Select Month</Text>
+                    <TouchableOpacity onPress={() => setMonthDropdownOpen(false)}>
+                      <Ionicons name="close" size={20} color="#6b7280" />
                     </TouchableOpacity>
-                  )}
-                />
+                  </View>
+                  <FlatList
+                    data={MONTHS}
+                    keyExtractor={(item) => item}
+                    scrollEnabled={true}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                    renderItem={({ item: month }) => (
+                      <TouchableOpacity 
+                        style={[styles.exportDropdownOption, exportMonth === month && styles.exportDropdownOptionActive]}
+                        onPress={() => { setExportMonth(month); setMonthDropdownOpen(false); }}
+                      >
+                        <Text style={[styles.exportDropdownOptionText, exportMonth === month && styles.exportDropdownOptionTextActive]}>{month}</Text>
+                        {exportMonth === month && <Ionicons name="checkmark-circle" size={20} color="#3b82f6" />}
+                      </TouchableOpacity>
+                    )}
+                  />
+                </View>
               </View>
-            </View>
+            </Modal>
           )}
 
           {yearDropdownOpen && (
-            <View style={styles.exportDropdownOverlay}>
-              <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setYearDropdownOpen(false)} />
-              <View style={[styles.exportDropdownModal, styles.exportDropdownModalSmall]}>
-                <View style={styles.exportDropdownHeader}>
-                  <Text style={styles.exportDropdownHeaderText}>Select Year</Text>
-                  <TouchableOpacity onPress={() => setYearDropdownOpen(false)}>
-                    <Ionicons name="close" size={20} color="#6b7280" />
-                  </TouchableOpacity>
+            <Modal visible={true} transparent animationType="fade" onRequestClose={() => setYearDropdownOpen(false)}>
+              <View style={styles.exportDropdownOverlay}>
+                <TouchableOpacity style={styles.exportDropdownBackdrop} onPress={() => setYearDropdownOpen(false)} activeOpacity={1} />
+                <View style={[styles.exportDropdownModal, styles.exportDropdownModalSmall]}>
+                  <View style={styles.exportDropdownHeader}>
+                    <Text style={styles.exportDropdownHeaderText}>Select Year</Text>
+                    <TouchableOpacity onPress={() => setYearDropdownOpen(false)}>
+                      <Ionicons name="close" size={20} color="#6b7280" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView scrollEnabled={true} showsVerticalScrollIndicator={true}>
+                    {['2023', '2024', '2025'].map(year => (
+                      <TouchableOpacity 
+                        key={year}
+                        style={[styles.exportDropdownOption, exportYear === year && styles.exportDropdownOptionActive]}
+                        onPress={() => { setExportYear(year); setYearDropdownOpen(false); }}
+                      >
+                        <Text style={[styles.exportDropdownOptionText, exportYear === year && styles.exportDropdownOptionTextActive]}>{year}</Text>
+                        {exportYear === year && <Ionicons name="checkmark-circle" size={18} color="#3b82f6" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
-                {['2023', '2024', '2025'].map(year => (
-                  <TouchableOpacity 
-                    key={year}
-                    style={[styles.exportDropdownOption, exportYear === year && styles.exportDropdownOptionActive]}
-                    onPress={() => { setExportYear(year); setYearDropdownOpen(false); }}
-                  >
-                    <Text style={[styles.exportDropdownOptionText, exportYear === year && styles.exportDropdownOptionTextActive]}>{year}</Text>
-                    {exportYear === year && <Ionicons name="checkmark-circle" size={18} color="#3b82f6" />}
-                  </TouchableOpacity>
-                ))}
               </View>
-            </View>
+            </Modal>
           )}
         </View>
       </Modal>
@@ -1736,25 +1940,25 @@ const styles = StyleSheet.create({
   exportDropdownTriggerText: { flex: 1, fontSize: 14, fontWeight: '500', color: '#111827' },
   
   // Dropdown Overlay & Modal
-  exportDropdownOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', zIndex: 100 },
-  exportDropdownBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)' },
-  exportDropdownModal: { backgroundColor: '#fff', borderRadius: 16, width: '90%', maxWidth: 360, maxHeight: 400, shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 15, overflow: 'hidden' },
-  exportDropdownModalSmall: { maxHeight: 220 },
-  exportDropdownHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', backgroundColor: '#f8fafc', borderTopLeftRadius: 16, borderTopRightRadius: 16 },
+  exportDropdownOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+  exportDropdownBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  exportDropdownModal: { backgroundColor: '#fff', borderRadius: 16, width: '85%', maxWidth: 360, maxHeight: '70%', shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 20, elevation: 15, overflow: 'hidden', zIndex: 1000 },
+  exportDropdownModalSmall: { maxHeight: '45%' },
+  exportDropdownHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', backgroundColor: '#f8fafc' },
   exportDropdownHeaderText: { fontSize: 16, fontWeight: '700', color: '#111827' },
   exportDropdownHeaderSub: { fontSize: 12, color: '#6b7280', marginTop: 2 },
-  exportDropdownScrollContainer: { flex: 1, maxHeight: 300 },
-  exportDropdownScrollContent: { paddingBottom: 16 },
+  exportDropdownScrollContainer: { flex: 1 },
+  exportDropdownScrollContent: { paddingVertical: 8 },
   exportDropdownEmpty: { paddingVertical: 40, alignItems: 'center', justifyContent: 'center' },
   exportDropdownEmptyText: { fontSize: 14, color: '#9ca3af', marginTop: 10 },
-  exportDropdownOption: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  exportDropdownOption: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
   exportDropdownOptionActive: { backgroundColor: '#eff6ff' },
-  exportDropdownOptionText: { flex: 1, fontSize: 15, fontWeight: '500', color: '#374151' },
+  exportDropdownOptionText: { flex: 1, fontSize: 14, fontWeight: '500', color: '#374151' },
   exportDropdownOptionTextActive: { color: '#2563eb', fontWeight: '600' },
-  exportDropdownOptionSub: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  exportDropdownOptionSub: { fontSize: 11, color: '#9ca3af', marginTop: 2 },
   exportDropdownOptionInfo: { flex: 1 },
-  exportDropdownAvatar: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#3b82f6', alignItems: 'center', justifyContent: 'center' },
-  exportDropdownAvatarText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  exportDropdownAvatar: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#3b82f6', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  exportDropdownAvatarText: { fontSize: 13, fontWeight: '700', color: '#fff' },
   
   // Export Modal Footer
   exportModalFooter: { flexDirection: 'row', padding: 18, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#f1f5f9', gap: 10, backgroundColor: '#f8fafc' },

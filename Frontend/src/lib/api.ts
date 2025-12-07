@@ -349,6 +349,11 @@ class ApiService {
           
           if (!token) {
             console.error('❌ No token available after refresh');
+            // Check if it's a token expiration error
+            const detailStr = data?.detail || '';
+            if (detailStr.includes('expired') || detailStr.includes('Signature has expired')) {
+              throw new Error('Your session has expired. Please log in again.');
+            }
             throw new Error('Authentication required. Please log in again.');
           }
 
@@ -359,7 +364,13 @@ class ApiService {
         // Handle validation errors (422)
         let errorMessage = `HTTP Error: ${response.status}`;
 
-        if (response.status === 422 && data?.detail) {
+        // Check for token expiration in error detail
+        const detailStr = data?.detail || '';
+        if ((response.status === 401 || response.status === 403) && detailStr.includes('expired')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+        } else if ((response.status === 401 || response.status === 403) && detailStr.includes('Signature has expired')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+        } else if (response.status === 422 && data?.detail) {
           if (Array.isArray(data.detail)) {
             const validationErrors = data.detail.map((err: any) => {
               const field = err.loc ? err.loc.join('.') : 'unknown';
@@ -649,6 +660,11 @@ class ApiService {
 
           if (!token) {
             console.error('❌ No token available after refresh');
+            // Check if it's a token expiration error
+            const detailStr = data?.detail || '';
+            if (detailStr.includes('expired') || detailStr.includes('Signature has expired')) {
+              throw new Error('Your session has expired. Please log in again.');
+            }
             throw new Error('Authentication required. Please log in again.');
           }
 
@@ -659,7 +675,13 @@ class ApiService {
         // Handle validation errors (422)
         let errorMessage = `HTTP Error: ${response.status}`;
 
-        if (response.status === 422 && data?.detail) {
+        // Check for token expiration in error detail
+        const detailStr = data?.detail || '';
+        if ((response.status === 401 || response.status === 403) && detailStr.includes('expired')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+        } else if ((response.status === 401 || response.status === 403) && detailStr.includes('Signature has expired')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+        } else if (response.status === 422 && data?.detail) {
           if (Array.isArray(data.detail)) {
             const validationErrors = data.detail.map((err: any) => {
               const field = err.loc ? err.loc.join('.') : 'unknown';
@@ -2320,6 +2342,78 @@ class ApiService {
     console.log("📤 Finalizing online status for user:", userId);
     return this.request(`/online-status/finalize/${userId}?attendance_id=${attendanceId}`, {
       method: "POST",
+    });
+  }
+
+  // ======================
+  // 🔹 Office Hours APIs
+  // ======================
+
+  /**
+   * Get all office timing configurations (global and department-specific)
+   */
+  async getOfficeTimings(): Promise<Array<{
+    id: number;
+    department: string | null;
+    start_time: string;
+    end_time: string;
+    check_in_grace_minutes: number;
+    check_out_grace_minutes: number;
+  }>> {
+    console.log("📥 Fetching office timings");
+    return this.request("/attendance/office-hours");
+  }
+
+  /**
+   * Get effective office timing for a specific department
+   * Returns department-specific timing if exists, otherwise global timing
+   */
+  async getEffectiveOfficeTiming(department?: string): Promise<{
+    id: number;
+    department: string | null;
+    start_time: string;
+    end_time: string;
+    check_in_grace_minutes: number;
+    check_out_grace_minutes: number;
+  }> {
+    const params = department ? `?department=${encodeURIComponent(department)}` : '';
+    console.log("📥 Fetching effective office timing for department:", department || "global");
+    return this.request(`/attendance/office-hours/effective${params}`);
+  }
+
+  /**
+   * Create or update office timing (global or department-specific)
+   * Admin only
+   */
+  async upsertOfficeTiming(timingData: {
+    department?: string | null;
+    start_time: string;
+    end_time: string;
+    check_in_grace_minutes: number;
+    check_out_grace_minutes: number;
+  }): Promise<{
+    id: number;
+    department: string | null;
+    start_time: string;
+    end_time: string;
+    check_in_grace_minutes: number;
+    check_out_grace_minutes: number;
+  }> {
+    console.log("📤 Upserting office timing:", timingData);
+    return this.request("/attendance/office-hours", {
+      method: "PUT",
+      body: JSON.stringify(timingData),
+    });
+  }
+
+  /**
+   * Delete office timing configuration
+   * Admin only
+   */
+  async deleteOfficeTiming(timingId: number): Promise<{ message: string }> {
+    console.log("🗑️ Deleting office timing:", timingId);
+    return this.request(`/attendance/office-hours/${timingId}`, {
+      method: "DELETE",
     });
   }
 
