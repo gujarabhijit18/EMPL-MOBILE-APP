@@ -5,11 +5,13 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Location from "expo-location";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar, setStatusBarBackgroundColor, setStatusBarStyle } from "expo-status-bar";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
+  AppStateStatus,
   Dimensions,
   Modal,
   Platform,
@@ -21,9 +23,15 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
 import OnlineStatusToggle from "../../components/OnlineStatusToggle";
+import {
+  isAdminRole,
+  canPerformAttendanceActions,
+  getTodayIST,
+} from "../../utils/attendanceWfhLogic";
 
 const { width } = Dimensions.get("window");
 
@@ -97,6 +105,12 @@ export default function AttendanceWithToggle() {
   const cameraRef = useRef<CameraView>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  // NEW: Last checked date for midnight refresh
+  const [lastCheckedDate, setLastCheckedDate] = useState<string>(getTodayIST());
+
+  // Role-based access control
+  const isAdmin = isAdminRole(user?.role);
+  const canPerformActions = canPerformAttendanceActions(user?.role);
 
   // Set status bar to match header color
   useEffect(() => {
@@ -105,6 +119,39 @@ export default function AttendanceWithToggle() {
     }
     setStatusBarStyle("light");
   }, []);
+
+  // NEW: Auto-refresh on app state change (background -> foreground)
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      if (nextAppState === "active") {
+        console.log("📱 App returned to foreground - Checking for date change");
+        handleMidnightRefresh();
+      }
+    });
+    return () => subscription.remove();
+  }, [lastCheckedDate]);
+
+  // NEW: Screen focus refresh
+  useFocusEffect(
+    useCallback(() => {
+      console.log("👀 Screen focused - Refreshing data");
+      handleMidnightRefresh();
+      return () => {};
+    }, [lastCheckedDate])
+  );
+
+  // NEW: Midnight refresh handler
+  const handleMidnightRefresh = async () => {
+    const today = getTodayIST();
+    if (today !== lastCheckedDate) {
+      console.log(`🌙 Date changed from ${lastCheckedDate} to ${today} - Refreshing all data`);
+      setLastCheckedDate(today);
+      setCurrentAttendance(null);
+      await loadAttendanceData();
+    } else {
+      await loadAttendanceData();
+    }
+  };
 
   useEffect(() => {
     requestPermissions();
@@ -174,7 +221,14 @@ export default function AttendanceWithToggle() {
       } else {
         let data = await apiService.getAllAttendance(selectedDate);
         if (user.role === "hr" || user.role === "manager") {
-          data = data.filter((record: any) => record.department === user.department);
+          // Filter to show team members (Team Lead and Employee roles) + self records in the same department
+          data = data.filter((record: any) => {
+            const recordRole = (record.role || "").toLowerCase();
+            const isTeamMember = recordRole === "employee" || recordRole === "team lead" || recordRole === "teamlead";
+            const isSameDepartment = record.department === user.department;
+            const isSelf = record.user_id === parseInt(user.id);
+            return isSameDepartment && (isTeamMember || isSelf);
+          });
         }
         const transformedData: AttendanceRecord[] = data.map((record: any) => {
           // Parse selfie data - handle JSON format with check_in and check_out
@@ -213,6 +267,12 @@ export default function AttendanceWithToggle() {
   };
 
   const openCamera = (checkIn: boolean) => {
+    // Admin cannot check-in/out
+    if (isAdmin) {
+      Alert.alert("Read-Only Access", "Admin users can view attendance but cannot check in/out.");
+      return;
+    }
+    
     if (!permission?.granted) {
       Alert.alert("Permission Required", "Please allow camera access.");
       return;
@@ -237,7 +297,10 @@ export default function AttendanceWithToggle() {
     }
     setLoading(true);
     try {
+      // Use existing location or default - don't wait for new location fetch
       const gpsLocationString = location ? `${location.latitude},${location.longitude}` : "0,0";
+
+      // Convert image to base64
       const base64Image = await FileSystem.readAsStringAsync(photoUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
@@ -258,7 +321,19 @@ export default function AttendanceWithToggle() {
         };
         setCurrentAttendance(record);
         setAttendanceHistory((prev) => [record, ...prev]);
+
+        // Auto-set chat status to online after check-in
+        try {
+          await apiService.toggleOnlineStatus(response.attendance_id, parseInt(user.id), true);
+          console.log("✅ Chat status set to Online after check-in");
+        } catch (chatErr) {
+          console.warn("⚠️ Failed to set chat status to Online:", chatErr);
+        }
+
         Alert.alert("✅ Checked In", "Successfully marked attendance!");
+
+        // Refresh data in background (don't wait)
+        loadAttendanceData().catch(() => { });
       } else if (currentAttendance) {
         const response = await apiService.checkOut(
           parseInt(user.id),
@@ -272,9 +347,20 @@ export default function AttendanceWithToggle() {
         setCurrentAttendance(updated);
         setAttendanceHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
         setTodaysWork("");
+
+        // Auto-set chat status to offline after check-out
+        try {
+          await apiService.toggleOnlineStatus(parseInt(currentAttendance.id), parseInt(user.id), false, "Shift completed / Checked out");
+          console.log("✅ Chat status set to Offline after check-out");
+        } catch (chatErr) {
+          console.warn("⚠️ Failed to set chat status to Offline:", chatErr);
+        }
+
         Alert.alert("✅ Checked Out", "Great work today!");
+
+        // Refresh data in background (don't wait)
+        loadAttendanceData().catch(() => { });
       }
-      await loadAttendanceData();
     } catch (error: any) {
       Alert.alert("Attendance Error", error.message || "Unable to submit attendance.");
     } finally {
@@ -360,7 +446,7 @@ export default function AttendanceWithToggle() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: "#3b82f6" }]} edges={["top"]}>
       <StatusBar style="light" backgroundColor="#3b82f6" translucent={false} />
-      
+
       {/* Header with Gradient */}
       <LinearGradient colors={["#3b82f6", "#1e40af"]} style={styles.header}>
         <View style={styles.headerContent}>
@@ -372,7 +458,7 @@ export default function AttendanceWithToggle() {
             <Ionicons name="person" size={24} color="#3b82f6" />
           </View>
         </View>
-        
+
         {/* View Mode Toggle */}
         <View style={styles.toggleContainer}>
           <TouchableOpacity
@@ -419,8 +505,8 @@ export default function AttendanceWithToggle() {
                       {currentAttendance?.checkOutTime
                         ? `${currentAttendance.workHours?.toFixed(1) || 0} hours worked`
                         : currentAttendance?.checkInTime
-                        ? `Since ${currentAttendance.checkInTime}`
-                        : "Tap to check in"}
+                          ? `Since ${currentAttendance.checkInTime}`
+                          : "Tap to check in"}
                     </Text>
                   </View>
                 </View>
@@ -481,6 +567,7 @@ export default function AttendanceWithToggle() {
             {user?.id && (
               <OnlineStatusToggle
                 userId={parseInt(user.id)}
+                attendanceId={currentAttendance?.id ? parseInt(currentAttendance.id) : null}
                 isCheckedIn={!!currentAttendance?.checkInTime}
                 isCheckedOut={!!currentAttendance?.checkOutTime}
                 onStatusChange={(isOnline, summary) => {
@@ -604,7 +691,7 @@ export default function AttendanceWithToggle() {
               <Text style={styles.modalTitle}>Ready to Check Out?</Text>
               <Text style={styles.modalSubtitle}>Add a quick summary of your work today</Text>
             </View>
-            
+
             <TextInput
               placeholder="What did you accomplish today?"
               value={todaysWork}
@@ -614,7 +701,7 @@ export default function AttendanceWithToggle() {
               numberOfLines={4}
               placeholderTextColor="#9ca3af"
             />
-            
+
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setCheckoutModal(false)}>
                 <Text style={styles.modalCancelText}>Cancel</Text>

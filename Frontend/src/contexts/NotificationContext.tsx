@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { useAuth } from "./AuthContext";
+import { getCurrentISTISOString } from "../utils/dateTime";
 
 // Safe notification import - handle Expo Go limitations
 // NOTE: Expo Go SDK 53+ removed Push Notification support. 
@@ -136,7 +137,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       ...notification,
       id: Date.now().toString(),
       userId: user.id,
-      createdAt: new Date().toISOString(),
+      createdAt: getCurrentISTISOString(),
       read: false,
     };
 

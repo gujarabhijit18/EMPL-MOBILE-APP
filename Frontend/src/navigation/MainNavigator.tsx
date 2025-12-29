@@ -8,7 +8,6 @@ import RoleDashboard from "../screens/dashboard/RoleDashboard";
 
 // Screens
 import AttendanceWrapper from "../screens/attendance/AttendanceWrapper";
-import CreateDepartmentForm from "../screens/departments/CreateDepartmentForm";
 import DepartmentManagement from "../screens/departments/DepartmentManagement";
 import EmployeeManagement from "../screens/employees/EmployeeManagement";
 import HiringManagement from "../screens/hiring/HiringManagement";
@@ -28,6 +27,12 @@ import EmployeeDashboard from "../screens/employee/EmployeeDashboard";
 import HRDashboard from "../screens/hr/HRDashboard";
 import ManagerDashboard from "../screens/manager/ManagerDashboard";
 import TeamLeadDashboard from "../screens/team_lead/TeamLeadDashboard";
+import ChatListScreen from "../screens/chat/ChatListScreen";
+import ChatRoomScreen from "../screens/chat/ChatRoomScreen";
+import NewChatScreen from "../screens/chat/NewChatScreen";
+import WfhApplyScreen from "../screens/wfh/WfhApplyScreen";
+import WfhHistoryScreen from "../screens/wfh/WfhHistoryScreen";
+import WfhRequestsScreen from "../screens/wfh/WfhRequestsScreen";
 
 export type MainStackParamList = {
   Dashboard: undefined;
@@ -37,7 +42,6 @@ export type MainStackParamList = {
   Tasks: undefined;
   Employees: undefined;
   Departments: undefined;
-  CreateDepartment: undefined;
   Hiring: undefined;
   Reports: undefined;
   RecentActivities: undefined;
@@ -46,7 +50,18 @@ export type MainStackParamList = {
   TeamShifts: undefined;
   Profile: undefined;
   Settings: undefined;
+  HelpSupport: undefined;
+  ChatList: undefined;
+  ChatRoom: { chatId: string; name: string };
+  ChatDetails: { chatId: string; name: string; avatar?: string; isGroup: boolean };
+  NewChat: undefined;
+  WfhApply: undefined;
+  WfhHistory: undefined;
+  WfhRequests: undefined;
 };
+
+import HelpSupportScreen from "../screens/help/HelpSupportScreen";
+import ChatDetailsScreen from "../screens/chat/ChatDetailsScreen";
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -125,12 +140,6 @@ export default function MainNavigator() {
         options={{ headerShown: false }}
       />
 
-      <Stack.Screen
-        name="CreateDepartment"
-        component={CreateDepartmentForm}
-        options={{ headerShown: false }}
-      />
-
       {/* Hiring - Admin/HR only */}
       <Stack.Screen
         name="Hiring"
@@ -186,6 +195,40 @@ export default function MainNavigator() {
         component={Settings}
         options={{ headerShown: false }}
       />
+
+      {/* Help & Support */}
+      <Stack.Screen
+        name="HelpSupport"
+        component={HelpSupportScreen}
+        options={{ headerShown: false }}
+      />
+
+      {/* Chat Feature */}
+      <Stack.Screen
+        name="ChatList"
+        component={ChatListScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ChatRoom"
+        component={ChatRoomScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="NewChat"
+        component={NewChatScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ChatDetails"
+        component={ChatDetailsScreen}
+        options={{ headerShown: false }}
+      />
+
+      {/* WFH Module */}
+      <Stack.Screen name="WfhApply" component={WfhApplyScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="WfhHistory" component={WfhHistoryScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="WfhRequests" component={WfhRequestsScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 }

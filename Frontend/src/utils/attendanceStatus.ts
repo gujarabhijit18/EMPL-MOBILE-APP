@@ -3,6 +3,8 @@
  * Determines check-in/check-out status based on office hours and grace periods
  */
 
+import { getCurrentISTTime, formatIST } from "./dateTime";
+
 export interface OfficeHours {
   start_time: string; // HH:MM format
   end_time: string; // HH:MM format
@@ -30,8 +32,10 @@ const timeToMinutes = (timeStr: string): number => {
  * Get current time in minutes since midnight (IST)
  */
 const getCurrentTimeInMinutes = (): number => {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
+  const now = getCurrentISTTime();
+  // Get time string in HH:mm using IST formatter
+  const timeStr = formatIST(now, "HH:mm");
+  return timeToMinutes(timeStr);
 };
 
 /**
@@ -54,7 +58,7 @@ export const calculateCheckInStatus = (officeHours: OfficeHours): AttendanceStat
       checkInStatus: "early",
       checkOutStatus: "on-time",
       minutesEarly,
-      message: `✅ Early Check-in: ${minutesEarly} minutes before office hours`,
+      message: "✅ Early",
     };
   } else if (currentTimeMinutes <= latestCheckInMinutes) {
     // Checked in within grace period
@@ -63,23 +67,23 @@ export const calculateCheckInStatus = (officeHours: OfficeHours): AttendanceStat
       return {
         checkInStatus: "on-time",
         checkOutStatus: "on-time",
-        message: "✅ Perfect! On-time check-in",
+        message: "✅ On Time",
       };
     }
     return {
       checkInStatus: "on-time",
       checkOutStatus: "on-time",
       minutesLate,
-      message: `✅ On-time Check-in: ${minutesLate} minutes after office start (within grace period)`,
+      message: "✅ On Time",
     };
   } else {
     // Checked in after grace period
-    const minutesLate = currentTimeMinutes - latestCheckInMinutes;
+    const totalMinutesLate = currentTimeMinutes - startTimeMinutes;
     return {
       checkInStatus: "late",
       checkOutStatus: "on-time",
-      minutesLate,
-      message: `⚠️ Late Check-in: ${minutesLate} minutes after grace period ended`,
+      minutesLate: totalMinutesLate,
+      message: "⚠️ Late",
     };
   }
 };
@@ -104,7 +108,7 @@ export const calculateCheckOutStatus = (officeHours: OfficeHours): AttendanceSta
       checkInStatus: "on-time",
       checkOutStatus: "early",
       minutesEarly,
-      message: `⚠️ Early Check-out: ${minutesEarly} minutes before allowed check-out time`,
+      message: "⚠️ Early",
     };
   } else if (currentTimeMinutes <= endTimeMinutes) {
     // Checked out within allowed window (end time - grace to end time)
@@ -113,23 +117,23 @@ export const calculateCheckOutStatus = (officeHours: OfficeHours): AttendanceSta
       return {
         checkInStatus: "on-time",
         checkOutStatus: "on-time",
-        message: "✅ Perfect! On-time check-out",
+        message: "✅ On Time",
       };
     }
     return {
       checkInStatus: "on-time",
       checkOutStatus: "on-time",
       minutesEarly,
-      message: `✅ On-time Check-out: ${minutesEarly} minutes before end time`,
+      message: "✅ On Time",
     };
   } else {
-    // Checked out after end time
+    // Checked out after end time (overtime)
     const minutesLate = currentTimeMinutes - endTimeMinutes;
     return {
       checkInStatus: "on-time",
       checkOutStatus: "late",
       minutesLate,
-      message: `✅ Check-out: ${minutesLate} minutes after end time (overtime)`,
+      message: "✅ Overtime",
     };
   }
 };

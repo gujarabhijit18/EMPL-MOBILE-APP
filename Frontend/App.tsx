@@ -6,10 +6,10 @@ import Toast from "react-native-toast-message";
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // ✅ Local Context Providers (Pure Context Logic)
-import { ThemeProvider } from "./src/contexts/ThemeContext";
 import { AuthProvider } from "./src/contexts/AuthContext";
 import { LanguageProvider } from "./src/contexts/LanguageContext";
 import { NotificationProvider } from "./src/contexts/NotificationContext";
+import { ModuleBadgeProvider } from "./src/contexts/ModuleBadgeContext";
 
 // ✅ App Navigation
 import RootNavigation from "./src/navigation/RootNavigation";
@@ -18,18 +18,18 @@ import RootNavigation from "./src/navigation/RootNavigation";
 export default function App() {
   return (
     <SafeAreaProvider>
-      <ThemeProvider>
-        <LanguageProvider>
-          <AuthProvider>
-            <NotificationProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <NotificationProvider>
+            <ModuleBadgeProvider>
               <NavigationContainer>
                 <RootNavigation />
                 <Toast />
               </NavigationContainer>
-            </NotificationProvider>
-          </AuthProvider>
-        </LanguageProvider>
-      </ThemeProvider>
+            </ModuleBadgeProvider>
+          </NotificationProvider>
+        </AuthProvider>
+      </LanguageProvider>
     </SafeAreaProvider>
   );
 }

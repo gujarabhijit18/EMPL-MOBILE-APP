@@ -5,14 +5,12 @@ import { getStatusColor } from "../utils/attendanceStatus";
 
 interface AttendanceStatusBadgeProps {
   status: "on-time" | "early" | "late";
-  minutesOffset?: number;
   size?: "small" | "medium" | "large";
   showLabel?: boolean;
 }
 
 const AttendanceStatusBadge: React.FC<AttendanceStatusBadgeProps> = ({
   status,
-  minutesOffset,
   size = "medium",
   showLabel = true,
 }) => {
@@ -62,11 +60,6 @@ const AttendanceStatusBadge: React.FC<AttendanceStatusBadgeProps> = ({
           <Text style={[styles.label, { color: colors.text, fontSize: currentSize.fontSize }]}>
             {colors.label}
           </Text>
-          {minutesOffset !== undefined && (
-            <Text style={[styles.offset, { color: colors.text, fontSize: currentSize.fontSize - 2 }]}>
-              {minutesOffset} min
-            </Text>
-          )}
         </View>
       )}
     </View>
@@ -90,8 +83,5 @@ const styles = StyleSheet.create({
   },
   label: {
     fontWeight: "700",
-  },
-  offset: {
-    fontWeight: "500",
   },
 });

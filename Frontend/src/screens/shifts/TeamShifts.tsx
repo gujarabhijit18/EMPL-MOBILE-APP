@@ -1,20 +1,29 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
+import { useModuleBadges } from '../../contexts/ModuleBadgeContext';
 import { format, addDays, startOfWeek, endOfWeek, isSameDay } from 'date-fns';
 import { formatDateIST, getDayMonthIST, getDayOfWeekShort, getMonthYearIST } from '../../utils/dateTime';
 
 export default function TeamShifts() {
   const navigation = useNavigation();
+  const { resetBadge } = useModuleBadges();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll({
     threshold: 16,
     overscrollMargin: 50,
   });
+
+  // Reset badge when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      resetBadge("shifts");
+    }, [resetBadge])
+  );
 
   // Animation values
   const headerAnim = useRef(new Animated.Value(0)).current;

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -8,19 +8,12 @@ import {
   FlatList,
   StyleSheet,
   Dimensions,
+  Platform,
+  Animated,
 } from "react-native";
-import { Check, ChevronDown, ChevronUp } from "lucide-react-native";
+import { ChevronDown, Check } from "lucide-react-native";
 
-const screenHeight = Dimensions.get("window").height;
-
-/**
- * 🎯 Select (Expo Compatible)
- * ✅ Works on iOS, Android, and Web (Expo Go)
- * 
- * - Custom dropdown using React Native Modal
- * - No platform-specific APIs
- * - No external API integrations
- */
+const { height: screenHeight, width: screenWidth } = Dimensions.get("window");
 
 interface SelectProps {
   value?: string;
@@ -28,93 +21,174 @@ interface SelectProps {
   placeholder?: string;
   items: { label: string; value: string }[];
   label?: string;
+  required?: boolean;
   disabled?: boolean;
   style?: any;
+  textStyle?: any;
+  activeColor?: string;
+  chevronColor?: string;
+  error?: string;
+  containerStyle?: any;
 }
 
 export const Select: React.FC<SelectProps> = ({
   value,
   onValueChange,
-  placeholder = "Select an option",
+  placeholder = "Select an item",
   items,
   label,
+  required,
+  activeColor = "#1D4ED8",
+  chevronColor = "#1E40AF",
   disabled = false,
   style,
+  textStyle,
+  error,
+  containerStyle,
 }) => {
   const [open, setOpen] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<View>(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const selectedLabel = items.find((item) => item.value === value)?.label;
 
+  const handleOpen = () => {
+    if (disabled) return;
+
+    triggerRef.current?.measure((x, y, width, height, pageX, pageY) => {
+      // Calculate position
+      let top = pageY + height;
+
+      // Prevent overflow bottom
+      const listHeight = Math.min(items.length * 48 + 10, 250);
+      if (top + listHeight > screenHeight - 20) {
+        top = pageY - listHeight;
+      }
+
+      setDropdownPosition({ top, left: pageX, width });
+      setOpen(true);
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    });
+  };
+
+  const handleClose = () => {
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(() => setOpen(false));
+  };
+
+  const handleSelect = (itemValue: string) => {
+    onValueChange?.(itemValue);
+    handleClose();
+  };
+
   return (
-    <View style={[styles.container, style]}>
-      {/* Optional Label */}
-      {label && <Text style={styles.label}>{label}</Text>}
+    <View style={[styles.mainContainer, containerStyle]}>
+      {label && (
+        <View style={styles.labelRow}>
+          <Text style={styles.label}>{label}</Text>
+          {required && <Text style={styles.requiredStar}> *</Text>}
+        </View>
+      )}
 
-      {/* Trigger Button */}
-      <TouchableOpacity
-        style={[styles.trigger, disabled && styles.disabledTrigger]}
-        onPress={() => !disabled && setOpen(true)}
-        activeOpacity={0.7}
+      <View
+        ref={triggerRef}
+        collapsable={false}
+        style={[
+          styles.triggerContainer,
+          error ? styles.errorBorder : styles.normalBorder,
+          disabled && styles.disabledTrigger,
+          style,
+        ]}
       >
-        <Text style={[styles.triggerText, !value && styles.placeholder]}>
-          {selectedLabel || placeholder}
-        </Text>
-        <ChevronDown color="#6B7280" size={18} />
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.triggerContent}
+          onPress={handleOpen}
+          activeOpacity={0.7}
+          disabled={disabled}
+        >
+          <Text
+            numberOfLines={1}
+            style={[styles.triggerText, !value && styles.placeholderText, textStyle]}
+          >
+            {selectedLabel || placeholder}
+          </Text>
+          <View style={styles.chevronBox}>
+            <ChevronDown color={chevronColor} size={20} />
+          </View>
+        </TouchableOpacity>
+      </View>
 
-      {/* Dropdown Modal */}
+      {error && <Text style={styles.errorText}>{error}</Text>}
+
       <Modal
         visible={open}
         transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
+        animationType="none"
+        onRequestClose={handleClose}
       >
-        <TouchableWithoutFeedback onPress={() => setOpen(false)}>
-          <View style={styles.overlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.dropdown}>
-                {/* Header */}
-                <View style={styles.dropdownHeader}>
-                  <Text style={styles.dropdownTitle}>Select an option</Text>
-                  <TouchableOpacity onPress={() => setOpen(false)}>
-                    <ChevronUp color="#374151" size={20} />
-                  </TouchableOpacity>
-                </View>
-
-                {/* Options */}
-                <FlatList
-                  data={items}
-                  keyExtractor={(item) => item.value}
-                  contentContainerStyle={{ paddingBottom: 10 }}
-                  renderItem={({ item }) => {
-                    const isSelected = item.value === value;
-                    return (
-                      <TouchableOpacity
+        <TouchableWithoutFeedback onPress={handleClose}>
+          <View style={styles.modalOverlay}>
+            <Animated.View
+              style={[
+                styles.dropdownList,
+                {
+                  top: dropdownPosition.top,
+                  left: dropdownPosition.left,
+                  width: dropdownPosition.width,
+                  opacity: fadeAnim,
+                  transform: [
+                    {
+                      translateY: fadeAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-10, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <FlatList
+                data={items}
+                keyExtractor={(item) => item.value}
+                showsVerticalScrollIndicator={true}
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                style={{ maxHeight: 250 }}
+                renderItem={({ item }) => {
+                  const isSelected = item.value === value;
+                  return (
+                    <TouchableOpacity
+                      style={[
+                        styles.item,
+                        isSelected && styles.selectedItem,
+                      ]}
+                      onPress={() => handleSelect(item.value)}
+                      activeOpacity={0.6}
+                    >
+                      <Text
                         style={[
-                          styles.item,
-                          isSelected && styles.activeItem,
+                          styles.itemText,
+                          isSelected && { color: activeColor, fontWeight: '600' },
                         ]}
-                        onPress={() => {
-                          onValueChange?.(item.value);
-                          setOpen(false);
-                        }}
-                        activeOpacity={0.6}
                       >
-                        <Text
-                          style={[
-                            styles.itemText,
-                            isSelected && styles.activeItemText,
-                          ]}
-                        >
-                          {item.label}
-                        </Text>
-                        {isSelected && <Check color="#2563EB" size={16} />}
-                      </TouchableOpacity>
-                    );
-                  }}
-                />
-              </View>
-            </TouchableWithoutFeedback>
+                        {item.label}
+                      </Text>
+                      {isSelected && (
+                        <Check color={activeColor} size={16} strokeWidth={3} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            </Animated.View>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
@@ -122,70 +196,92 @@ export const Select: React.FC<SelectProps> = ({
   );
 };
 
-/* ✅ Expo-Safe Styling (no elevation or platform-specific shadows) */
 const styles = StyleSheet.create({
-  container: {
+  mainContainer: {
     width: "100%",
+    marginBottom: 12,
+  },
+  labelRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+    paddingHorizontal: 2,
   },
   label: {
     fontSize: 14,
+    fontWeight: "600",
     color: "#374151",
-    marginBottom: 6,
-    fontWeight: "500",
   },
-  trigger: {
-    height: 45,
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
+  requiredStar: {
+    fontSize: 14,
+    color: "#EF4444",
+    fontWeight: "700",
+  },
+  triggerContainer: {
+    height: 48,
     borderRadius: 8,
-    paddingHorizontal: 12,
     backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+    borderWidth: 1.5,
+  },
+  normalBorder: {
+    borderColor: "#E5E7EB",
+  },
+  errorBorder: {
+    borderColor: "#EF4444",
+  },
+  disabledTrigger: {
+    backgroundColor: "#F3F4F6",
+    opacity: 0.7,
+  },
+  triggerContent: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   triggerText: {
+    flex: 1,
     fontSize: 15,
     color: "#111827",
+    paddingHorizontal: 12,
   },
-  placeholder: {
+  placeholderText: {
     color: "#9CA3AF",
   },
-  disabledTrigger: {
-    backgroundColor: "#F3F4F6",
-    opacity: 0.6,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
+  chevronBox: {
+    width: 44,
+    height: "100%",
+    backgroundColor: "#DBEAFE", // Light blue as in the image
     justifyContent: "center",
-    padding: 20,
+    alignItems: "center",
+    borderLeftWidth: 1.5,
+    borderLeftColor: "#E5E7EB",
   },
-  dropdown: {
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  dropdownList: {
+    position: "absolute",
     backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    maxHeight: screenHeight * 0.6,
+    borderRadius: 8,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    paddingBottom: 5,
-    // ✅ Expo-safe subtle shadow (no elevation)
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  dropdownHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 12,
-    borderBottomWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  dropdownTitle: {
-    fontSize: 16,
-    color: "#111827",
-    fontWeight: "600",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 5,
+      },
+      web: {
+        boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+      },
+    }),
   },
   item: {
     flexDirection: "row",
@@ -193,17 +289,25 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: 12,
     paddingHorizontal: 16,
+    height: 48,
   },
-  activeItem: {
-    backgroundColor: "#EFF6FF",
+  selectedItem: {
+    backgroundColor: "#EFF6FF", // Soft background for selected items
   },
   itemText: {
     fontSize: 15,
-    color: "#1F2937",
+    color: "#374151",
+    flex: 1,
   },
-  activeItemText: {
+  selectedItemText: {
     color: "#1D4ED8",
     fontWeight: "600",
+  },
+  errorText: {
+    fontSize: 12,
+    color: "#EF4444",
+    marginTop: 4,
+    paddingHorizontal: 2,
   },
 });
 

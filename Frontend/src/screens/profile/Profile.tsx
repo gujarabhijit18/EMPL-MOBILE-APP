@@ -1,11 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar, setStatusBarBackgroundColor, setStatusBarStyle } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert,
   Animated,
   Dimensions,
   Easing,
@@ -13,22 +11,19 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  ActionSheetIOS
+  Alert,
 } from "react-native";
 import { Avatar } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as ImagePicker from "expo-image-picker";
 import { API_CONFIG } from "../../config/api";
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { getMonthYearIST } from "../../utils/dateTime";
-import { checkCameraPermission } from "../../utils/permissions";
 
 const { width, height } = Dimensions.get("window");
 
@@ -53,19 +48,21 @@ interface User {
 export default function Profile() {
   const navigation = useNavigation();
   const { user: authUser, logout } = useAuth();
-  const { isDarkMode } = useTheme();
-
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
 
   // Animation values
   const headerAnim = useRef(new Animated.Value(0)).current;
   const contentAnim = useRef(new Animated.Value(0)).current;
   const avatarScale = useRef(new Animated.Value(0.8)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const cardAnims = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
 
-  // Status bar color will be set after user loads
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [photoLoadError, setPhotoLoadError] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   useEffect(() => {
+    // Start animations
     Animated.parallel([
       Animated.timing(headerAnim, {
         toValue: 1,
@@ -88,23 +85,17 @@ export default function Profile() {
       }),
     ]).start();
 
-    // Pulse animation for edit button
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.1, duration: 1000, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      ])
-    ).start();
+    // Staggered card animations
+    cardAnims.forEach((anim, index) => {
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 500,
+        delay: 400 + index * 100,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.back(1.2)),
+      }).start();
+    });
   }, []);
-
-  const [user, setUser] = useState<User | null>(null);
-  const [originalUser, setOriginalUser] = useState<User | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedUser, setEditedUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [photoLoadError, setPhotoLoadError] = useState(false);
 
   const getProfilePhotoUrl = (photoPath?: string) => {
     if (!photoPath) return null;
@@ -140,8 +131,6 @@ export default function Profile() {
           status: profileData.status || "active",
         };
         setUser(userProfile);
-        setOriginalUser(userProfile);
-        setEditedUser(userProfile);
       } catch (error: any) {
         if (authUser) {
           const fallbackUser: User = {
@@ -154,8 +143,6 @@ export default function Profile() {
             role: authUser.role,
           };
           setUser(fallbackUser);
-          setOriginalUser(fallbackUser);
-          setEditedUser(fallbackUser);
         }
       } finally {
         setIsLoading(false);
@@ -163,143 +150,6 @@ export default function Profile() {
     };
     fetchUserProfile();
   }, [authUser]);
-
-  const pickImage = async () => {
-    const takePhoto = async () => {
-      const hasPermission = await checkCameraPermission();
-      if (!hasPermission) {
-        Alert.alert("Permission Required", "Camera permission is needed to take photos.");
-        return;
-      }
-      try {
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.8,
-          // iOS specific: ensure we get a local copy
-          exif: false,
-        });
-        if (!result.canceled && result.assets.length > 0) {
-          // Use the URI directly - it's already in the correct format for both platforms
-          setSelectedImage(result.assets[0].uri);
-        }
-      } catch (error) {
-        console.error("Camera Error:", error);
-        Alert.alert("Error", "Failed to open camera");
-      }
-    };
-
-    const chooseFromGallery = async () => {
-      try {
-        // Request permission first (required for iOS 14+)
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert("Permission Required", "Photo library permission is needed to select photos.");
-          return;
-        }
-
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.8,
-          // iOS specific: ensure we get a local copy
-          exif: false,
-        });
-        if (!result.canceled && result.assets.length > 0) {
-          setSelectedImage(result.assets[0].uri);
-        }
-      } catch (error) {
-        console.error("Gallery Error:", error);
-        Alert.alert("Error", "Failed to open gallery");
-      }
-    };
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ["Cancel", "Take Photo", "Choose from Gallery"],
-          cancelButtonIndex: 0,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 1) takePhoto();
-          if (buttonIndex === 2) chooseFromGallery();
-        }
-      );
-    } else {
-      Alert.alert("Profile Photo", "Choose an option", [
-        { text: "Take Photo", onPress: takePhoto },
-        { text: "Choose from Gallery", onPress: chooseFromGallery },
-        { text: "Cancel", style: "cancel" }
-      ]);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!editedUser || !user || !originalUser) return;
-
-    // Build update data with only changed fields
-    const updateData: Record<string, any> = {};
-    const editableFields = ["name", "phone", "address", "department", "designation", "gender"];
-
-    editableFields.forEach((field) => {
-      const newValue = (editedUser as any)[field];
-      const originalValue = (originalUser as any)[field];
-
-      // Only include if value actually changed and is not empty
-      if (newValue !== originalValue && newValue !== undefined && newValue !== null && newValue !== "") {
-        updateData[field] = newValue;
-      }
-    });
-
-    // Always include required fields from original data
-    updateData.email = originalUser.email;
-    updateData.employee_id = originalUser.employee_id;
-    updateData.name = editedUser.name || originalUser.name;
-
-    // Handle profile photo
-    if (selectedImage) {
-      updateData.profile_photo = selectedImage;
-    }
-
-    // Check if anything changed
-    const hasChanges = Object.keys(updateData).some(
-      (key) => !["email", "employee_id", "name"].includes(key) || updateData.name !== originalUser.name
-    );
-
-    if (!hasChanges && !selectedImage) {
-      Alert.alert("No Changes", "No changes were made to your profile.");
-      setIsEditing(false);
-      return;
-    }
-
-    try {
-      setIsSaving(true);
-      await apiService.updateUserProfile(user.id, updateData);
-
-      const updatedUser: User = {
-        ...originalUser,
-        ...editedUser,
-        profilePhoto: selectedImage || user.profilePhoto,
-      };
-      setUser(updatedUser);
-      setOriginalUser(updatedUser);
-      setIsEditing(false);
-      setSelectedImage(null);
-      Alert.alert("✅ Success", "Profile updated successfully!");
-    } catch (error: any) {
-      Alert.alert("Error", error.message || "Failed to update profile.");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setEditedUser(originalUser);
-    setSelectedImage(null);
-    setIsEditing(false);
-  };
 
   const getRoleGradient = (role: string): [string, string, string] => {
     switch (role) {
@@ -321,7 +171,16 @@ export default function Profile() {
     }
   };
 
-  // Set status bar color based on role
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case "admin": return "shield-checkmark";
+      case "hr": return "people";
+      case "manager": return "briefcase";
+      case "team_lead": return "flag";
+      default: return "person";
+    }
+  };
+
   useEffect(() => {
     if (user) {
       const statusBarColor = getRoleStatusBarColor(user.role);
@@ -332,14 +191,138 @@ export default function Profile() {
     }
   }, [user]);
 
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case "admin": return "shield-checkmark";
-      case "hr": return "people";
-      case "manager": return "briefcase";
-      case "team_lead": return "flag";
-      default: return "person";
+  const handlePickPhoto = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadProfilePhoto(result.assets[0].uri);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to pick image");
     }
+  };
+
+  const handleTakePhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert("Permission Denied", "Camera permission is required to take a photo");
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadProfilePhoto(result.assets[0].uri);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to take photo");
+    }
+  };
+
+  const uploadProfilePhoto = async (photoUri: string) => {
+    if (!user) return;
+
+    try {
+      setIsUploadingPhoto(true);
+      
+      const filename = photoUri.split("/").pop() || "profile.jpg";
+      const response = await apiService.updateUserProfile(user.id, {
+        profile_photo: {
+          uri: photoUri,
+          type: "image/jpeg",
+          name: filename,
+        } as any,
+      });
+
+      if (response.profile_photo) {
+        setUser({
+          ...user,
+          profilePhoto: response.profile_photo,
+        });
+        setPhotoLoadError(false);
+        Alert.alert("Success", "Profile photo updated successfully");
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to upload photo");
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    Alert.alert("Remove Photo", "Are you sure you want to remove your profile photo?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setIsUploadingPhoto(true);
+            await apiService.removeProfilePhoto();
+            setUser({
+              ...user!,
+              profilePhoto: undefined,
+            });
+            setPhotoLoadError(false);
+            Alert.alert("Success", "Profile photo removed successfully");
+          } catch (error: any) {
+            Alert.alert("Error", error.message || "Failed to remove photo");
+          } finally {
+            setIsUploadingPhoto(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handlePhotoOptions = () => {
+    const options = ["Take Photo", "Choose from Library"];
+    if (user?.profilePhoto) {
+      options.push("Remove Photo");
+    }
+    options.push("Cancel");
+
+    Alert.alert("Profile Photo", "Choose an option", [
+      {
+        text: "Take Photo",
+        onPress: handleTakePhoto,
+      },
+      {
+        text: "Choose from Library",
+        onPress: handlePickPhoto,
+      },
+      ...(user?.profilePhoto
+        ? [
+            {
+              text: "Remove Photo",
+              onPress: handleRemovePhoto,
+              style: "destructive" as const,
+            },
+          ]
+        : []),
+      {
+        text: "Cancel",
+        style: "cancel" as const,
+      },
+    ]);
+  };
+
+  const handleLogout = () => {
+    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Sign Out", style: "destructive", onPress: logout },
+    ]);
   };
 
   if (isLoading || !user) {
@@ -356,10 +339,62 @@ export default function Profile() {
   }
 
   const statusBarColor = getRoleStatusBarColor(user.role);
+  const photoUrl = getProfilePhotoUrl(user.profilePhoto);
+
+  // Info card component
+  const InfoCard = ({ 
+    title, 
+    icon, 
+    iconBg, 
+    iconColor, 
+    items, 
+    animIndex 
+  }: { 
+    title: string; 
+    icon: string; 
+    iconBg: string; 
+    iconColor: string; 
+    items: { label: string; value: string; icon: string }[];
+    animIndex: number;
+  }) => {
+    const animValue = cardAnims[animIndex];
+    return (
+      <Animated.View
+        style={[
+          styles.card,
+          {
+            opacity: animValue,
+            transform: [
+              { translateY: animValue.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) },
+              { scale: animValue.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) },
+            ],
+          },
+        ]}
+      >
+        <View style={styles.cardHeader}>
+          <View style={[styles.cardIcon, { backgroundColor: iconBg }]}>
+            <Ionicons name={icon as any} size={20} color={iconColor} />
+          </View>
+          <Text style={styles.cardTitle}>{title}</Text>
+        </View>
+        {items.map((item, index) => (
+          <View key={item.label} style={[styles.infoRow, index !== 0 && styles.infoRowBorder]}>
+            <View style={styles.infoLeft}>
+              <View style={styles.infoIconWrapper}>
+                <Ionicons name={item.icon as any} size={16} color="#9ca3af" />
+              </View>
+              <Text style={styles.infoLabel}>{item.label}</Text>
+            </View>
+            <Text style={styles.infoValue} numberOfLines={1}>{item.value || "Not set"}</Text>
+          </View>
+        ))}
+      </Animated.View>
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: statusBarColor }]} edges={["top"]}>
-      <StatusBar style="light" backgroundColor={getRoleStatusBarColor(user.role)} translucent={false} />
+      <StatusBar style="light" backgroundColor={statusBarColor} translucent={false} />
 
       <ScrollView
         style={styles.scrollView}
@@ -368,7 +403,7 @@ export default function Profile() {
         scrollEventThrottle={scrollEventThrottle}
         showsVerticalScrollIndicator={false}
       >
-        {/* Large Modern Header */}
+        {/* Header */}
         <LinearGradient
           colors={getRoleGradient(user.role)}
           start={{ x: 0, y: 0 }}
@@ -380,8 +415,6 @@ export default function Profile() {
             <View style={[styles.decorCircle, styles.decorCircle1]} />
             <View style={[styles.decorCircle, styles.decorCircle2]} />
             <View style={[styles.decorCircle, styles.decorCircle3]} />
-            <View style={[styles.decorLine, styles.decorLine1]} />
-            <View style={[styles.decorLine, styles.decorLine2]} />
           </View>
 
           <Animated.View
@@ -393,51 +426,51 @@ export default function Profile() {
               },
             ]}
           >
-            {/* Top Actions */}
-            <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+            {/* Top Bar */}
+            <View style={styles.topBar}>
+              <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
                 <Ionicons name="arrow-back" size={22} color="#fff" />
               </TouchableOpacity>
-
-              <Text style={styles.headerLabel}>Profile</Text>
-
-              <Animated.View style={{ transform: [{ scale: isEditing ? 1 : pulseAnim }] }}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, isEditing && styles.actionBtnActive]}
-                  onPress={() => setIsEditing(!isEditing)}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name={isEditing ? "close" : "create-outline"} size={22} color="#fff" />
-                </TouchableOpacity>
-              </Animated.View>
+              <Text style={styles.headerTitle}>My Profile</Text>
+              <View style={styles.backBtn} />
             </View>
 
             {/* Avatar Section */}
-            <Animated.View style={[styles.avatarContainer, { transform: [{ scale: avatarScale }] }]}>
-              <View style={styles.avatarRing}>
-                <View style={styles.avatarInner}>
-                  {(() => {
-                    const photoUrl = selectedImage || getProfilePhotoUrl(user.profilePhoto);
-                    if (photoUrl && !photoLoadError) {
-                      return <Avatar.Image size={120} source={{ uri: photoUrl }} style={styles.avatar} />;
-                    }
-                    return (
-                      <View style={styles.avatarPlaceholder}>
-                        <Ionicons name="person" size={56} color="#fff" />
-                      </View>
-                    );
-                  })()}
+            <Animated.View style={[styles.avatarSection, { transform: [{ scale: avatarScale }] }]}>
+              <View style={styles.avatarContainer}>
+                <View style={styles.avatarRing}>
+                  {photoUrl && !photoLoadError ? (
+                    <Avatar.Image 
+                      size={110} 
+                      source={{ uri: photoUrl }} 
+                      style={styles.avatar}
+                    />
+                  ) : (
+                    <View style={styles.avatarPlaceholder}>
+                      <Ionicons name="person" size={50} color="#fff" />
+                    </View>
+                  )}
+                  {/* Status indicator */}
+                  <View style={styles.statusIndicator}>
+                    <View style={styles.statusDot} />
+                  </View>
                 </View>
-                {isEditing && (
-                  <TouchableOpacity style={styles.cameraBtn} onPress={pickImage} activeOpacity={0.8}>
-                    <LinearGradient colors={["#10b981", "#059669"]} style={styles.cameraBtnGradient}>
-                      <Ionicons name="camera" size={18} color="#fff" />
-                    </LinearGradient>
-                  </TouchableOpacity>
-                )}
+
+                {/* Edit Photo Button */}
+                <TouchableOpacity
+                  style={styles.editPhotoBtn}
+                  onPress={handlePhotoOptions}
+                  disabled={isUploadingPhoto}
+                  activeOpacity={0.7}
+                >
+                  {isUploadingPhoto ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="camera" size={16} color="#fff" />
+                  )}
+                </TouchableOpacity>
               </View>
 
-              {/* User Info */}
               <Text style={styles.userName}>{user.name}</Text>
               <Text style={styles.userDesignation}>{user.designation || "Employee"}</Text>
 
@@ -446,146 +479,94 @@ export default function Profile() {
                 <Ionicons name={getRoleIcon(user.role) as any} size={14} color="#fff" />
                 <Text style={styles.roleBadgeText}>{user.role.toUpperCase().replace("_", " ")}</Text>
               </View>
-
-              {/* Quick Info Row */}
-              <View style={styles.quickInfoRow}>
-                <View style={styles.quickInfoItem}>
-                  <Ionicons name="card-outline" size={16} color="rgba(255,255,255,0.9)" />
-                  <Text style={styles.quickInfoText}>{user.employee_id || "N/A"}</Text>
-                </View>
-                <View style={styles.quickInfoDivider} />
-                <View style={styles.quickInfoItem}>
-                  <Ionicons name="business-outline" size={16} color="rgba(255,255,255,0.9)" />
-                  <Text style={styles.quickInfoText}>{user.department || "N/A"}</Text>
-                </View>
-                <View style={styles.quickInfoDivider} />
-                <View style={styles.quickInfoItem}>
-                  <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.9)" />
-                  <Text style={styles.quickInfoText}>
-                    {user.joiningDate ? getMonthYearIST(user.joiningDate) : "N/A"}
-                  </Text>
-                </View>
-              </View>
             </Animated.View>
+
+            {/* Quick Stats */}
+            <View style={styles.quickStats}>
+              <View style={styles.statItem}>
+                <View style={styles.statIconWrapper}>
+                  <Ionicons name="card-outline" size={18} color="#fff" />
+                </View>
+                <Text style={styles.statValue}>{user.employee_id || "N/A"}</Text>
+                <Text style={styles.statLabel}>Employee ID</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <View style={styles.statIconWrapper}>
+                  <Ionicons name="business-outline" size={18} color="#fff" />
+                </View>
+                <Text style={styles.statValue}>{user.department || "N/A"}</Text>
+                <Text style={styles.statLabel}>Department</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <View style={styles.statIconWrapper}>
+                  <Ionicons name="calendar-outline" size={18} color="#fff" />
+                </View>
+                <Text style={styles.statValue}>{user.joiningDate ? getMonthYearIST(user.joiningDate) : "N/A"}</Text>
+                <Text style={styles.statLabel}>Joined</Text>
+              </View>
+            </View>
           </Animated.View>
         </LinearGradient>
 
-        {/* Content Section with Gradient Background */}
-        <LinearGradient
-          colors={["#f0f9ff", "#e0f2fe", "#f0fdf4"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.contentBackground}
-        >
-          <Animated.View
-            style={[
-              styles.contentSection,
-              {
-                opacity: contentAnim,
-                transform: [{ translateY: contentAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) }],
-              },
-            ]}
-          >
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          {/* Editable Personal Info */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.cardIcon, { backgroundColor: "#ede9fe" }]}>
-                <Ionicons name="person-outline" size={20} color="#8b5cf6" />
-              </View>
-              <Text style={styles.cardTitle}>Personal Information</Text>
-              {isEditing && <View style={styles.editIndicator}><Text style={styles.editIndicatorText}>Editing</Text></View>}
-            </View>
-
-            {[
-              { label: "Full Name", key: "name", icon: "person-outline", editable: true },
-              { label: "Phone", key: "phone", icon: "call-outline", editable: true },
-              { label: "Address", key: "address", icon: "location-outline", editable: true },
-              { label: "Gender", key: "gender", icon: "male-female-outline", editable: true },
-            ].map((field, index) => (
-              <View key={field.key} style={[styles.fieldRow, index !== 0 && styles.fieldRowBorder]}>
-                <View style={styles.fieldLabel}>
-                  <Ionicons name={field.icon as any} size={18} color="#9ca3af" />
-                  <Text style={styles.fieldLabelText}>{field.label}</Text>
-                </View>
-                {isEditing && field.editable ? (
-                  <TextInput
-                    value={(editedUser as any)?.[field.key] || ""}
-                    onChangeText={(text) => setEditedUser({ ...editedUser!, [field.key]: text })}
-                    style={styles.fieldInput}
-                    placeholder={`Enter ${field.label.toLowerCase()}`}
-                    placeholderTextColor="#d1d5db"
-                  />
-                ) : (
-                  <Text style={styles.fieldValue}>{(user as any)?.[field.key] || "Not set"}</Text>
-                )}
-              </View>
-            ))}
-          </View>
-
-          {/* Read-only Professional Info */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.cardIcon, { backgroundColor: "#dbeafe" }]}>
-                <Ionicons name="briefcase-outline" size={20} color="#3b82f6" />
-              </View>
-              <Text style={styles.cardTitle}>Professional Information</Text>
-            </View>
-
-            {[
+        {/* Content */}
+        <View style={styles.contentSection}>
+          {/* Personal Info Card */}
+          <InfoCard
+            title="Personal Information"
+            icon="person-outline"
+            iconBg="#ede9fe"
+            iconColor="#8b5cf6"
+            animIndex={0}
+            items={[
+              { label: "Full Name", value: user.name, icon: "person-outline" },
               { label: "Email", value: user.email, icon: "mail-outline" },
-              { label: "Employee ID", value: user.employee_id, icon: "card-outline" },
-              { label: "Department", value: user.department, icon: "business-outline" },
-              { label: "Designation", value: user.designation, icon: "ribbon-outline" },
-              { label: "Employee Type", value: user.employee_type, icon: "people-outline" },
-              { label: "Shift Type", value: user.shift_type, icon: "time-outline" },
-              { label: "Role", value: user.role?.toUpperCase().replace("_", " "), icon: "shield-outline" },
-            ].map((field, index) => (
-              <View key={field.label} style={[styles.fieldRow, index !== 0 && styles.fieldRowBorder]}>
-                <View style={styles.fieldLabel}>
-                  <Ionicons name={field.icon as any} size={18} color="#9ca3af" />
-                  <Text style={styles.fieldLabelText}>{field.label}</Text>
+              { label: "Phone", value: user.phone || "", icon: "call-outline" },
+              { label: "Gender", value: user.gender || "", icon: "male-female-outline" },
+              { label: "Address", value: user.address || "", icon: "location-outline" },
+            ]}
+          />
+
+          {/* Work Info Card */}
+          <InfoCard
+            title="Work Information"
+            icon="briefcase-outline"
+            iconBg="#dbeafe"
+            iconColor="#3b82f6"
+            animIndex={1}
+            items={[
+              { label: "Department", value: user.department || "", icon: "business-outline" },
+              { label: "Designation", value: user.designation || "", icon: "ribbon-outline" },
+              { label: "Employee Type", value: user.employee_type || "", icon: "people-outline" },
+              { label: "Shift Type", value: user.shift_type || "", icon: "time-outline" },
+              { label: "Role", value: user.role?.toUpperCase().replace("_", " ") || "", icon: "shield-outline" },
+            ]}
+          />
+
+          {/* Sign Out Button */}
+          <Animated.View
+            style={{
+              opacity: cardAnims[2],
+              transform: [{ translateY: cardAnims[2].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }],
+            }}
+          >
+            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
+              <LinearGradient
+                colors={["#fef2f2", "#fee2e2"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.logoutBtnGradient}
+              >
+                <View style={styles.logoutIconWrapper}>
+                  <Ionicons name="log-out-outline" size={20} color="#ef4444" />
                 </View>
-                <Text style={styles.fieldValue}>{field.value || "Not set"}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Action Buttons */}
-          {isEditing && (
-            <View style={styles.actionButtons}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel} activeOpacity={0.8}>
-                <Ionicons name="close-outline" size={20} color="#6b7280" />
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={isSaving} activeOpacity={0.8}>
-                <LinearGradient colors={["#10b981", "#059669"]} style={styles.saveBtnGradient}>
-                  {isSaving ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <>
-                      <Ionicons name="checkmark-outline" size={20} color="#fff" />
-                      <Text style={styles.saveBtnText}>Save Changes</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Logout Button */}
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout} activeOpacity={0.8}>
-            <View style={styles.logoutBtnContent}>
-              <View style={[styles.cardIcon, { backgroundColor: "#fee2e2" }]}>
-                <Ionicons name="log-out-outline" size={20} color="#ef4444" />
-              </View>
-              <Text style={styles.logoutBtnText}>Sign Out</Text>
-              <Ionicons name="chevron-forward" size={20} color="#ef4444" />
-            </View>
-          </TouchableOpacity>
-          </KeyboardAvoidingView>
+                <Text style={styles.logoutBtnText}>Sign Out</Text>
+                <Ionicons name="chevron-forward" size={20} color="#ef4444" />
+              </LinearGradient>
+            </TouchableOpacity>
           </Animated.View>
-        </LinearGradient>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -595,7 +576,6 @@ export default function Profile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f0f9ff",
   },
   loaderContainer: {
     flex: 1,
@@ -616,19 +596,17 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    backgroundColor: "#f0f9ff",
+    backgroundColor: "#f8fafc",
   },
   scrollContent: {
     flexGrow: 1,
   },
 
-  // Header Styles
+  // Header
   headerGradient: {
-    paddingTop: 16,
-    paddingBottom: 32,
+    paddingBottom: 24,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
-    minHeight: height * 0.48,
     position: "relative",
     overflow: "hidden",
   },
@@ -643,110 +621,106 @@ const styles = StyleSheet.create({
   decorCircle1: {
     width: 200,
     height: 200,
-    top: -60,
+    top: -80,
     right: -60,
   },
   decorCircle2: {
     width: 150,
     height: 150,
-    bottom: -30,
-    left: -40,
+    bottom: -40,
+    left: -50,
   },
   decorCircle3: {
     width: 80,
     height: 80,
-    top: 100,
-    left: 30,
-  },
-  decorLine: {
-    position: "absolute",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 4,
-  },
-  decorLine1: {
-    width: 120,
-    height: 4,
-    top: 80,
-    right: 40,
-    transform: [{ rotate: "-15deg" }],
-  },
-  decorLine2: {
-    width: 80,
-    height: 4,
-    bottom: 60,
-    right: 80,
-    transform: [{ rotate: "25deg" }],
+    top: 60,
+    left: 20,
   },
   headerContent: {
     paddingHorizontal: 20,
-    zIndex: 1,
+    paddingTop: 16,
   },
-  headerActions: {
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 24,
   },
-  actionBtn: {
+  backBtn: {
     width: 44,
     height: 44,
     borderRadius: 14,
     backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
   },
-  actionBtnActive: {
-    backgroundColor: "rgba(239,68,68,0.3)",
-    borderColor: "rgba(239,68,68,0.4)",
-  },
-  headerLabel: {
+  headerTitle: {
     fontSize: 18,
     fontWeight: "700",
     color: "#fff",
     letterSpacing: 0.5,
   },
 
-  // Avatar Styles
-  avatarContainer: {
+  // Avatar
+  avatarSection: {
     alignItems: "center",
+    marginBottom: 24,
+  },
+  avatarContainer: {
+    position: "relative",
+    marginBottom: 16,
   },
   avatarRing: {
     padding: 4,
     borderRadius: 999,
     backgroundColor: "rgba(255,255,255,0.2)",
-    marginBottom: 16,
     position: "relative",
-  },
-  avatarInner: {
-    borderRadius: 999,
-    overflow: "hidden",
   },
   avatar: {
     backgroundColor: "transparent",
   },
   avatarPlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 110,
+    height: 110,
+    borderRadius: 55,
     backgroundColor: "rgba(255,255,255,0.2)",
     justifyContent: "center",
     alignItems: "center",
   },
-  cameraBtn: {
+  statusIndicator: {
     position: "absolute",
-    bottom: 4,
-    right: 4,
+    bottom: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  cameraBtnGradient: {
+  statusDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#10b981",
+  },
+  editPhotoBtn: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
     width: 40,
     height: 40,
     borderRadius: 20,
+    backgroundColor: "#3b82f6",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 3,
     borderColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   userName: {
     fontSize: 26,
@@ -769,7 +743,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     gap: 6,
-    marginBottom: 20,
   },
   roleBadgeText: {
     fontSize: 12,
@@ -777,37 +750,47 @@ const styles = StyleSheet.create({
     color: "#fff",
     letterSpacing: 0.5,
   },
-  quickInfoRow: {
+
+  // Quick Stats
+  quickStats: {
     flexDirection: "row",
-    alignItems: "center",
     backgroundColor: "rgba(255,255,255,0.12)",
-    borderRadius: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    borderRadius: 20,
+    padding: 16,
+    marginHorizontal: 4,
   },
-  quickInfoItem: {
+  statItem: {
     flex: 1,
-    flexDirection: "row",
     alignItems: "center",
+  },
+  statIconWrapper: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
-    gap: 6,
+    alignItems: "center",
+    marginBottom: 8,
   },
-  quickInfoText: {
-    fontSize: 12,
-    fontWeight: "600",
+  statValue: {
+    fontSize: 13,
+    fontWeight: "700",
     color: "#fff",
+    textAlign: "center",
+    marginBottom: 2,
   },
-  quickInfoDivider: {
+  statLabel: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.7)",
+    fontWeight: "500",
+  },
+  statDivider: {
     width: 1,
-    height: 20,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.15)",
+    marginVertical: 8,
   },
 
-  // Content Styles
-  contentBackground: {
-    flex: 1,
-    minHeight: height * 0.6,
-  },
+  // Content
   contentSection: {
     padding: 16,
     paddingTop: 24,
@@ -830,8 +813,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   cardIcon: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -842,111 +825,61 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#1f2937",
   },
-  editIndicator: {
-    backgroundColor: "#fef3c7",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  editIndicatorText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#d97706",
-  },
-  fieldRow: {
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingVertical: 14,
   },
-  fieldRowBorder: {
+  infoRowBorder: {
     borderTopWidth: 1,
     borderTopColor: "#f3f4f6",
   },
-  fieldLabel: {
+  infoLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 6,
+    gap: 10,
   },
-  fieldLabelText: {
-    fontSize: 13,
-    fontWeight: "500",
-    color: "#9ca3af",
-  },
-  fieldValue: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#374151",
-    paddingLeft: 26,
-  },
-  fieldInput: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#1f2937",
+  infoIconWrapper: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     backgroundColor: "#f9fafb",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
-    marginLeft: 26,
-  },
-
-  // Action Buttons
-  actionButtons: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
-  },
-  cancelBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    paddingVertical: 14,
-    borderWidth: 1.5,
-    borderColor: "#e5e7eb",
+    alignItems: "center",
   },
-  cancelBtnText: {
-    fontSize: 15,
-    fontWeight: "600",
+  infoLabel: {
+    fontSize: 14,
+    fontWeight: "500",
     color: "#6b7280",
   },
-  saveBtn: {
-    flex: 1,
-    borderRadius: 14,
-    overflow: "hidden",
-  },
-  saveBtnGradient: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 14,
-  },
-  saveBtnText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#fff",
+  infoValue: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1f2937",
+    maxWidth: "45%",
+    textAlign: "right",
   },
 
-  // Logout Button
+  // Logout
   logoutBtn: {
-    backgroundColor: "#fff",
     borderRadius: 16,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    marginTop: 8,
   },
-  logoutBtnContent: {
+  logoutBtnGradient: {
     flexDirection: "row",
     alignItems: "center",
     padding: 16,
     gap: 12,
+  },
+  logoutIconWrapper: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
   },
   logoutBtnText: {
     flex: 1,

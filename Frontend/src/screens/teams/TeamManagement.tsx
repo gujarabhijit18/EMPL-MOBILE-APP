@@ -1,543 +1,420 @@
 // 📂 src/screens/team/TeamManagement.tsx
-import React, { useState } from "react";
+import React, { useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  TextInput,
-  Modal,
-  FlatList,
   TouchableOpacity,
   ScrollView,
-  Alert,
+  Animated,
+  Easing,
+  Dimensions,
 } from "react-native";
-import { Card, Button, Avatar } from "react-native-paper";
-import { LinearGradient } from "expo-linear-gradient"; // ✅ Expo-safe gradient import
-import { Ionicons } from "@expo/vector-icons"; // ✅ Expo-safe icon import
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useModuleBadges } from "../../contexts/ModuleBadgeContext";
 
-// Import tab bar visibility
-import { useAutoHideTabBarOnScroll } from '../../navigation/tabBarVisibility';
-import { formatTimeIST, formatDateIST } from '../../utils/dateTime';
-
-interface TeamMember {
-  id: string;
-  name: string;
-  role: string;
-  email: string;
-  status: "active" | "inactive";
-}
-
-interface Team {
-  id: string;
-  name: string;
-  description: string;
-  department: string;
-  members: TeamMember[];
-}
-
-interface TeamMessage {
-  id: string;
-  teamId: string;
-  senderName: string;
-  message: string;
-  timestamp: Date;
-  type: "message" | "update" | "announcement";
-}
+const { width } = Dimensions.get('window');
 
 const TeamManagement: React.FC = () => {
-  const [teams, setTeams] = useState<Team[]>([
-    {
-      id: "1",
-      name: "Development Team Alpha",
-      description: "Main development team for Product A",
-      department: "Engineering",
-      members: [
-        {
-          id: "101",
-          name: "Alice Johnson",
-          role: "Frontend Developer",
-          email: "alice@company.com",
-          status: "active",
-        },
-        {
-          id: "102",
-          name: "Bob Smith",
-          role: "Backend Developer",
-          email: "bob@company.com",
-          status: "active",
-        },
-      ],
-    },
-  ]);
   const navigation = useNavigation<any>();
+  const { resetBadge } = useModuleBadges();
 
-  const [selectedTab, setSelectedTab] = useState("teams");
-  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [isCreateModal, setIsCreateModal] = useState(false);
-  const [isAddMemberModal, setIsAddMemberModal] = useState(false);
-  const [newTeam, setNewTeam] = useState({
-    name: "",
-    department: "",
-    description: "",
-  });
-  const [messageInput, setMessageInput] = useState("");
-  const [messages, setMessages] = useState<TeamMessage[]>([
-    {
-      id: "1",
-      teamId: "1",
-      senderName: "Alice Johnson",
-      message: "Completed feature implementation ✅",
-      timestamp: new Date(),
-      type: "update",
-    },
-  ]);
+  // Reset badge when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      resetBadge("teams");
+    }, [resetBadge])
+  );
 
-  // Tab bar visibility hook
-  const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(40)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  const availableEmployees: TeamMember[] = [
-    { id: "201", name: "David Brown", role: "Designer", email: "david@company.com", status: "inactive" },
-    { id: "202", name: "Emma Davis", role: "QA Tester", email: "emma@company.com", status: "inactive" },
-  ];
+  useEffect(() => {
+    startAnimations();
+  }, []);
 
-  // 🧩 Create Team
-  const handleCreateTeam = () => {
-    if (!newTeam.name.trim() || !newTeam.department.trim()) {
-      Alert.alert("Error", "Please fill in all required fields.");
-      return;
-    }
-    const newT: Team = {
-      id: Date.now().toString(),
-      name: newTeam.name,
-      department: newTeam.department,
-      description: newTeam.description,
-      members: [],
-    };
-    setTeams([...teams, newT]);
-    setNewTeam({ name: "", department: "", description: "" });
-    setIsCreateModal(false);
+  const startAnimations = () => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 800,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 40,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Pulse animation for the icon
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
   };
 
-  // ➕ Add Member
-  const handleAddMember = (teamId: string, empId: string) => {
-    const emp = availableEmployees.find((e) => e.id === empId);
-    if (!emp) return;
-    const updated = teams.map((t) =>
-      t.id === teamId
-        ? { ...t, members: [...t.members, { ...emp, status: "active" } as TeamMember] }
-        : t
-    );
-    setTeams(updated);
-    setIsAddMemberModal(false);
-  };
-
-  // 💬 Send Message
-  const handleSendMessage = () => {
-    if (!selectedTeam || !messageInput.trim()) return;
-    const newMsg: TeamMessage = {
-      id: Date.now().toString(),
-      teamId: selectedTeam.id,
-      senderName: "You",
-      message: messageInput,
-      timestamp: new Date(),
-      type: "message",
-    };
-    setMessages([...messages, newMsg]);
-    setMessageInput("");
+  const handleGoBack = () => {
+    navigation.goBack();
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#39549fff' }} edges={['top']}>
-      <StatusBar style="dark" />
-      <LinearGradient colors={["#39549fff", "#39549fff"]} style={styles.headerGradient}>
-        <View style={styles.headerHeroRow}>
-          <TouchableOpacity style={styles.backCircle} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" color="#fff" size={20} />
-          </TouchableOpacity>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerTitle}>Team Management</Text>
-            <Text style={styles.headerSubtitle}>Manage teams, members & collaboration</Text>
-          </View>
-        </View>
-      </LinearGradient>
+    <View style={styles.mainContainer}>
+      <StatusBar style="light" backgroundColor="#3b82f6" />
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
 
-      <View style={styles.contentArea}>
+        {/* Header */}
+        <LinearGradient
+          colors={["#3b82f6", "#2563eb", "#1d4ed8"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerGradient}
+        >
+          <View style={styles.headerPattern}>
+            <View style={[styles.patternCircle, { top: -20, right: -20, width: 120, height: 120 }]} />
+            <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 150, height: 150 }]} />
+          </View>
+
+          <View style={styles.headerContent}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleGoBack}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="chevron-back" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+
+        {/* Main Content */}
         <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: Math.max(32, tabBarVisible ? tabBarHeight + 24 : 32) }}
-          onScroll={onScroll}
-          scrollEventThrottle={scrollEventThrottle}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Card style={styles.cardArea} mode="elevated">
-            <View style={styles.statsRow}>
-              <StatCard icon="people" label="Total Teams" value={teams.length.toString()} />
-              <StatCard
-                icon="person-add"
-                label="Total Members"
-                value={teams.reduce((a, t) => a + t.members.length, 0).toString()}
+          <Animated.View
+            style={[
+              styles.contentContainer,
+              {
+                opacity: fadeAnim,
+                transform: [
+                  {
+                    translateY: slideAnim,
+                  },
+                  {
+                    scale: scaleAnim,
+                  },
+                ],
+              },
+            ]}
+          >
+            {/* Icon Container with Pulse */}
+            <Animated.View
+              style={[
+                styles.iconContainer,
+                {
+                  transform: [{ scale: pulseAnim }],
+                },
+              ]}
+            >
+              <LinearGradient
+                colors={["#3b82f6", "#2563eb"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.iconGradient}
+              >
+                <MaterialCommunityIcons name="chart-timeline-variant" size={48} color="#fff" />
+              </LinearGradient>
+
+              {/* Sparkle Icon */}
+              <View style={styles.sparkleContainer}>
+                <MaterialCommunityIcons name="star" size={24} color="#fbbf24" />
+              </View>
+            </Animated.View>
+
+            {/* Title */}
+            <Text style={styles.mainTitle}>Coming Soon</Text>
+
+            {/* Subtitle */}
+            <Text style={styles.subtitle}>
+              Version 2 features are under development. Coming soon.
+            </Text>
+
+            {/* Loading Dots Animation */}
+            <View style={styles.dotsContainer}>
+              <Animated.View
+                style={[
+                  styles.dot,
+                  {
+                    opacity: Animated.sequence([
+                      Animated.timing(new Animated.Value(0.3), {
+                        toValue: 1,
+                        duration: 600,
+                        useNativeDriver: true,
+                      }),
+                      Animated.timing(new Animated.Value(1), {
+                        toValue: 0.3,
+                        duration: 600,
+                        useNativeDriver: true,
+                      }),
+                    ]) as any,
+                  },
+                ]}
               />
-              <StatCard icon="analytics" label="Active Projects" value="5" />
-              <StatCard icon="trending-up" label="Performance" value="92%" />
+              <Animated.View
+                style={[
+                  styles.dot,
+                  {
+                    opacity: Animated.sequence([
+                      Animated.timing(new Animated.Value(0.3), {
+                        toValue: 0.3,
+                        duration: 300,
+                        useNativeDriver: true,
+                      }),
+                      Animated.timing(new Animated.Value(0.3), {
+                        toValue: 1,
+                        duration: 600,
+                        useNativeDriver: true,
+                      }),
+                      Animated.timing(new Animated.Value(1), {
+                        toValue: 0.3,
+                        duration: 600,
+                        useNativeDriver: true,
+                      }),
+                    ]) as any,
+                  },
+                ]}
+              />
+              <Animated.View
+                style={[
+                  styles.dot,
+                  {
+                    opacity: Animated.sequence([
+                      Animated.timing(new Animated.Value(0.3), {
+                        toValue: 0.3,
+                        duration: 600,
+                        useNativeDriver: true,
+                      }),
+                      Animated.timing(new Animated.Value(0.3), {
+                        toValue: 1,
+                        duration: 600,
+                        useNativeDriver: true,
+                      }),
+                      Animated.timing(new Animated.Value(1), {
+                        toValue: 0.3,
+                        duration: 600,
+                        useNativeDriver: true,
+                      }),
+                    ]) as any,
+                  },
+                ]}
+              />
             </View>
-            <View style={styles.tabs}>
-              {["teams", "chat", "updates"].map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.tab, selectedTab === t && styles.activeTab]}
-                  onPress={() => setSelectedTab(t)}
-                >
-                  <Text style={[styles.tabText, selectedTab === t && styles.activeTabText]}>
-                    {t.toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+
+            {/* Description */}
+            <Text style={styles.description}>
+              We're working hard to bring you amazing new features
+            </Text>
+
+            {/* Go Back Button */}
+            <TouchableOpacity
+              style={styles.goBackButton}
+              onPress={handleGoBack}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="arrow-back" size={18} color="#fff" />
+              <Text style={styles.goBackText}>Go Back</Text>
+            </TouchableOpacity>
+
+            {/* Indicator Dots */}
+            <View style={styles.indicatorDots}>
+              <View style={[styles.indicatorDot, styles.indicatorDotActive]} />
+              <View style={styles.indicatorDot} />
+              <View style={styles.indicatorDot} />
             </View>
-          </Card>
-
-          {selectedTab === 'teams' && (
-            <>
-              <View style={styles.headerRow}>
-                <Text style={styles.sectionTitle}>Your Teams</Text>
-                <Button icon="plus" mode="contained" onPress={() => setIsCreateModal(true)}>
-                  Create Team
-                </Button>
-              </View>
-
-              {teams.map((team) => (
-                <Card key={team.id} style={styles.teamCard}>
-                  <Card.Title
-                    title={team.name}
-                    subtitle={team.department}
-                    right={() => (
-                      <Button compact mode="outlined" onPress={() => setIsAddMemberModal(true)}>
-                        Add
-                      </Button>
-                    )}
-                  />
-                  <Card.Content>
-                    <Text style={styles.desc}>{team.description}</Text>
-                    <Text style={styles.memberLabel}>Members ({team.members.length})</Text>
-                    {team.members.map((m) => (
-                      <View key={m.id} style={styles.memberRow}>
-                        <Avatar.Text size={32} label={m.name.charAt(0)} />
-                        <View style={{ flex: 1, marginLeft: 10 }}>
-                          <Text style={{ fontWeight: '600' }}>{m.name}</Text>
-                          <Text style={{ color: '#6b7280', fontSize: 12 }}>{m.role}</Text>
-                        </View>
-                        <Button
-                          mode="text"
-                          textColor="#ef4444"
-                          onPress={() =>
-                            setTeams(
-                              teams.map((t) =>
-                                t.id === team.id
-                                  ? { ...t, members: t.members.filter((mem) => mem.id !== m.id) }
-                                  : t
-                              )
-                            )
-                          }
-                        >
-                          Remove
-                        </Button>
-                      </View>
-                    ))}
-                    <Button mode="outlined" icon="forum" onPress={() => setSelectedTeam(team)}>
-                      Open Chat
-                    </Button>
-                  </Card.Content>
-                </Card>
-              ))}
-            </>
-          )}
-
-          {selectedTab === 'chat' && (
-            <View style={styles.chatSection}>
-              {selectedTeam ? (
-                <Card style={styles.chatCard}>
-                  <Card.Title title={`${selectedTeam.name} - Chat`} />
-                  <Card.Content>
-                    <FlatList
-                      data={messages.filter((m) => m.teamId === selectedTeam.id)}
-                      keyExtractor={(i) => i.id}
-                      renderItem={({ item }) => (
-                        <View
-                          style={[
-                            styles.messageBubble,
-                            item.type === 'announcement' && styles.announcement,
-                            item.type === 'update' && styles.update,
-                          ]}
-                        >
-                          <Text style={styles.sender}>{item.senderName}</Text>
-                          <Text>{item.message}</Text>
-                          <Text style={styles.timestamp}>{formatTimeIST(item.timestamp)}</Text>
-                        </View>
-                      )}
-                    />
-                    <View style={styles.messageInputRow}>
-                      <TextInput
-                        placeholder="Type a message..."
-                        style={styles.input}
-                        value={messageInput}
-                        onChangeText={setMessageInput}
-                      />
-                      <Button icon="send" mode="contained" onPress={handleSendMessage}>
-                        Send
-                      </Button>
-                    </View>
-                  </Card.Content>
-                </Card>
-              ) : (
-                <Text style={{ textAlign: 'center', color: '#6b7280', marginTop: 20 }}>
-                  Select a team from "Teams" tab to start chatting.
-                </Text>
-              )}
-            </View>
-          )}
-
-          {selectedTab === 'updates' && (
-            <Card style={{ margin: 10 }}>
-              <Card.Title title="Recent Work Updates" />
-              <Card.Content>
-                {messages
-                  .filter((m) => m.type === 'update')
-                  .map((m) => (
-                    <View key={m.id} style={styles.updateCard}>
-                      <Text style={styles.sender}>{m.senderName}</Text>
-                      <Text>{m.message}</Text>
-                      <Text style={styles.timestamp}>{formatDateIST(m.timestamp)}</Text>
-                    </View>
-                  ))}
-              </Card.Content>
-            </Card>
-          )}
+          </Animated.View>
         </ScrollView>
-      </View>
-
-      {/* 🏗 Create Team Modal */}
-      <Modal visible={isCreateModal} transparent animationType="slide">
-        <View style={styles.modalContainer}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Create New Team</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Team Name"
-              value={newTeam.name}
-              onChangeText={(t) => setNewTeam({ ...newTeam, name: t })}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Department"
-              value={newTeam.department}
-              onChangeText={(t) => setNewTeam({ ...newTeam, department: t })}
-            />
-            <TextInput
-              style={[styles.modalInput, { height: 80 }]}
-              placeholder="Description"
-              multiline
-              value={newTeam.description}
-              onChangeText={(t) => setNewTeam({ ...newTeam, description: t })}
-            />
-            <View style={styles.modalButtons}>
-              <Button onPress={() => setIsCreateModal(false)}>Cancel</Button>
-              <Button mode="contained" onPress={handleCreateTeam}>
-                Create
-              </Button>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ➕ Add Member Modal */}
-      <Modal visible={isAddMemberModal} transparent animationType="fade">
-        <View style={styles.modalContainer}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add Team Member</Text>
-            {availableEmployees.map((emp) => (
-              <View key={emp.id} style={styles.memberSelectRow}>
-                <View>
-                  <Text style={{ fontWeight: "600" }}>{emp.name}</Text>
-                  <Text style={{ fontSize: 12, color: "#6b7280" }}>{emp.role}</Text>
-                </View>
-                <Button onPress={() => handleAddMember(teams[0].id, emp.id)}>
-                  Add
-                </Button>
-              </View>
-            ))}
-            <Button onPress={() => setIsAddMemberModal(false)}>Close</Button>
-          </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 };
 
 export default TeamManagement;
 
-// 🧩 StatCard Component
-const StatCard = ({
-  icon,
-  label,
-  value,
-}: {
-  icon: string;
-  label: string;
-  value: string;
-}) => (
-  <View style={styles.statCard}>
-    <Ionicons name={icon as any} size={22} color="#2563eb" />
-    <View>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  </View>
-);
-
 // 🎨 Styles
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F9FAFB" },
+  mainContainer: {
+    flex: 1,
+    backgroundColor: '#f0f9ff',
+  },
+  safeArea: {
+    flex: 1,
+  },
   headerGradient: {
-    paddingVertical: 24,
-    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 24,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
+    position: 'relative',
+    overflow: 'hidden',
   },
-  contentArea: {
+  headerPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  patternCircle: {
+    position: 'absolute',
+    borderRadius: 9999,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  headerContent: {
+    paddingHorizontal: 20,
+    position: 'relative',
+    zIndex: 1,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollView: {
     flex: 1,
-    backgroundColor: "#f9fafb",
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    marginTop: -20,
-    paddingTop: 20,
   },
-  cardArea: {
-    marginHorizontal: 16,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: "#fff",
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 40,
+  },
+  contentContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  iconContainer: {
+    position: 'relative',
+    marginBottom: 32,
+  },
+  iconGradient: {
+    width: 120,
+    height: 120,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  sparkleContainer: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+  },
+  mainTitle: {
+    fontSize: 42,
+    fontWeight: '800',
+    color: '#3b82f6',
+    marginBottom: 16,
+    letterSpacing: 0.5,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 24,
+    fontWeight: '500',
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 32,
+    height: 40,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#3b82f6',
+  },
+  description: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
+    marginBottom: 40,
+    fontWeight: '500',
+    letterSpacing: 0.3,
+  },
+  goBackButton: {
+    flexDirection: 'row',
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 32,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     elevation: 4,
   },
-  scrollWrapper: { flex: 1, marginTop: 16 },
-  headerHeroRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTextContainer: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 24,
+  goBackText: {
+    fontSize: 16,
     fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.3,
   },
-  headerSubtitle: {
-    color: '#e0f2fe',
-    fontSize: 14,
-    marginTop: 4,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  createButton: {
+  indicatorDots: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    gap: 6,
-  },
-  createIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#e0e7ff',
-    alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
   },
-  createButtonText: {
-    fontWeight: '600',
-    color: '#0f172a',
+  indicatorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#cbd5e1',
   },
-  statsRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", margin: 10 },
-  statCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    width: "47%",
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 5,
-    elevation: 2,
-    gap: 10,
-  },
-  statLabel: { fontSize: 12, color: "#6b7280" },
-  statValue: { fontSize: 18, fontWeight: "bold", color: "#111827" },
-  tabs: { flexDirection: "row", justifyContent: "space-around", marginVertical: 10 },
-  tab: { padding: 10 },
-  activeTab: { borderBottomWidth: 2, borderColor: "#2563eb" },
-  tabText: { fontSize: 14, color: "#6b7280" },
-  activeTabText: { color: "#2563eb", fontWeight: "bold" },
-  headerRow: { flexDirection: "row", justifyContent: "space-between", margin: 10 },
-  sectionTitle: { fontWeight: "600", fontSize: 16 },
-  teamCard: { margin: 10, borderRadius: 12, elevation: 2 },
-  desc: { color: "#6b7280", marginBottom: 8 },
-  memberLabel: { fontWeight: "600", marginBottom: 5 },
-  memberRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  chatSection: { padding: 10 },
-  chatCard: { borderRadius: 12 },
-  messageBubble: { backgroundColor: "#f3f4f6", borderRadius: 8, padding: 10, marginVertical: 4 },
-  announcement: { backgroundColor: "#dbeafe" },
-  update: { backgroundColor: "#dcfce7" },
-  sender: { fontWeight: "bold", fontSize: 13 },
-  timestamp: { fontSize: 10, color: "#9ca3af", marginTop: 2 },
-  messageInputRow: { flexDirection: "row", alignItems: "center", marginTop: 10 },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    padding: 8,
-    marginRight: 8,
-  },
-  updateCard: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    padding: 10,
-    marginVertical: 4,
-  },
-  modalContainer: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center" },
-  modalCard: { backgroundColor: "#fff", margin: 20, borderRadius: 12, padding: 20 },
-  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10 },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 8,
-    padding: 8,
-    marginVertical: 5,
-  },
-  modalButtons: { flexDirection: "row", justifyContent: "space-between", marginTop: 10 },
-  memberSelectRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderBottomWidth: 1,
-    borderColor: "#E5E7EB",
-    paddingVertical: 8,
+  indicatorDotActive: {
+    backgroundColor: '#3b82f6',
   },
 });

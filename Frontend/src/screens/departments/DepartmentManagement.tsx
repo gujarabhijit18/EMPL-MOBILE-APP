@@ -4,48 +4,55 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar, setStatusBarBackgroundColor, setStatusBarStyle } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    FlatList,
-    Modal,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  FlatList,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useTheme } from "../../contexts/ThemeContext";
 import { apiService, DepartmentManager, DepartmentResponse } from "../../lib/api";
 import { formatDateIST } from "../../utils/dateTime";
-
-// Header gradient primary color for status bar
-const HEADER_PRIMARY_COLOR = "#764ba2";
+import {
+  Colors,
+  Spacing,
+  BorderRadius,
+  Shadows,
+  Typography,
+  Gradients,
+  HeaderStyles,
+  CardStyles,
+  CommonStyles,
+  getStatusBadgeStyle,
+} from "../../constants/designSystem";
 
 const { width } = Dimensions.get("window");
 
 export default function DepartmentManagement() {
   const navigation = useNavigation();
-  const { isDarkMode, colors } = useTheme();
-  
+
   // Animation values
   const headerAnim = useRef(new Animated.Value(0)).current;
   const statsAnim = useRef(new Animated.Value(0)).current;
   const listAnim = useRef(new Animated.Value(0)).current;
   const fabAnim = useRef(new Animated.Value(0)).current;
-  
-  // Set status bar to match header gradient color
+
+  // Set status bar to match white header
   useEffect(() => {
     if (Platform.OS === "android") {
-      setStatusBarBackgroundColor(HEADER_PRIMARY_COLOR, true);
+      setStatusBarBackgroundColor(Colors.surface, false);
     }
-    setStatusBarStyle("light");
+    setStatusBarStyle("dark");
   }, []);
 
   // Animate on mount
@@ -88,11 +95,16 @@ export default function DepartmentManagement() {
   const [managerFilter, setManagerFilter] = useState<number | null>(null);
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [selectedDept, setSelectedDept] = useState<DepartmentResponse | null>(null);
+  const [uniqueStaffCount, setUniqueStaffCount] = useState(0);
 
   const fetchDepartments = useCallback(async () => {
     try {
       const data = await apiService.getDepartments();
       setDepartments(data);
+
+      // Fetch unique staff count
+      const employees = await apiService.getEmployees();
+      setUniqueStaffCount(employees.length);
     } catch (error: any) {
       console.error("Failed to fetch departments:", error);
       Alert.alert("Error", error.message || "Failed to load departments");
@@ -133,11 +145,11 @@ export default function DepartmentManagement() {
   const handleDelete = (id: number) => {
     const dept = departments.find((d) => d.id === id);
     const hasEmployees = dept?.employee_count && dept.employee_count > 0;
-    
-    const message = hasEmployees 
+
+    const message = hasEmployees
       ? `Are you sure you want to delete "${dept?.name}"?\n\nThis department has ${dept.employee_count} employee(s). The employees will NOT be deleted, but their department assignment will remain as "${dept?.name}".`
       : `Are you sure you want to delete "${dept?.name}"?`;
-    
+
     Alert.alert("Confirm Delete", message, [
       { text: "Cancel", style: "cancel" },
       {
@@ -177,7 +189,7 @@ export default function DepartmentManagement() {
   const totalDepartments = departments.length;
   const activeDepartments = departments.filter(d => d.status === "active").length;
   const inactiveDepartments = departments.filter(d => d.status === "inactive").length;
-  const totalEmployees = departments.reduce((sum, d) => sum + (d.employee_count || 0), 0);
+  const totalEmployees = uniqueStaffCount; // Use the actual unique staff count
   const totalBudget = departments.reduce((sum, d) => sum + (d.budget || 0), 0);
 
   const getManagerName = (managerId?: number) => {
@@ -186,7 +198,7 @@ export default function DepartmentManagement() {
   };
 
   const openView = (dept: DepartmentResponse) => { setSelectedDept(dept); setViewModalVisible(true); };
-  
+
   // Edit Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingDept, setEditingDept] = useState<DepartmentResponse | null>(null);
@@ -260,21 +272,21 @@ export default function DepartmentManagement() {
     }
   };
 
-  const departmentManagers = managers.filter(m => 
-    editingDept && 
-    m.department && 
+  const departmentManagers = managers.filter(m =>
+    editingDept &&
+    m.department &&
     m.department.toLowerCase() === editingDept.name.toLowerCase() &&
     m.role.toLowerCase() === 'manager'
   );
-  
+
   const filteredEditManagers = departmentManagers.filter(m =>
     m.name.toLowerCase().includes(managerSearch.toLowerCase())
   );
 
-  const selectedEditManager = departmentManagers.find(m => m.id === editForm.manager_id) || 
+  const selectedEditManager = departmentManagers.find(m => m.id === editForm.manager_id) ||
     managers.find(m => m.id === editForm.manager_id);
 
-  // Create Modal State
+  // Create Modal State with Multi-Step Form
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [createForm, setCreateForm] = useState({
     name: '',
@@ -289,6 +301,14 @@ export default function DepartmentManagement() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createManagerSearch, setCreateManagerSearch] = useState('');
   const [showCreateManagerDropdown, setShowCreateManagerDropdown] = useState(false);
+  const [createCurrentStep, setCreateCurrentStep] = useState(0);
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+  const createSteps = [
+    { title: 'Basic Info', icon: 'information-circle-outline' },
+    { title: 'Management', icon: 'people-outline' },
+    { title: 'Details', icon: 'document-text-outline' },
+  ];
+  const createProgressWidth = useRef(new Animated.Value(0)).current;
 
   const openNewDepartment = () => {
     setCreateForm({
@@ -303,6 +323,8 @@ export default function DepartmentManagement() {
     });
     setCreateManagerSearch('');
     setShowCreateManagerDropdown(false);
+    setCreateCurrentStep(0);
+    setCreateErrors({});
     setCreateModalVisible(true);
   };
 
@@ -310,6 +332,30 @@ export default function DepartmentManagement() {
     setCreateModalVisible(false);
     setCreateManagerSearch('');
     setShowCreateManagerDropdown(false);
+    setCreateCurrentStep(0);
+    setCreateErrors({});
+  };
+
+  const validateCreateStep = (step: number): boolean => {
+    const newErrors: Record<string, string> = {};
+    if (step === 0) {
+      if (!createForm.name.trim()) newErrors.name = 'Department name is required';
+      if (!createForm.code.trim()) newErrors.code = 'Department code is required';
+      if (createForm.code.length > 5) newErrors.code = 'Code must be 5 characters or less';
+    }
+    setCreateErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const nextCreateStep = () => {
+    if (validateCreateStep(createCurrentStep)) {
+      if (createCurrentStep < createSteps.length - 1) setCreateCurrentStep(createCurrentStep + 1);
+      else handleCreateSubmit();
+    }
+  };
+
+  const prevCreateStep = () => {
+    if (createCurrentStep > 0) setCreateCurrentStep(createCurrentStep - 1);
   };
 
   const handleCreateSubmit = async () => {
@@ -362,7 +408,10 @@ export default function DepartmentManagement() {
     setLoadingEmployees(true);
     try {
       const allEmployees = await apiService.getEmployees();
-      const filtered = allEmployees.filter((emp: any) => emp.department?.toLowerCase() === deptName.toLowerCase());
+      const filtered = allEmployees.filter((emp: any) => {
+        const depts = (emp.department || '').split(',').map((d: string) => d.trim().toLowerCase());
+        return depts.includes(deptName.toLowerCase());
+      });
       setDepartmentEmployees(filtered);
     } catch (error: any) {
       console.error("Failed to fetch employees:", error);
@@ -378,7 +427,7 @@ export default function DepartmentManagement() {
     await fetchDepartmentEmployees(dept.name);
     setEmployeeListModalVisible(true);
   };
-  
+
   const handleSyncDepartments = async () => {
     Alert.alert(
       "Sync Departments",
@@ -412,7 +461,7 @@ export default function DepartmentManagement() {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
 
   const getStatusColor = (status: string) => {
-    return status === "active" 
+    return status === "active"
       ? { bg: '#dcfce7', text: '#16a34a', dot: '#22c55e' }
       : { bg: '#fee2e2', text: '#dc2626', dot: '#ef4444' };
   };
@@ -420,24 +469,31 @@ export default function DepartmentManagement() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar style="light" backgroundColor={HEADER_PRIMARY_COLOR} translucent={false} />
-        <LinearGradient colors={[HEADER_PRIMARY_COLOR, "#764ba2"]} style={styles.loadingGradient}>
-          <View style={styles.loadingContainer}>
-            <View style={styles.loadingIconBox}>
-              <Ionicons name="business" size={40} color="#fff" />
-            </View>
-            <ActivityIndicator size="large" color="#fff" style={{ marginTop: 20 }} />
-            <Text style={styles.loadingText}>Loading departments...</Text>
+        <StatusBar style="dark" backgroundColor={Colors.surface} translucent={false} />
+        <View style={styles.loadingHeader}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+          </TouchableOpacity>
+          <View style={styles.headerTextSection}>
+            <Text style={styles.headerTitle}>Departments</Text>
+            <Text style={styles.headerSubtitle}>Loading...</Text>
           </View>
-        </LinearGradient>
+        </View>
+        <View style={styles.loadingContainer}>
+          <View style={styles.loadingIconBox}>
+            <Ionicons name="business" size={40} color={Colors.primary} />
+          </View>
+          <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 20 }} />
+          <Text style={styles.loadingText}>Loading departments...</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
   const renderDepartmentCard = ({ item, index }: { item: DepartmentResponse; index: number }) => {
-    const statusColor = getStatusColor(item.status);
+    const statusStyle = getStatusBadgeStyle(item.status);
     const cardAnim = new Animated.Value(0);
-    
+
     Animated.timing(cardAnim, {
       toValue: 1,
       duration: 400,
@@ -451,7 +507,7 @@ export default function DepartmentManagement() {
         styles.card,
         {
           opacity: cardAnim,
-          transform: [{ 
+          transform: [{
             translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] })
           }]
         }
@@ -459,33 +515,29 @@ export default function DepartmentManagement() {
         {/* Card Header */}
         <View style={styles.cardHeader}>
           <View style={styles.cardHeaderLeft}>
-            <LinearGradient 
-              colors={item.status === "active" ? ['#7d57a3ff', '#7d57a3ff'] : ['#9ca3af', '#6b7280']} 
-              style={styles.codeBox}
-            >
+            <View style={[styles.codeBox, { backgroundColor: item.status === "active" ? Colors.primary : Colors.textTertiary }]}>
               <Text style={styles.codeText}>{item.code}</Text>
-            </LinearGradient>
+            </View>
             <View style={styles.cardTitleContainer}>
               <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
               <View style={styles.locationRow}>
-                <Ionicons name="location-outline" size={12} color="#9ca3af" />
+                <Ionicons name="location-outline" size={12} color={Colors.textTertiary} />
                 <Text style={styles.cardSubtitle} numberOfLines={1}>
                   {item.location || 'No location'}
                 </Text>
               </View>
             </View>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: statusColor.bg }]}>
-            <View style={[styles.statusDot, { backgroundColor: statusColor.dot }]} />
-            <Text style={[styles.statusText, { color: statusColor.text }]}>{item.status}</Text>
+          <View style={[statusStyle.container, styles.statusBadge]}>
+            <Text style={statusStyle.text}>{item.status}</Text>
           </View>
         </View>
 
         {/* Card Stats Grid */}
         <View style={styles.cardStatsGrid}>
           <View style={styles.cardStatItem}>
-            <View style={[styles.cardStatIcon, { backgroundColor: '#eff6ff' }]}>
-              <Ionicons name="person" size={14} color="#3b82f6" />
+            <View style={[styles.cardStatIcon, { backgroundColor: Colors.primaryLighter }]}>
+              <Ionicons name="person" size={14} color={Colors.primary} />
             </View>
             <View>
               <Text style={styles.cardStatLabel}>Manager</Text>
@@ -493,8 +545,8 @@ export default function DepartmentManagement() {
             </View>
           </View>
           <View style={styles.cardStatItem}>
-            <View style={[styles.cardStatIcon, { backgroundColor: '#f0fdf4' }]}>
-              <Ionicons name="people" size={14} color="#22c55e" />
+            <View style={[styles.cardStatIcon, { backgroundColor: Colors.successLighter }]}>
+              <Ionicons name="people" size={14} color={Colors.success} />
             </View>
             <View>
               <Text style={styles.cardStatLabel}>Employees</Text>
@@ -502,8 +554,8 @@ export default function DepartmentManagement() {
             </View>
           </View>
           <View style={styles.cardStatItem}>
-            <View style={[styles.cardStatIcon, { backgroundColor: '#faf5ff' }]}>
-              <Ionicons name="wallet" size={14} color="#a855f7" />
+            <View style={[styles.cardStatIcon, { backgroundColor: Colors.purpleLighter }]}>
+              <Ionicons name="wallet" size={14} color={Colors.purple} />
             </View>
             <View>
               <Text style={styles.cardStatLabel}>Budget</Text>
@@ -529,17 +581,17 @@ export default function DepartmentManagement() {
             <Ionicons name="create-outline" size={18} color="#667eea" />
             <Text style={[styles.actionBtnText, { color: '#667eea' }]}>Edit</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
-              styles.toggleBtn, 
+              styles.toggleBtn,
               { backgroundColor: item.status === "active" ? '#fef3c7' : '#d1fae5' }
-            ]} 
+            ]}
             onPress={() => handleToggleStatus(item)}
           >
-            <Ionicons 
-              name={item.status === "active" ? "pause-circle-outline" : "play-circle-outline"} 
-              size={16} 
-              color={item.status === "active" ? "#d97706" : "#059669"} 
+            <Ionicons
+              name={item.status === "active" ? "pause-circle-outline" : "play-circle-outline"}
+              size={16}
+              color={item.status === "active" ? "#d97706" : "#059669"}
             />
             <Text style={[styles.toggleBtnText, { color: item.status === "active" ? "#d97706" : "#059669" }]}>
               {item.status === "active" ? "Deactivate" : "Activate"}
@@ -555,38 +607,23 @@ export default function DepartmentManagement() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar style="light" backgroundColor={HEADER_PRIMARY_COLOR} translucent={false} />
-      
-      {/* Modern Gradient Header */}
-      <LinearGradient colors={[HEADER_PRIMARY_COLOR, "#764ba2"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.headerGradient}>
-        {/* Background Pattern */}
-        <View style={styles.headerPattern}>
-          <View style={[styles.patternCircle, { top: -30, right: -30, width: 140, height: 140 }]} />
-          <View style={[styles.patternCircle, { bottom: -40, left: -40, width: 160, height: 160 }]} />
-          <View style={[styles.patternCircle, { top: 50, right: 80, width: 60, height: 60 }]} />
-        </View>
+      <StatusBar style="dark" backgroundColor={Colors.surface} translucent={false} />
 
-        <Animated.View style={[styles.headerContent, { opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }] }]}>
-          {/* Header Top */}
-          <View style={styles.headerTop}>
-            <View style={styles.headerLeft}>
-              <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-                <Ionicons name="arrow-back" size={22} color="#fff" />
-              </TouchableOpacity>
-              <View style={styles.iconBadge}>
-                <LinearGradient colors={["rgba(255,255,255,0.3)", "rgba(255,255,255,0.1)"]} style={styles.iconBadgeGradient}>
-                  <Ionicons name="business" size={24} color="#fff" />
-                </LinearGradient>
-              </View>
-              <View style={styles.headerTextSection}>
-                <Text style={styles.headerTitle}>Departments</Text>
-                <Text style={styles.headerSubtitle}>Manage your organization</Text>
-              </View>
-            </View>
-
+      {/* White Header */}
+      <Animated.View style={[styles.whiteHeader, { opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }] }]}>
+        <View style={styles.headerTop}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+          </TouchableOpacity>
+          <View style={styles.headerIconBox}>
+            <Ionicons name="business" size={22} color={Colors.primary} />
           </View>
-        </Animated.View>
-      </LinearGradient>
+          <View style={styles.headerTextSection}>
+            <Text style={styles.headerTitle}>Departments</Text>
+            <Text style={styles.headerSubtitle}>Manage your organization</Text>
+          </View>
+        </View>
+      </Animated.View>
 
       {/* Main Content */}
       <View style={styles.content}>
@@ -628,12 +665,12 @@ export default function DepartmentManagement() {
         <View style={styles.searchSection}>
           <View style={styles.searchContainer}>
             <Ionicons name="search" size={20} color="#9ca3af" />
-            <TextInput 
-              placeholder="Search departments..." 
-              style={styles.searchInput} 
-              value={search} 
-              onChangeText={setSearch} 
-              placeholderTextColor="#9ca3af" 
+            <TextInput
+              placeholder="Search departments..."
+              style={styles.searchInput}
+              value={search}
+              onChangeText={setSearch}
+              placeholderTextColor="#9ca3af"
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch('')}>
@@ -641,14 +678,14 @@ export default function DepartmentManagement() {
               </TouchableOpacity>
             )}
           </View>
-          <TouchableOpacity 
-            style={[styles.filterChip, statusFilter !== 'all' && styles.filterChipActive]} 
+          <TouchableOpacity
+            style={[styles.filterChip, statusFilter !== 'all' && styles.filterChipActive]}
             onPress={() => setStatusFilter(statusFilter === "all" ? "active" : statusFilter === "active" ? "inactive" : "all")}
           >
-            <Ionicons 
-              name={statusFilter === 'all' ? 'filter-outline' : statusFilter === 'active' ? 'checkmark-circle' : 'close-circle'} 
-              size={16} 
-              color={statusFilter !== 'all' ? '#667eea' : '#6b7280'} 
+            <Ionicons
+              name={statusFilter === 'all' ? 'filter-outline' : statusFilter === 'active' ? 'checkmark-circle' : 'close-circle'}
+              size={16}
+              color={statusFilter !== 'all' ? '#667eea' : '#6b7280'}
             />
             <Text style={[styles.filterChipText, statusFilter !== 'all' && { color: '#667eea' }]}>
               {statusFilter === "all" ? "All" : statusFilter}
@@ -689,7 +726,7 @@ export default function DepartmentManagement() {
       {/* Floating Action Buttons */}
       <Animated.View style={[styles.fabContainer, { opacity: fabAnim, transform: [{ scale: fabAnim }] }]}>
         <TouchableOpacity style={styles.fabSecondary} onPress={handleSyncDepartments} activeOpacity={0.8} disabled={syncing}>
-          <LinearGradient colors={['#7d57a3ff', '#7d57a3ff']} style={styles.fabGradient}>
+          <LinearGradient colors={Gradients.primary} style={styles.fabGradient}>
             {syncing ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
@@ -698,7 +735,7 @@ export default function DepartmentManagement() {
           </LinearGradient>
         </TouchableOpacity>
         <TouchableOpacity style={styles.fabPrimary} onPress={openNewDepartment} activeOpacity={0.8}>
-          <LinearGradient colors={['#7d57a3ff', '#7d57a3ff']} style={styles.fabGradient}>
+          <LinearGradient colors={Gradients.primary} style={styles.fabGradient}>
             <Ionicons name="add" size={28} color="#fff" />
           </LinearGradient>
         </TouchableOpacity>
@@ -710,7 +747,7 @@ export default function DepartmentManagement() {
         <View style={styles.modalOverlay}>
           <View style={styles.viewModalContainer}>
             {/* Modal Header */}
-            <LinearGradient colors={['#7d57a3ff', '#7d57a3ff']} style={styles.viewModalHeader}>
+            <LinearGradient colors={Gradients.primary} style={styles.viewModalHeader}>
               <View style={styles.viewModalHeaderContent}>
                 <View style={styles.viewModalIconBox}>
                   <Ionicons name="business" size={24} color="#fff" />
@@ -807,7 +844,7 @@ export default function DepartmentManagement() {
             {/* Modal Actions */}
             <View style={styles.viewModalActions}>
               <TouchableOpacity style={styles.viewActionBtn} onPress={() => { selectedDept && openEmployeeList(selectedDept); }}>
-                <LinearGradient colors={['#7d57a3ff', '#7d57a3ff']} style={styles.viewActionBtnGradient}>
+                <LinearGradient colors={Gradients.primary} style={styles.viewActionBtnGradient}>
                   <Ionicons name="people-outline" size={18} color="#fff" />
                   <Text style={styles.viewActionBtnText}>View Employees</Text>
                 </LinearGradient>
@@ -822,7 +859,7 @@ export default function DepartmentManagement() {
         <View style={styles.modalOverlay}>
           <View style={styles.formModalContainer}>
             {/* Modal Header */}
-            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.formModalHeader}>
+            <LinearGradient colors={Gradients.primary} style={styles.formModalHeader}>
               <View style={styles.formModalHeaderContent}>
                 <View style={styles.formModalIconBox}>
                   <Ionicons name="create" size={24} color="#fff" />
@@ -1028,7 +1065,7 @@ export default function DepartmentManagement() {
                 {editSubmitting ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <LinearGradient colors={['#667eea', '#764ba2']} style={styles.saveBtnGradient}>
+                  <LinearGradient colors={Gradients.primary} style={styles.saveBtnGradient}>
                     <Ionicons name="checkmark" size={18} color="#fff" />
                     <Text style={styles.saveBtnText}>Save Changes</Text>
                   </LinearGradient>
@@ -1040,12 +1077,12 @@ export default function DepartmentManagement() {
       </Modal>
 
 
-      {/* Create Department Modal */}
+      {/* Create Department Modal - Simple Form */}
       <Modal visible={createModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.formModalContainer}>
             {/* Modal Header */}
-            <LinearGradient colors={['#22c55e', '#16a34a']} style={styles.formModalHeader}>
+            <LinearGradient colors={Gradients.primary} style={styles.formModalHeader}>
               <View style={styles.formModalHeaderContent}>
                 <View style={styles.formModalIconBox}>
                   <Ionicons name="add-circle" size={24} color="#fff" />
@@ -1064,11 +1101,11 @@ export default function DepartmentManagement() {
             <ScrollView style={styles.formModalBody} showsVerticalScrollIndicator={false}>
               {/* Name */}
               <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="business-outline" size={14} color="#22c55e" /> Department Name *
+                <Text style={styles.formLabel}>
+                  <Ionicons name="business-outline" size={14} color="#667eea" /> Department Name *
                 </Text>
                 <TextInput
-                  style={[styles.formInput, styles.formInputGreen]}
+                  style={styles.formInput}
                   value={createForm.name}
                   onChangeText={(t) => setCreateForm({ ...createForm, name: t })}
                   placeholder="Enter department name"
@@ -1078,64 +1115,40 @@ export default function DepartmentManagement() {
 
               {/* Code */}
               <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="code-outline" size={14} color="#22c55e" /> Department Code *
+                <Text style={styles.formLabel}>
+                  <Ionicons name="code-outline" size={14} color="#667eea" /> Department Code *
                 </Text>
                 <TextInput
-                  style={[styles.formInput, styles.formInputGreen]}
+                  style={styles.formInput}
                   value={createForm.code}
-                  onChangeText={(t) => setCreateForm({ ...createForm, code: t.toUpperCase() })}
-                  placeholder="e.g., ENG, MKT"
+                  onChangeText={(t) => setCreateForm({ ...createForm, code: t })}
+                  placeholder="e.g., HR, IT, SALES"
                   placeholderTextColor="#9ca3af"
                   maxLength={5}
-                  autoCapitalize="characters"
                 />
-              </View>
-
-              {/* Status */}
-              <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="toggle-outline" size={14} color="#22c55e" /> Status
-                </Text>
-                <View style={styles.statusToggleRow}>
-                  <TouchableOpacity
-                    style={[styles.statusToggleBtn, createForm.status === 'active' && styles.statusToggleBtnActiveGreen]}
-                    onPress={() => setCreateForm({ ...createForm, status: 'active' })}
-                  >
-                    <Ionicons name="checkmark-circle" size={18} color={createForm.status === 'active' ? '#fff' : '#22c55e'} />
-                    <Text style={[styles.statusToggleText, createForm.status === 'active' && styles.statusToggleTextActive]}>Active</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.statusToggleBtn, createForm.status === 'inactive' && styles.statusToggleBtnInactive]}
-                    onPress={() => setCreateForm({ ...createForm, status: 'inactive' })}
-                  >
-                    <Ionicons name="close-circle" size={18} color={createForm.status === 'inactive' ? '#fff' : '#ef4444'} />
-                    <Text style={[styles.statusToggleText, createForm.status === 'inactive' && styles.statusToggleTextActive]}>Inactive</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
 
               {/* Manager Selection */}
               <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="person-outline" size={14} color="#22c55e" /> Department Manager
+                <Text style={styles.formLabel}>
+                  <Ionicons name="person-outline" size={14} color="#667eea" /> Department Manager
                 </Text>
                 {selectedCreateManager ? (
-                  <View style={[styles.selectedManagerBox, { borderColor: '#22c55e' }]}>
-                    <View style={[styles.managerAvatar, { backgroundColor: '#22c55e' }]}>
-                      <Text style={styles.managerAvatarText}>{selectedCreateManager.name.charAt(0)}</Text>
+                  <View style={styles.selectedManagerBox}>
+                    <View style={styles.managerOptionAvatar}>
+                      <Text style={styles.managerOptionAvatarText}>{selectedCreateManager.name.charAt(0)}</Text>
                     </View>
-                    <View style={styles.managerInfo}>
-                      <Text style={styles.managerName}>{selectedCreateManager.name}</Text>
-                      <Text style={styles.managerRole}>{selectedCreateManager.role} {selectedCreateManager.department ? `• ${selectedCreateManager.department}` : ''}</Text>
+                    <View style={styles.managerOptionInfo}>
+                      <Text style={styles.managerOptionName}>{selectedCreateManager.name}</Text>
+                      <Text style={styles.managerOptionRole}>{selectedCreateManager.role}</Text>
                     </View>
                     <TouchableOpacity onPress={() => setCreateForm({ ...createForm, manager_id: null })}>
-                      <Ionicons name="close-circle" size={24} color="#ef4444" />
+                      <Ionicons name="close-circle" size={20} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  <TouchableOpacity style={[styles.selectManagerBtn, { borderColor: '#d1fae5' }]} onPress={() => setShowCreateManagerDropdown(!showCreateManagerDropdown)}>
-                    <Ionicons name="person-add-outline" size={18} color="#22c55e" />
+                  <TouchableOpacity style={styles.selectManagerBtn} onPress={() => setShowCreateManagerDropdown(!showCreateManagerDropdown)}>
+                    <Ionicons name="person-add-outline" size={18} color="#667eea" />
                     <Text style={styles.selectManagerText}>Select a Manager</Text>
                     <Ionicons name={showCreateManagerDropdown ? "chevron-up" : "chevron-down"} size={18} color="#9ca3af" />
                   </TouchableOpacity>
@@ -1169,7 +1182,7 @@ export default function DepartmentManagement() {
                               setCreateManagerSearch('');
                             }}
                           >
-                            <View style={[styles.managerOptionAvatar, { backgroundColor: '#22c55e' }]}>
+                            <View style={styles.managerOptionAvatar}>
                               <Text style={styles.managerOptionAvatarText}>{m.name.charAt(0)}</Text>
                             </View>
                             <View style={styles.managerOptionInfo}>
@@ -1186,22 +1199,22 @@ export default function DepartmentManagement() {
 
               {/* Employee Count Info */}
               <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="people-outline" size={14} color="#22c55e" /> Number of Employees
+                <Text style={styles.formLabel}>
+                  <Ionicons name="people-outline" size={14} color="#667eea" /> Number of Employees
                 </Text>
-                <View style={[styles.autoCalcBox, { backgroundColor: '#f0fdf4', borderColor: '#22c55e' }]}>
-                  <Ionicons name="information-circle" size={18} color="#22c55e" />
-                  <Text style={[styles.autoCalcText, { color: '#16a34a' }]}>Auto-calculated from users</Text>
+                <View style={styles.autoCalcBox}>
+                  <Ionicons name="information-circle" size={18} color="#667eea" />
+                  <Text style={styles.autoCalcText}>Auto-calculated based on assigned employees</Text>
                 </View>
               </View>
 
               {/* Budget */}
               <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="cash-outline" size={14} color="#22c55e" /> Annual Budget (₹)
+                <Text style={styles.formLabel}>
+                  <Ionicons name="cash-outline" size={14} color="#667eea" /> Annual Budget (₹)
                 </Text>
                 <TextInput
-                  style={[styles.formInput, styles.formInputGreen]}
+                  style={styles.formInput}
                   value={String(createForm.budget)}
                   onChangeText={(t) => setCreateForm({ ...createForm, budget: parseInt(t) || 0 })}
                   keyboardType="numeric"
@@ -1212,11 +1225,11 @@ export default function DepartmentManagement() {
 
               {/* Location */}
               <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="location-outline" size={14} color="#22c55e" /> Location
+                <Text style={styles.formLabel}>
+                  <Ionicons name="location-outline" size={14} color="#667eea" /> Location
                 </Text>
                 <TextInput
-                  style={[styles.formInput, styles.formInputGreen]}
+                  style={styles.formInput}
                   value={createForm.location}
                   onChangeText={(t) => setCreateForm({ ...createForm, location: t })}
                   placeholder="e.g., Building A, Floor 3"
@@ -1226,14 +1239,14 @@ export default function DepartmentManagement() {
 
               {/* Description */}
               <View style={styles.formGroup}>
-                <Text style={[styles.formLabel, { color: '#22c55e' }]}>
-                  <Ionicons name="document-text-outline" size={14} color="#22c55e" /> Description
+                <Text style={styles.formLabel}>
+                  <Ionicons name="document-text-outline" size={14} color="#667eea" /> Description
                 </Text>
                 <TextInput
-                  style={[styles.formInput, styles.formInputGreen, styles.formTextArea]}
+                  style={[styles.formInput, styles.formTextArea]}
                   value={createForm.description}
                   onChangeText={(t) => setCreateForm({ ...createForm, description: t })}
-                  placeholder="Brief description..."
+                  placeholder="Brief description of the department..."
                   placeholderTextColor="#9ca3af"
                   multiline
                   numberOfLines={3}
@@ -1251,8 +1264,8 @@ export default function DepartmentManagement() {
                 {createSubmitting ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <LinearGradient colors={['#22c55e', '#16a34a']} style={styles.saveBtnGradient}>
-                    <Ionicons name="add" size={18} color="#fff" />
+                  <LinearGradient colors={Gradients.primary} style={styles.saveBtnGradient}>
+                    <Ionicons name="checkmark" size={18} color="#fff" />
                     <Text style={styles.saveBtnText}>Create Department</Text>
                   </LinearGradient>
                 )}
@@ -1267,7 +1280,7 @@ export default function DepartmentManagement() {
         <View style={styles.modalOverlay}>
           <View style={styles.employeeModalContainer}>
             {/* Header */}
-            <LinearGradient colors={['#7d57a3ff', '#7d57a3ff']} style={styles.employeeModalHeader}>
+            <LinearGradient colors={Gradients.primary} style={styles.employeeModalHeader}>
               <View style={styles.employeeModalHeaderContent}>
                 <View style={styles.employeeModalIconBox}>
                   <Ionicons name="people" size={24} color="#fff" />
@@ -1363,7 +1376,7 @@ export default function DepartmentManagement() {
               </View>
             </View>
             <TouchableOpacity style={styles.filterApplyBtn} onPress={() => setFilterModalVisible(false)}>
-              <LinearGradient colors={['#667eea', '#764ba2']} style={styles.filterApplyBtnGradient}>
+              <LinearGradient colors={Gradients.primary} style={styles.filterApplyBtnGradient}>
                 <Text style={styles.filterApplyBtnText}>Apply Filters</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -1376,1168 +1389,1368 @@ export default function DepartmentManagement() {
 
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: HEADER_PRIMARY_COLOR 
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background
   },
-  
+
+  // White Header
+  whiteHeader: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.headerBorder,
+  },
+
   // Loading Screen
-  loadingGradient: { 
-    flex: 1 
+  loadingHeader: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.headerBorder,
+    flexDirection: "row",
+    alignItems: "center",
   },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: "center", 
-    alignItems: "center" 
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: Colors.background
   },
-  loadingIconBox: { 
-    width: 80, 
-    height: 80, 
-    borderRadius: 24, 
-    backgroundColor: "rgba(255,255,255,0.2)", 
-    justifyContent: "center", 
-    alignItems: "center" 
+  loadingIconBox: {
+    width: 80,
+    height: 80,
+    borderRadius: BorderRadius.xl,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: "center",
+    alignItems: "center"
   },
-  loadingText: { 
-    marginTop: 16, 
-    fontSize: 16, 
-    color: "#fff", 
-    fontWeight: "500" 
+  loadingText: {
+    marginTop: Spacing.lg,
+    fontSize: 16,
+    color: Colors.textSecondary,
+    fontWeight: "500"
   },
 
   // Header
-  headerGradient: { 
-    paddingBottom: 20 
+  headerIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primaryLight,
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: Spacing.md,
   },
-  headerPattern: { 
-    position: "absolute", 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    bottom: 0, 
-    overflow: "hidden" 
+  headerTop: {
+    flexDirection: "row",
+    alignItems: "center",
   },
-  patternCircle: { 
-    position: "absolute", 
-    borderRadius: 999, 
-    backgroundColor: "rgba(255,255,255,0.08)" 
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.headerBorder,
   },
-  headerContent: { 
-    paddingHorizontal: 16, 
-    paddingTop: 12 
+  headerTextSection: {
+    marginLeft: Spacing.md,
+    flex: 1
   },
-  headerTop: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    justifyContent: "space-between" 
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: Colors.headerText,
+    letterSpacing: -0.3,
   },
-  headerLeft: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    flex: 1 
-  },
-  backBtn: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 12, 
-    backgroundColor: "rgba(255,255,255,0.15)", 
-    justifyContent: "center", 
-    alignItems: "center" 
-  },
-  iconBadge: { 
-    marginLeft: 12 
-  },
-  iconBadgeGradient: { 
-    width: 44, 
-    height: 44, 
-    borderRadius: 14, 
-    justifyContent: "center", 
-    alignItems: "center" 
-  },
-  headerTextSection: { 
-    marginLeft: 12, 
-    flex: 1 
-  },
-  headerTitle: { 
-    fontSize: 22, 
-    fontWeight: "700", 
-    color: "#fff" 
-  },
-  headerSubtitle: { 
-    fontSize: 13, 
-    color: "rgba(255,255,255,0.8)", 
-    marginTop: 2 
+  headerSubtitle: {
+    fontSize: 13,
+    color: Colors.headerSubtext,
+    marginTop: 2
   },
 
 
   // Content
-  content: { 
-    flex: 1, 
-    backgroundColor: "#f8fafc", 
-    borderTopLeftRadius: 24, 
-    borderTopRightRadius: 24, 
-    marginTop: -4 
+  content: {
+    flex: 1,
+    backgroundColor: Colors.background,
   },
 
   // Stats
-  statsContainer: { 
-    paddingHorizontal: 16, 
-    paddingTop: 20 
+  statsContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 20
   },
-  statsRow: { 
-    flexDirection: "row", 
-    gap: 10 
+  statsRow: {
+    flexDirection: "row",
+    gap: 10
   },
-  statCard: { 
-    flex: 1, 
-    backgroundColor: "#fff", 
-    borderRadius: 16, 
-    padding: 12, 
-    alignItems: "center", 
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.06, 
-    shadowRadius: 8, 
-    elevation: 3 
+  statCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 12,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3
   },
-  statIconBoxSmall: { 
-    width: 32, 
-    height: 32, 
-    borderRadius: 10, 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginBottom: 6 
+  statIconBoxSmall: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 6
   },
-  statValueSmall: { 
-    fontSize: 20, 
-    fontWeight: "800" 
+  statValueSmall: {
+    fontSize: 20,
+    fontWeight: "800"
   },
-  statLabelSmall: { 
-    fontSize: 10, 
-    fontWeight: "600", 
-    color: "#6b7280", 
-    marginTop: 2 
+  statLabelSmall: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#6b7280",
+    marginTop: 2
   },
 
   // Search
-  searchSection: { 
-    flexDirection: "row", 
-    paddingHorizontal: 16, 
-    paddingTop: 16, 
-    gap: 10 
+  searchSection: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 10
   },
-  searchContainer: { 
-    flex: 1, 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#fff", 
-    borderRadius: 14, 
-    paddingHorizontal: 14, 
-    height: 48, 
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 1 }, 
-    shadowOpacity: 0.04, 
-    shadowRadius: 4, 
-    elevation: 2, 
-    gap: 10 
+  searchContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 48,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+    gap: 10
   },
-  searchInput: { 
-    flex: 1, 
-    fontSize: 15, 
-    color: "#1f2937" 
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: "#1f2937"
   },
-  filterChip: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#fff", 
-    borderRadius: 14, 
-    paddingHorizontal: 14, 
-    height: 48, 
-    gap: 6, 
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 1 }, 
-    shadowOpacity: 0.04, 
-    shadowRadius: 4, 
-    elevation: 2 
+  filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    height: 48,
+    gap: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2
   },
-  filterChipActive: { 
-    backgroundColor: "#f0f0ff", 
-    borderWidth: 1, 
-    borderColor: "#667eea" 
+  filterChipActive: {
+    backgroundColor: "#f0f0ff",
+    borderWidth: 1,
+    borderColor: "#667eea"
   },
-  filterChipText: { 
-    fontSize: 13, 
-    fontWeight: "600", 
-    color: "#6b7280", 
-    textTransform: "capitalize" 
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6b7280",
+    textTransform: "capitalize"
   },
 
   // List
-  listWrapper: { 
-    flex: 1 
+  listWrapper: {
+    flex: 1
   },
-  listContainer: { 
-    padding: 16, 
-    paddingBottom: 120 
+  listContainer: {
+    padding: 16,
+    paddingBottom: 120
   },
 
   // Card
-  card: { 
-    backgroundColor: "#fff", 
-    borderRadius: 20, 
-    padding: 16, 
-    marginBottom: 14, 
-    shadowColor: "#667eea", 
-    shadowOffset: { width: 0, height: 4 }, 
-    shadowOpacity: 0.08, 
-    shadowRadius: 12, 
-    elevation: 4 
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 14,
+    shadowColor: "#667eea",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4
   },
-  cardHeader: { 
-    flexDirection: "row", 
-    justifyContent: "space-between", 
-    alignItems: "flex-start", 
-    marginBottom: 16 
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 16
   },
-  cardHeaderLeft: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    flex: 1 
+  cardHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1
   },
-  codeBox: { 
-    width: 52, 
-    height: 52, 
-    borderRadius: 14, 
-    justifyContent: "center", 
-    alignItems: "center" 
+  codeBox: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center"
   },
-  codeText: { 
-    color: "#fff", 
-    fontWeight: "800", 
-    fontSize: 14 
+  codeText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14
   },
-  cardTitleContainer: { 
-    flex: 1, 
-    marginLeft: 12 
+  cardTitleContainer: {
+    flex: 1,
+    marginLeft: 12
   },
-  cardTitle: { 
-    fontSize: 17, 
-    fontWeight: "700", 
-    color: "#1f2937" 
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1f2937"
   },
-  locationRow: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    marginTop: 4, 
-    gap: 4 
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    gap: 4
   },
-  cardSubtitle: { 
-    fontSize: 12, 
-    color: "#9ca3af" 
+  cardSubtitle: {
+    fontSize: 12,
+    color: "#9ca3af"
   },
-  statusBadge: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    paddingHorizontal: 10, 
-    paddingVertical: 6, 
-    borderRadius: 20, 
-    gap: 6 
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6
   },
-  statusDot: { 
-    width: 6, 
-    height: 6, 
-    borderRadius: 3 
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3
   },
-  statusText: { 
-    fontSize: 12, 
-    fontWeight: "600", 
-    textTransform: "capitalize" 
+  statusText: {
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "capitalize"
   },
 
   // Card Stats
-  cardStatsGrid: { 
-    flexDirection: "row", 
-    backgroundColor: "#f8fafc", 
-    borderRadius: 14, 
-    padding: 12, 
-    marginBottom: 12, 
-    gap: 8 
+  cardStatsGrid: {
+    flexDirection: "row",
+    backgroundColor: "#f8fafc",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+    gap: 8
   },
-  cardStatItem: { 
-    flex: 1, 
-    flexDirection: "row", 
-    alignItems: "center", 
-    gap: 8 
+  cardStatItem: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
   },
-  cardStatIcon: { 
-    width: 32, 
-    height: 32, 
-    borderRadius: 10, 
-    justifyContent: "center", 
-    alignItems: "center" 
+  cardStatIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center"
   },
-  cardStatLabel: { 
-    fontSize: 10, 
-    color: "#9ca3af", 
-    fontWeight: "500" 
+  cardStatLabel: {
+    fontSize: 10,
+    color: "#9ca3af",
+    fontWeight: "500"
   },
-  cardStatValue: { 
-    fontSize: 12, 
-    fontWeight: "700", 
-    color: "#1f2937" 
+  cardStatValue: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1f2937"
   },
 
   // Description
-  descriptionBox: { 
-    backgroundColor: "#f8fafc", 
-    borderRadius: 10, 
-    padding: 12, 
-    marginBottom: 12 
+  descriptionBox: {
+    backgroundColor: "#f8fafc",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12
   },
-  cardDescription: { 
-    fontSize: 13, 
-    color: "#6b7280", 
-    lineHeight: 18 
+  cardDescription: {
+    fontSize: 13,
+    color: "#6b7280",
+    lineHeight: 18
   },
 
   // Card Actions
-  cardActions: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    borderTopWidth: 1, 
-    borderTopColor: "#f1f5f9", 
-    paddingTop: 12, 
-    gap: 8 
+  cardActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9",
+    paddingTop: 12,
+    gap: 8
   },
-  actionBtn: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    paddingHorizontal: 12, 
-    paddingVertical: 8, 
-    borderRadius: 10, 
-    backgroundColor: "#f8fafc", 
-    gap: 6 
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    gap: 6
   },
-  actionBtnPrimary: { 
-    backgroundColor: "#f0f0ff" 
+  actionBtnPrimary: {
+    backgroundColor: "#f0f0ff"
   },
-  actionBtnText: { 
-    fontSize: 13, 
-    fontWeight: "600", 
-    color: "#6b7280" 
+  actionBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6b7280"
   },
-  toggleBtn: { 
-    flex: 1, 
-    flexDirection: "row", 
-    alignItems: "center", 
-    justifyContent: "center", 
-    paddingVertical: 8, 
-    borderRadius: 10, 
-    gap: 6 
+  toggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6
   },
-  toggleBtnText: { 
-    fontSize: 12, 
-    fontWeight: "600" 
+  toggleBtnText: {
+    fontSize: 12,
+    fontWeight: "600"
   },
-  deleteBtn: { 
-    width: 36, 
-    height: 36, 
-    borderRadius: 10, 
-    backgroundColor: "#fef2f2", 
-    justifyContent: "center", 
-    alignItems: "center" 
+  deleteBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#fef2f2",
+    justifyContent: "center",
+    alignItems: "center"
   },
 
   // Empty State
-  emptyContainer: { 
-    alignItems: "center", 
-    paddingVertical: 60 
+  emptyContainer: {
+    alignItems: "center",
+    paddingVertical: 60
   },
-  emptyIconBox: { 
-    width: 100, 
-    height: 100, 
-    borderRadius: 30, 
-    backgroundColor: "#f3f4f6", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginBottom: 16 
+  emptyIconBox: {
+    width: 100,
+    height: 100,
+    borderRadius: 30,
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16
   },
-  emptyText: { 
-    fontSize: 18, 
-    fontWeight: "700", 
-    color: "#374151" 
+  emptyText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#374151"
   },
-  emptySubtext: { 
-    fontSize: 14, 
-    color: "#9ca3af", 
-    marginTop: 4 
+  emptySubtext: {
+    fontSize: 14,
+    color: "#9ca3af",
+    marginTop: 4
   },
-  emptyBtn: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#667eea", 
-    paddingHorizontal: 20, 
-    paddingVertical: 12, 
-    borderRadius: 12, 
-    marginTop: 20, 
-    gap: 8 
+  emptyBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#667eea",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginTop: 20,
+    gap: 8
   },
-  emptyBtnText: { 
-    fontSize: 14, 
-    fontWeight: "600", 
-    color: "#fff" 
+  emptyBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#fff"
   },
 
   // FAB
-  fabContainer: { 
-    position: "absolute", 
-    bottom: 24, 
-    right: 20, 
-    gap: 12 
+  fabContainer: {
+    position: "absolute",
+    bottom: 24,
+    right: 20,
+    gap: 12
   },
-  fabPrimary: { 
-    shadowColor: "#667eea", 
-    shadowOffset: { width: 0, height: 6 }, 
-    shadowOpacity: 0.4, 
-    shadowRadius: 12, 
-    elevation: 8 
+  fabPrimary: {
+    shadowColor: "#667eea",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8
   },
-  fabSecondary: { 
-    shadowColor: "#3b82f6", 
-    shadowOffset: { width: 0, height: 4 }, 
-    shadowOpacity: 0.3, 
-    shadowRadius: 8, 
-    elevation: 6 
+  fabSecondary: {
+    shadowColor: "#3b82f6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6
   },
-  fabGradient: { 
-    width: 56, 
-    height: 56, 
-    borderRadius: 18, 
-    justifyContent: "center", 
-    alignItems: "center" 
+  fabGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center"
   },
 
 
   // Modal Common
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: "rgba(0,0,0,0.5)", 
-    justifyContent: "flex-end" 
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end"
   },
-  modalCloseBtn: { 
-    width: 36, 
-    height: 36, 
-    borderRadius: 18, 
-    backgroundColor: "rgba(255,255,255,0.2)", 
-    justifyContent: "center", 
-    alignItems: "center" 
+  modalCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    justifyContent: "center",
+    alignItems: "center"
   },
 
   // View Modal
-  viewModalContainer: { 
-    backgroundColor: "#fff", 
-    borderTopLeftRadius: 28, 
-    borderTopRightRadius: 28, 
-    maxHeight: "85%" 
+  viewModalContainer: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: "85%"
   },
-  viewModalHeader: { 
-    borderTopLeftRadius: 28, 
-    borderTopRightRadius: 28, 
-    padding: 20, 
-    flexDirection: "row", 
-    justifyContent: "space-between", 
-    alignItems: "center" 
+  viewModalHeader: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center"
   },
-  viewModalHeaderContent: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    flex: 1 
+  viewModalHeaderContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1
   },
-  viewModalIconBox: { 
-    width: 48, 
-    height: 48, 
-    borderRadius: 16, 
-    backgroundColor: "rgba(255,255,255,0.2)", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginRight: 14 
+  viewModalIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14
   },
-  viewModalHeaderText: { 
-    flex: 1 
+  viewModalHeaderText: {
+    flex: 1
   },
-  viewModalTitle: { 
-    fontSize: 20, 
-    fontWeight: "700", 
-    color: "#fff" 
+  viewModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#fff"
   },
-  viewModalSubtitle: { 
-    fontSize: 13, 
-    color: "rgba(255,255,255,0.8)", 
-    marginTop: 2 
+  viewModalSubtitle: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 2
   },
-  viewModalBody: { 
-    padding: 20 
+  viewModalBody: {
+    padding: 20
   },
-  viewInfoRow: { 
-    flexDirection: "row", 
-    gap: 12, 
-    marginBottom: 16 
+  viewInfoRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 16
   },
-  viewInfoItem: { 
-    flex: 1 
+  viewInfoItem: {
+    flex: 1
   },
-  viewInfoLabel: { 
-    fontSize: 12, 
-    color: "#6b7280", 
-    fontWeight: "500", 
-    marginBottom: 6 
+  viewInfoLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontWeight: "500",
+    marginBottom: 6
   },
-  viewCodeBadge: { 
-    backgroundColor: "#667eea", 
-    paddingHorizontal: 14, 
-    paddingVertical: 8, 
-    borderRadius: 10, 
-    alignSelf: "flex-start" 
+  viewCodeBadge: {
+    backgroundColor: "#667eea",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignSelf: "flex-start"
   },
-  viewCodeText: { 
-    color: "#fff", 
-    fontWeight: "700", 
-    fontSize: 14 
+  viewCodeText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14
   },
-  viewStatusBadge: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    paddingHorizontal: 12, 
-    paddingVertical: 8, 
-    borderRadius: 10, 
-    alignSelf: "flex-start", 
-    gap: 6 
+  viewStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignSelf: "flex-start",
+    gap: 6
   },
-  viewStatusText: { 
-    fontSize: 13, 
-    fontWeight: "600", 
-    textTransform: "capitalize" 
+  viewStatusText: {
+    fontSize: 13,
+    fontWeight: "600",
+    textTransform: "capitalize"
   },
-  viewStatsRow: { 
-    flexDirection: "row", 
-    gap: 10, 
-    marginBottom: 20 
+  viewStatsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 20
   },
-  viewStatCard: { 
-    flex: 1, 
-    backgroundColor: "#fff", 
-    borderRadius: 14, 
-    padding: 14, 
-    alignItems: "center", 
-    borderWidth: 1, 
-    borderColor: "#f1f5f9" 
+  viewStatCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#f1f5f9"
   },
-  viewStatIcon: { 
-    width: 36, 
-    height: 36, 
-    borderRadius: 10, 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginBottom: 8 
+  viewStatIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8
   },
-  viewStatValue: { 
-    fontSize: 14, 
-    fontWeight: "700", 
-    color: "#1f2937", 
-    marginTop: 4, 
-    textAlign: "center" 
+  viewStatValue: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginTop: 4,
+    textAlign: "center"
   },
-  viewStatLabel: { 
-    fontSize: 11, 
-    color: "#9ca3af", 
-    fontWeight: "500" 
+  viewStatLabel: {
+    fontSize: 11,
+    color: "#9ca3af",
+    fontWeight: "500"
   },
-  viewDetailsList: { 
-    gap: 12 
+  viewDetailsList: {
+    gap: 12
   },
-  viewDetailItem: { 
-    flexDirection: "row", 
-    alignItems: "flex-start", 
-    backgroundColor: "#f8fafc", 
-    borderRadius: 12, 
-    padding: 14 
+  viewDetailItem: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#f8fafc",
+    borderRadius: 12,
+    padding: 14
   },
-  viewDetailIcon: { 
-    width: 36, 
-    height: 36, 
-    borderRadius: 10, 
-    backgroundColor: "#f0f0ff", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginRight: 12 
+  viewDetailIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#f0f0ff",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12
   },
-  viewDetailContent: { 
-    flex: 1 
+  viewDetailContent: {
+    flex: 1
   },
-  viewDetailLabel: { 
-    fontSize: 12, 
-    color: "#6b7280", 
-    fontWeight: "500" 
+  viewDetailLabel: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontWeight: "500"
   },
-  viewDetailValue: { 
-    fontSize: 14, 
-    color: "#1f2937", 
-    fontWeight: "600", 
-    marginTop: 2 
+  viewDetailValue: {
+    fontSize: 14,
+    color: "#1f2937",
+    fontWeight: "600",
+    marginTop: 2
   },
-  viewModalActions: { 
-    padding: 20, 
-    borderTopWidth: 1, 
-    borderTopColor: "#f1f5f9" 
+  viewModalActions: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9"
   },
-  viewActionBtn: { 
-    borderRadius: 14, 
-    overflow: "hidden" 
+  viewActionBtn: {
+    borderRadius: 14,
+    overflow: "hidden"
   },
-  viewActionBtnGradient: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    justifyContent: "center", 
-    paddingVertical: 14, 
-    gap: 8 
+  viewActionBtnGradient: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    gap: 8
   },
-  viewActionBtnText: { 
-    fontSize: 15, 
-    fontWeight: "700", 
-    color: "#fff" 
+  viewActionBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#fff"
   },
 
   // Form Modal
-  formModalContainer: { 
-    backgroundColor: "#fff", 
-    borderTopLeftRadius: 28, 
-    borderTopRightRadius: 28, 
-    maxHeight: "90%" 
+  formModalContainer: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: "90%"
   },
-  formModalHeader: { 
-    borderTopLeftRadius: 28, 
-    borderTopRightRadius: 28, 
-    padding: 20, 
-    flexDirection: "row", 
-    justifyContent: "space-between", 
-    alignItems: "center" 
+  formModalHeader: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center"
   },
-  formModalHeaderContent: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    flex: 1 
+  formModalHeaderContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1
   },
-  formModalIconBox: { 
-    width: 48, 
-    height: 48, 
-    borderRadius: 16, 
-    backgroundColor: "rgba(255,255,255,0.2)", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginRight: 14 
+  formModalIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14
   },
-  formModalHeaderText: { 
-    flex: 1 
+  formModalHeaderText: {
+    flex: 1
   },
-  formModalTitle: { 
-    fontSize: 20, 
-    fontWeight: "700", 
-    color: "#fff" 
+  formModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#fff"
   },
-  formModalSubtitle: { 
-    fontSize: 13, 
-    color: "rgba(255,255,255,0.8)", 
-    marginTop: 2 
+  formModalSubtitle: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 2
   },
-  formModalBody: { 
-    padding: 20, 
-    maxHeight: 450 
+  formModalBody: {
+    padding: 20,
+    maxHeight: 450
   },
-  formGroup: { 
-    marginBottom: 18 
+  formGroup: {
+    marginBottom: 18
   },
-  formLabel: { 
-    fontSize: 14, 
-    fontWeight: "600", 
-    color: "#667eea", 
-    marginBottom: 8 
+  formLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#667eea",
+    marginBottom: 8
   },
-  formInput: { 
-    borderWidth: 1.5, 
-    borderColor: "#e5e7eb", 
-    borderRadius: 14, 
-    padding: 14, 
-    fontSize: 15, 
-    color: "#1f2937", 
-    backgroundColor: "#fff" 
+  formInput: {
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 14,
+    padding: 14,
+    fontSize: 15,
+    color: "#1f2937",
+    backgroundColor: "#fff"
   },
-  formInputGreen: { 
-    borderColor: "#d1fae5" 
+  formInputGreen: {
+    borderColor: "#d1fae5"
   },
-  formTextArea: { 
-    height: 90, 
-    textAlignVertical: "top" 
+  formTextArea: {
+    height: 90,
+    textAlignVertical: "top"
   },
-  statusToggleRow: { 
-    flexDirection: "row", 
-    gap: 12 
+  statusToggleRow: {
+    flexDirection: "row",
+    gap: 12
   },
-  statusToggleBtn: { 
-    flex: 1, 
-    flexDirection: "row", 
-    alignItems: "center", 
-    justifyContent: "center", 
-    paddingVertical: 14, 
-    borderRadius: 12, 
-    borderWidth: 1.5, 
-    borderColor: "#e5e7eb", 
-    backgroundColor: "#fff", 
-    gap: 8 
+  statusToggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    backgroundColor: "#fff",
+    gap: 8
   },
-  statusToggleBtnActive: { 
-    backgroundColor: "#22c55e", 
-    borderColor: "#22c55e" 
+  statusToggleBtnActive: {
+    backgroundColor: "#22c55e",
+    borderColor: "#22c55e"
   },
-  statusToggleBtnActiveGreen: { 
-    backgroundColor: "#22c55e", 
-    borderColor: "#22c55e" 
+  statusToggleBtnActiveGreen: {
+    backgroundColor: "#22c55e",
+    borderColor: "#22c55e"
   },
-  statusToggleBtnInactive: { 
-    backgroundColor: "#ef4444", 
-    borderColor: "#ef4444" 
+  statusToggleBtnInactive: {
+    backgroundColor: "#ef4444",
+    borderColor: "#ef4444"
   },
-  statusToggleText: { 
-    fontSize: 14, 
-    fontWeight: "600", 
-    color: "#6b7280" 
+  statusToggleText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#6b7280"
   },
-  statusToggleTextActive: { 
-    color: "#fff" 
+  statusToggleTextActive: {
+    color: "#fff"
   },
 
   // Manager Selection
-  selectedManagerBox: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#f0f0ff", 
-    borderWidth: 1.5, 
-    borderColor: "#667eea", 
-    borderRadius: 14, 
-    padding: 12, 
-    gap: 12 
+  selectedManagerBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f0f0ff",
+    borderWidth: 1.5,
+    borderColor: "#667eea",
+    borderRadius: 14,
+    padding: 12,
+    gap: 12
   },
-  managerAvatar: { 
-    width: 44, 
-    height: 44, 
-    borderRadius: 22, 
-    backgroundColor: "#667eea", 
-    justifyContent: "center", 
-    alignItems: "center" 
+  managerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#667eea",
+    justifyContent: "center",
+    alignItems: "center"
   },
-  managerAvatarText: { 
-    fontSize: 18, 
-    fontWeight: "700", 
-    color: "#fff" 
+  managerAvatarText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff"
   },
-  managerInfo: { 
-    flex: 1 
+  managerInfo: {
+    flex: 1
   },
-  managerName: { 
-    fontSize: 15, 
-    fontWeight: "600", 
-    color: "#1f2937" 
+  managerName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#1f2937"
   },
-  managerRole: { 
-    fontSize: 12, 
-    color: "#6b7280", 
-    marginTop: 2 
+  managerRole: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 2
   },
-  selectManagerBtn: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    borderWidth: 1.5, 
-    borderColor: "#e5e7eb", 
-    borderRadius: 14, 
-    padding: 14, 
-    gap: 10, 
-    backgroundColor: "#fff" 
+  selectManagerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+    backgroundColor: "#fff"
   },
-  selectManagerText: { 
-    flex: 1, 
-    fontSize: 15, 
-    color: "#9ca3af" 
+  selectManagerText: {
+    flex: 1,
+    fontSize: 15,
+    color: "#9ca3af"
   },
-  managerDropdown: { 
-    borderWidth: 1.5, 
-    borderColor: "#e5e7eb", 
-    borderRadius: 14, 
-    backgroundColor: "#fff", 
-    marginTop: 8, 
-    overflow: "hidden" 
+  managerDropdown: {
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    marginTop: 8,
+    overflow: "hidden"
   },
-  managerSearchBox: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    padding: 12, 
-    borderBottomWidth: 1, 
-    borderBottomColor: "#f1f5f9", 
-    gap: 8 
+  managerSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+    gap: 8
   },
-  managerSearchInput: { 
-    flex: 1, 
-    fontSize: 14, 
-    color: "#1f2937" 
+  managerSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: "#1f2937"
   },
-  managerList: { 
-    maxHeight: 160 
+  managerList: {
+    maxHeight: 160
   },
-  noManagersBox: { 
-    alignItems: "center", 
-    padding: 20, 
-    gap: 6 
+  noManagersBox: {
+    alignItems: "center",
+    padding: 20,
+    gap: 6
   },
-  noManagersText: { 
-    fontSize: 13, 
-    color: "#9ca3af" 
+  noManagersText: {
+    fontSize: 13,
+    color: "#9ca3af"
   },
-  managerOption: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    padding: 12, 
-    borderBottomWidth: 1, 
-    borderBottomColor: "#f1f5f9", 
-    gap: 10 
+  managerOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+    gap: 10
   },
-  managerOptionAvatar: { 
-    width: 36, 
-    height: 36, 
-    borderRadius: 18, 
-    backgroundColor: "#667eea", 
-    justifyContent: "center", 
-    alignItems: "center" 
+  managerOptionAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#667eea",
+    justifyContent: "center",
+    alignItems: "center"
   },
-  managerOptionAvatarText: { 
-    fontSize: 14, 
-    fontWeight: "700", 
-    color: "#fff" 
+  managerOptionAvatarText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff"
   },
-  managerOptionInfo: { 
-    flex: 1 
+  managerOptionInfo: {
+    flex: 1
   },
-  managerOptionName: { 
-    fontSize: 14, 
-    fontWeight: "600", 
-    color: "#1f2937" 
+  managerOptionName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1f2937"
   },
-  managerOptionRole: { 
-    fontSize: 11, 
-    color: "#6b7280", 
-    marginTop: 1 
+  managerOptionRole: {
+    fontSize: 11,
+    color: "#6b7280",
+    marginTop: 1
   },
-  autoCalcBox: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#f0f0ff", 
-    borderWidth: 1.5, 
-    borderColor: "#667eea", 
-    borderRadius: 14, 
-    padding: 14, 
-    gap: 10 
+  autoCalcBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f0f0ff",
+    borderWidth: 1.5,
+    borderColor: "#667eea",
+    borderRadius: 14,
+    padding: 14,
+    gap: 10
   },
-  autoCalcText: { 
-    flex: 1, 
-    fontSize: 14, 
-    color: "#4338ca", 
-    fontWeight: "500" 
+  autoCalcText: {
+    flex: 1,
+    fontSize: 14,
+    color: "#4338ca",
+    fontWeight: "500"
   },
-  formModalActions: { 
-    flexDirection: "row", 
-    padding: 20, 
-    paddingTop: 16, 
-    borderTopWidth: 1, 
-    borderTopColor: "#f1f5f9", 
-    gap: 12 
+  formModalActions: {
+    flexDirection: "row",
+    padding: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#f1f5f9",
+    gap: 12
   },
-  cancelBtn: { 
-    flex: 1, 
-    paddingVertical: 14, 
-    borderRadius: 14, 
-    borderWidth: 1.5, 
-    borderColor: "#e5e7eb", 
-    alignItems: "center", 
-    backgroundColor: "#fff" 
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    alignItems: "center",
+    backgroundColor: "#fff"
   },
-  cancelBtnText: { 
-    fontSize: 15, 
-    fontWeight: "600", 
-    color: "#6b7280" 
+  cancelBtnText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#6b7280"
   },
-  saveBtn: { 
-    flex: 2, 
-    borderRadius: 14, 
-    overflow: "hidden" 
+  saveBtn: {
+    flex: 2,
+    borderRadius: 14,
+    overflow: "hidden"
   },
-  saveBtnGradient: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    justifyContent: "center", 
-    paddingVertical: 14, 
-    gap: 8 
+  saveBtnGradient: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    gap: 8
   },
-  saveBtnText: { 
-    fontSize: 15, 
-    fontWeight: "700", 
-    color: "#fff" 
+  saveBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#fff"
   },
 
 
   // Employee Modal
-  employeeModalContainer: { 
-    backgroundColor: "#fff", 
-    borderTopLeftRadius: 28, 
-    borderTopRightRadius: 28, 
-    maxHeight: "90%", 
-    flex: 1 
+  employeeModalContainer: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: "90%",
+    flex: 1
   },
-  employeeModalHeader: { 
-    borderTopLeftRadius: 28, 
-    borderTopRightRadius: 28, 
-    padding: 20, 
-    flexDirection: "row", 
-    justifyContent: "space-between", 
-    alignItems: "center" 
+  employeeModalHeader: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center"
   },
-  employeeModalHeaderContent: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    flex: 1 
+  employeeModalHeaderContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1
   },
-  employeeModalIconBox: { 
-    width: 48, 
-    height: 48, 
-    borderRadius: 16, 
-    backgroundColor: "rgba(255,255,255,0.2)", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginRight: 14 
+  employeeModalIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14
   },
-  employeeModalHeaderText: { 
-    flex: 1 
+  employeeModalHeaderText: {
+    flex: 1
   },
-  employeeModalTitle: { 
-    fontSize: 20, 
-    fontWeight: "700", 
-    color: "#fff" 
+  employeeModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#fff"
   },
-  employeeModalSubtitle: { 
-    fontSize: 13, 
-    color: "rgba(255,255,255,0.8)", 
-    marginTop: 2 
+  employeeModalSubtitle: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 2
   },
-  employeeCountSection: { 
-    paddingHorizontal: 20, 
-    paddingVertical: 16, 
-    backgroundColor: "#f0f9ff", 
-    borderBottomWidth: 1, 
-    borderBottomColor: "#e0e7ff" 
+  employeeCountSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: "#f0f9ff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e0e7ff"
   },
-  employeeCountCard: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#fff", 
-    borderRadius: 14, 
-    padding: 14, 
-    borderWidth: 1, 
-    borderColor: "#e0e7ff", 
-    gap: 14 
+  employeeCountCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#e0e7ff",
+    gap: 14
   },
-  employeeCountIconBox: { 
-    width: 48, 
-    height: 48, 
-    borderRadius: 14, 
-    backgroundColor: "#eff6ff", 
-    justifyContent: "center", 
-    alignItems: "center" 
+  employeeCountIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: "#eff6ff",
+    justifyContent: "center",
+    alignItems: "center"
   },
-  employeeCountNumber: { 
-    fontSize: 28, 
-    fontWeight: "800", 
-    color: "#3b82f6" 
+  employeeCountNumber: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#3b82f6"
   },
-  employeeCountLabel: { 
-    fontSize: 13, 
-    color: "#6b7280", 
-    fontWeight: "500" 
+  employeeCountLabel: {
+    fontSize: 13,
+    color: "#6b7280",
+    fontWeight: "500"
   },
-  employeeLoadingBox: { 
-    flex: 1, 
-    justifyContent: "center", 
-    alignItems: "center" 
+  employeeLoadingBox: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center"
   },
-  employeeLoadingText: { 
-    marginTop: 12, 
-    fontSize: 16, 
-    color: "#6b7280" 
+  employeeLoadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#6b7280"
   },
-  employeeEmptyBox: { 
-    flex: 1, 
-    justifyContent: "center", 
-    alignItems: "center", 
-    paddingHorizontal: 20 
+  employeeEmptyBox: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20
   },
-  employeeEmptyIconBox: { 
-    width: 100, 
-    height: 100, 
-    borderRadius: 30, 
-    backgroundColor: "#f3f4f6", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginBottom: 16 
+  employeeEmptyIconBox: {
+    width: 100,
+    height: 100,
+    borderRadius: 30,
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16
   },
-  employeeEmptyText: { 
-    fontSize: 18, 
-    fontWeight: "700", 
-    color: "#374151" 
+  employeeEmptyText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#374151"
   },
-  employeeEmptySubtext: { 
-    fontSize: 14, 
-    color: "#9ca3af", 
-    marginTop: 4 
+  employeeEmptySubtext: {
+    fontSize: 14,
+    color: "#9ca3af",
+    marginTop: 4
   },
-  employeeListContent: { 
-    paddingHorizontal: 16, 
-    paddingVertical: 12, 
-    paddingBottom: 20 
+  employeeListContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingBottom: 20
   },
-  employeeCard: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#fff", 
-    borderRadius: 16, 
-    padding: 14, 
-    marginBottom: 12, 
-    borderWidth: 1, 
-    borderColor: "#e5e7eb", 
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 1 }, 
-    shadowOpacity: 0.04, 
-    shadowRadius: 4, 
-    elevation: 2 
+  employeeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2
   },
-  employeeAvatar: { 
-    width: 48, 
-    height: 48, 
-    borderRadius: 24, 
-    justifyContent: "center", 
-    alignItems: "center", 
-    marginRight: 12 
+  employeeAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12
   },
-  employeeAvatarText: { 
-    fontSize: 18, 
-    fontWeight: "700" 
+  employeeAvatarText: {
+    fontSize: 18,
+    fontWeight: "700"
   },
-  employeeInfo: { 
-    flex: 1 
+  employeeInfo: {
+    flex: 1
   },
-  employeeName: { 
-    fontSize: 15, 
-    fontWeight: "700", 
-    color: "#1f2937", 
-    marginBottom: 2 
+  employeeName: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1f2937",
+    marginBottom: 2
   },
-  employeeRole: { 
-    fontSize: 12, 
-    color: "#6b7280", 
-    fontWeight: "500", 
-    marginBottom: 2 
+  employeeRole: {
+    fontSize: 12,
+    color: "#6b7280",
+    fontWeight: "500",
+    marginBottom: 2
   },
-  employeeEmail: { 
-    fontSize: 11, 
-    color: "#9ca3af" 
+  employeeEmail: {
+    fontSize: 11,
+    color: "#9ca3af"
   },
-  employeeIdBadge: { 
-    backgroundColor: "#f3f4f6", 
-    paddingHorizontal: 12, 
-    paddingVertical: 6, 
-    borderRadius: 8 
+  employeeIdBadge: {
+    backgroundColor: "#f3f4f6",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8
   },
-  employeeIdText: { 
-    fontSize: 12, 
-    fontWeight: "600", 
-    color: "#374151" 
+  employeeIdText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#374151"
   },
 
   // Filter Modal
-  filterModalOverlay: { 
-    flex: 1, 
-    backgroundColor: "rgba(0,0,0,0.5)", 
-    justifyContent: "center", 
-    alignItems: "center", 
-    padding: 20 
+  filterModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20
   },
-  filterModalContainer: { 
-    backgroundColor: "#fff", 
-    borderRadius: 24, 
-    width: "100%", 
-    maxWidth: 400, 
-    padding: 20 
+  filterModalContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 24,
+    width: "100%",
+    maxWidth: 400,
+    padding: 20
   },
-  filterModalHeader: { 
-    flexDirection: "row", 
-    justifyContent: "space-between", 
-    alignItems: "center", 
-    marginBottom: 20 
+  filterModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20
   },
-  filterModalTitle: { 
-    fontSize: 18, 
-    fontWeight: "700", 
-    color: "#1f2937" 
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1f2937"
   },
-  filterModalBody: { 
-    marginBottom: 20 
+  filterModalBody: {
+    marginBottom: 20
   },
-  filterLabel: { 
-    fontSize: 14, 
-    fontWeight: "600", 
-    color: "#374151", 
-    marginBottom: 12 
+  filterLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+    marginBottom: 12
   },
-  filterOptionsRow: { 
-    flexDirection: "row", 
-    gap: 10 
+  filterOptionsRow: {
+    flexDirection: "row",
+    gap: 10
   },
-  filterOption: { 
-    flex: 1, 
-    paddingVertical: 12, 
-    borderRadius: 12, 
-    borderWidth: 1.5, 
-    borderColor: "#e5e7eb", 
-    alignItems: "center", 
-    backgroundColor: "#fff" 
+  filterOption: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+    alignItems: "center",
+    backgroundColor: "#fff"
   },
-  filterOptionActive: { 
-    backgroundColor: "#f0f0ff", 
-    borderColor: "#667eea" 
+  filterOptionActive: {
+    backgroundColor: "#f0f0ff",
+    borderColor: "#667eea"
   },
-  filterOptionText: { 
-    fontSize: 13, 
-    fontWeight: "600", 
-    color: "#6b7280" 
+  filterOptionText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6b7280"
   },
-  filterOptionTextActive: { 
-    color: "#667eea" 
+  filterOptionTextActive: {
+    color: "#667eea"
   },
-  filterApplyBtn: { 
-    borderRadius: 14, 
-    overflow: "hidden" 
+  filterApplyBtn: {
+    borderRadius: 14,
+    overflow: "hidden"
   },
-  filterApplyBtnGradient: { 
-    paddingVertical: 14, 
-    alignItems: "center" 
+  filterApplyBtnGradient: {
+    paddingVertical: 14,
+    alignItems: "center"
   },
-  filterApplyBtnText: { 
-    fontSize: 15, 
-    fontWeight: "700", 
-    color: "#fff" 
+  filterApplyBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#fff"
+  },
+
+  // Multi-Step Form Styles
+  stepContent: {
+    gap: Spacing.xl,
+  },
+  stepTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.text,
+    textAlign: 'center',
+  },
+  stepSubtitle: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: Spacing.sm,
+  },
+  inputGroup: {
+    gap: Spacing.sm,
+  },
+  inputError: {
+    borderColor: Colors.error,
+  },
+  errorText: {
+    fontSize: 12,
+    color: Colors.error,
+    marginTop: 4,
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  selectedManagerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0ff',
+    borderWidth: 1,
+    borderColor: '#e0e7ff',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    gap: Spacing.md,
+  },
+  selectedManagerAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#e0e7ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectedManagerInfo: {
+    flex: 1,
+  },
+  selectedManagerName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  selectedManagerRole: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  clearManagerButton: {
+    padding: 4,
+  },
+  managerSelectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+  },
+  managerSelectButtonText: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.textTertiary,
+  },
+  numberInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+  },
+  numberInput: {
+    flex: 1,
+    padding: Spacing.lg,
+    fontSize: 16,
+    color: Colors.text,
+  },
+  numberButtons: {
+    flexDirection: 'column',
+  },
+  numberButton: {
+    width: 40,
+    height: 27,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: Colors.border,
+  },
+  summaryCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginTop: Spacing.sm,
+  },
+  summaryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: Spacing.lg,
+    textAlign: 'center',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderLight,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    fontWeight: '500',
+  },
+  summaryValue: {
+    fontSize: 14,
+    color: Colors.text,
+    fontWeight: '600',
+  },
+  progressSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  progressBar: {
+    flex: 1,
+    height: 6,
+    backgroundColor: Colors.border,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#22c55e',
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#22c55e',
+    minWidth: 35,
+  },
+  stepsIndicatorContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  stepIndicator: {
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  stepCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.backgroundAlt,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stepCircleActive: {
+    backgroundColor: '#22c55e',
+  },
+  stepLabel: {
+    fontSize: 11,
+    color: Colors.textTertiary,
+    fontWeight: '500',
+  },
+  stepLabelActive: {
+    color: '#22c55e',
+    fontWeight: '600',
+  },
+  nextButtonFull: {
+    flex: 1,
+  },
+  prevButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    gap: Spacing.sm,
   },
 });

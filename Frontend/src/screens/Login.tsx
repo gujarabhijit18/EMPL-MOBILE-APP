@@ -4,20 +4,20 @@ import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    Keyboard,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../contexts/AuthContext";
@@ -129,7 +129,7 @@ const LoginScreen = () => {
 
   const handleSendOTP = async () => {
     Keyboard.dismiss();
-    
+
     if (!email) {
       setEmailError("Please enter your email");
       shakeError();
@@ -162,8 +162,8 @@ const LoginScreen = () => {
       }
 
       const message = isDevelopment
-        ? `OTP sent to ${email}\n\n🔑 DEV OTP: ${response.otp}\n\nExpires in ${response.expires_in_minutes} minutes`
-        : `OTP sent to ${email}\n\nExpires in ${response.expires_in_minutes} minutes`;
+        ? `OTP sent to ${email}\n\n🔑 DEV OTP: ${response.otp}\n\nExpires in ${response.expires_in_minutes || 2} minutes`
+        : `OTP sent to ${email}\n\nExpires in ${response.expires_in_minutes || 2} minutes`;
 
       Alert.alert("✅ OTP Sent", message, [
         {
@@ -190,7 +190,7 @@ const LoginScreen = () => {
 
   const handleLogin = async () => {
     Keyboard.dismiss();
-    
+
     if (!otp) {
       setOtpError("Please enter the OTP");
       shakeError();
@@ -219,7 +219,7 @@ const LoginScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      
+
       {/* Background Gradient */}
       <LinearGradient
         colors={["#667eea", "#764ba2", "#f093fb"] as const}

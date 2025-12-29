@@ -17,10 +17,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { apiService } from "../../lib/api";
 import { formatTimeIST, getDayMonthIST, getRelativeTime } from "../../utils/dateTime";
+import { Colors, Shadows, BorderRadius, Spacing, Typography, Gradients } from "../../constants/designSystem";
 
 const { width } = Dimensions.get('window');
 
@@ -44,7 +44,6 @@ interface DepartmentStats {
 }
 
 const HRDashboard: React.FC = () => {
-  const { isDarkMode, colors } = useTheme();
   const navigation = useNavigation<any>();
   const { logout, user } = useAuth();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
@@ -77,10 +76,10 @@ const HRDashboard: React.FC = () => {
 
       console.log(`📊 Fetching data for department: ${userDepartment}`);
 
-      // 1. Fetch all employees and filter by department
+      // 1. Fetch all employees and filter by department (exclude Admin role)
       const allEmployees = await apiService.getEmployees();
       const departmentEmployees = allEmployees.filter(
-        (emp: any) => emp.department === userDepartment
+        (emp: any) => emp.department === userDepartment && emp.role !== 'Admin'
       );
 
       // 2. Fetch Attendance (Real Data)
@@ -224,71 +223,39 @@ const HRDashboard: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'approved': return '#10b981';
-      case 'pending': return '#f59e0b';
-      case 'rejected': return '#ef4444';
-      case 'new': return '#3b82f6';
-      case 'submitted': return '#8b5cf6';
-      case 'processing': return '#06b6d4';
-      default: return '#6b7280';
+      case 'approved': return Colors.success;
+      case 'pending': return Colors.warning;
+      case 'rejected': return Colors.error;
+      case 'new': return Colors.primary;
+      case 'submitted': return Colors.purple;
+      case 'processing': return Colors.info;
+      default: return Colors.textSecondary;
     }
   };
 
   const getIconBg = (type: string) => {
     switch (type) {
-      case 'leave': return '#fef3c7';
-      case 'hire': return '#e0e7ff';
-      case 'document': return '#dbeafe';
-      case 'exit': return '#fee2e2';
-      default: return '#f3f4f6';
+      case 'leave': return Colors.warningLight;
+      case 'hire': return Colors.purpleLight;
+      case 'document': return Colors.primaryLight;
+      case 'exit': return Colors.errorLight;
+      default: return Colors.backgroundAlt;
     }
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.header }]} edges={['top']}>
-      <StatusBar style="light" />
+    <SafeAreaView style={[styles.container, { backgroundColor: Colors.surface }]} edges={['top']}>
+      <StatusBar style="dark" />
 
-      {/* Modern HR Header */}
-      <LinearGradient
-        colors={['#3b82f6', '#2563eb']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        {/* Background Pattern */}
-        <View style={styles.headerPattern}>
-          <View style={[styles.patternCircle, { top: -20, right: -20, width: 120, height: 120 }]} />
-          <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 150, height: 150 }]} />
-          <View style={[styles.patternCircle, { top: 40, right: 60, width: 80, height: 80 }]} />
-        </View>
-
-        <Animated.View
-          style={[
-            styles.headerContent,
-            {
-              opacity: headerAnim,
-              transform: [
-                {
-                  translateY: headerAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
+      {/* Modern White Header */}
+      <View style={styles.headerContainer}>
+        <View style={styles.headerContent}>
           {/* Header Top Section */}
           <View style={styles.headerTopSection}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+            </TouchableOpacity>
             <View style={styles.headerLeft}>
-              <View style={styles.iconBadge}>
-                <LinearGradient
-                  colors={['rgba(255,255,255,0.3)', 'rgba(255,255,255,0.1)']}
-                  style={styles.iconBadgeGradient}
-                >
-                  <Ionicons name="people" size={24} color="#fff" />
-                </LinearGradient>
-              </View>
               <View style={styles.headerTextSection}>
                 <Text style={styles.headerTitle}>HR Dashboard</Text>
                 <Text style={styles.headerSubtitle}>Human Resources Management</Text>
@@ -305,31 +272,31 @@ const HRDashboard: React.FC = () => {
           {/* Stats Overview Bar */}
           <View style={styles.statsOverviewBar}>
             <View style={styles.miniStatItem}>
-              <Ionicons name="people-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="people-outline" size={14} color={Colors.primary} />
               <Text style={styles.miniStatValue}>{stats?.totalEmployees || 0}</Text>
               <Text style={styles.miniStatLabel}>Staff</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.miniStatItem}>
-              <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="checkmark-circle-outline" size={14} color={Colors.success} />
               <Text style={styles.miniStatValue}>{stats?.presentToday || 0}</Text>
               <Text style={styles.miniStatLabel}>Present</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.miniStatItem}>
-              <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="calendar-outline" size={14} color={Colors.warning} />
               <Text style={styles.miniStatValue}>{stats?.onLeave || 0}</Text>
               <Text style={styles.miniStatLabel}>Leave</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.miniStatItem}>
-              <Ionicons name="briefcase-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="briefcase-outline" size={14} color={Colors.purple} />
               <Text style={styles.miniStatValue}>{stats?.attendanceRate || 0}%</Text>
               <Text style={styles.miniStatLabel}>Rate</Text>
             </View>
           </View>
-        </Animated.View>
-      </LinearGradient>
+        </View>
+      </View>
 
       {/* Main Content */}
       <ScrollView
@@ -375,48 +342,64 @@ const HRDashboard: React.FC = () => {
               ]}
             >
               {/* Stat Card - Total Employees */}
-              <View style={styles.statCard}>
-                <LinearGradient colors={['#3b82f6', '#2563eb']} style={styles.statGradient}>
+              <TouchableOpacity 
+                style={styles.statCard}
+                onPress={() => goTo('Employees')}
+                activeOpacity={0.7}
+              >
+                <LinearGradient colors={[...Gradients.primary]} style={styles.statGradient}>
                   <Ionicons name="people" size={18} color="#fff" />
                 </LinearGradient>
                 <View style={styles.statContent}>
                   <Text style={styles.statValue}>{stats.totalEmployees}</Text>
                   <Text style={styles.statLabel}>Employees</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
 
               {/* Stat Card - Present Today */}
-              <View style={styles.statCard}>
-                <LinearGradient colors={['#10b981', '#059669']} style={styles.statGradient}>
+              <TouchableOpacity 
+                style={styles.statCard}
+                onPress={() => goTo('Attendance')}
+                activeOpacity={0.7}
+              >
+                <LinearGradient colors={[...Gradients.success]} style={styles.statGradient}>
                   <Ionicons name="checkmark-circle" size={18} color="#fff" />
                 </LinearGradient>
                 <View style={styles.statContent}>
                   <Text style={styles.statValue}>{stats.presentToday}</Text>
                   <Text style={styles.statLabel}>Present</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
 
               {/* Stat Card - On Leave */}
-              <View style={styles.statCard}>
-                <LinearGradient colors={['#f59e0b', '#d97706']} style={styles.statGradient}>
+              <TouchableOpacity 
+                style={styles.statCard}
+                onPress={() => goTo('Leaves')}
+                activeOpacity={0.7}
+              >
+                <LinearGradient colors={[...Gradients.warning]} style={styles.statGradient}>
                   <Ionicons name="calendar" size={18} color="#fff" />
                 </LinearGradient>
                 <View style={styles.statContent}>
                   <Text style={styles.statValue}>{stats.onLeave}</Text>
                   <Text style={styles.statLabel}>On Leave</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
 
               {/* Stat Card - Pending Leaves */}
-              <View style={styles.statCard}>
-                <LinearGradient colors={['#8b5cf6', '#7c3aed']} style={styles.statGradient}>
+              <TouchableOpacity 
+                style={styles.statCard}
+                onPress={() => goTo('LeaveRequests')}
+                activeOpacity={0.7}
+              >
+                <LinearGradient colors={[...Gradients.purple]} style={styles.statGradient}>
                   <Ionicons name="time" size={18} color="#fff" />
                 </LinearGradient>
                 <View style={styles.statContent}>
                   <Text style={styles.statValue}>{stats.pendingLeaves}</Text>
                   <Text style={styles.statLabel}>Pending</Text>
                 </View>
-              </View>
+              </TouchableOpacity>
             </Animated.View>
 
             {/* Department Info Card */}
@@ -427,7 +410,7 @@ const HRDashboard: React.FC = () => {
 
               <View style={styles.departmentInfoCard}>
                 <LinearGradient
-                  colors={['#3b82f6', '#2563eb']}
+                  colors={[...Gradients.primary]}
                   style={styles.departmentIconLarge}
                 >
                   <Ionicons name="business" size={28} color="#fff" />
@@ -436,17 +419,17 @@ const HRDashboard: React.FC = () => {
                   <Text style={styles.departmentInfoName}>{stats.departmentName}</Text>
                   <View style={styles.departmentInfoRow}>
                     <View style={styles.departmentInfoItem}>
-                      <Ionicons name="people" size={14} color="#6b7280" />
+                      <Ionicons name="people" size={14} color={Colors.textSecondary} />
                       <Text style={styles.departmentInfoText}>{stats.totalEmployees} Members</Text>
                     </View>
                     <View style={styles.departmentInfoItem}>
-                      <Ionicons name="trending-up" size={14} color="#10b981" />
+                      <Ionicons name="trending-up" size={14} color={Colors.success} />
                       <Text style={styles.departmentInfoText}>{stats.attendanceRate}% Attendance</Text>
                     </View>
                   </View>
                   <View style={styles.departmentInfoRow}>
                     <View style={styles.departmentInfoItem}>
-                      <Ionicons name="person-add" size={14} color="#6b7280" />
+                      <Ionicons name="person-add" size={14} color={Colors.textSecondary} />
                       <Text style={styles.departmentInfoText}>{stats.newJoiners} New This Month</Text>
                     </View>
                   </View>
@@ -465,7 +448,7 @@ const HRDashboard: React.FC = () => {
 
               {stats.recentActivities.length > 0 ? (
                 <View style={styles.activitiesList}>
-                  {stats.recentActivities.map((activity) => (
+                  {stats.recentActivities.slice(0, 2).map((activity) => (
                     <View key={activity.id} style={styles.compactActivityCard}>
                       <View style={[styles.activityIconSmall, { backgroundColor: getIconBg(activity.type) }]}>
                         <Ionicons name={activity.icon as any} size={16} color={getStatusColor(activity.status)} />
@@ -498,106 +481,83 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  headerGradient: {
-    paddingTop: 16,
-    paddingBottom: 24,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  // Decorative Pattern
-  headerPattern: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  patternCircle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  headerContainer: {
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    paddingBottom: Spacing.lg,
   },
   headerContent: {
-    paddingHorizontal: 20,
-    position: 'relative',
-    zIndex: 1,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   // Header Top Section
   headerTopSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  iconBadge: {
-    marginRight: 14,
-  },
-  iconBadgeGradient: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
   headerTextSection: {
     flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.3,
+    ...Typography.screenTitle,
   },
   headerSubtitle: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.85)',
+    ...Typography.secondary,
     marginTop: 2,
-    fontWeight: '500',
-    letterSpacing: 0.2,
   },
   headerRight: {
     alignItems: 'flex-end',
   },
   dateTimeContainer: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: '#bfdbfe',
   },
   timeText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: Colors.primaryDark,
     letterSpacing: 0.5,
   },
   dateText: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.8)',
+    color: Colors.primary,
     marginTop: 2,
     fontWeight: '600',
   },
   // Stats Overview Bar
   statsOverviewBar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 14,
-    padding: 12,
+    backgroundColor: Colors.backgroundAlt,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
     justifyContent: 'space-around',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: Colors.border,
   },
   miniStatItem: {
     alignItems: 'center',
@@ -606,13 +566,13 @@ const styles = StyleSheet.create({
   miniStatValue: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#fff',
+    color: Colors.text,
     marginTop: 4,
     letterSpacing: 0.3,
   },
   miniStatLabel: {
     fontSize: 9,
-    color: 'rgba(255,255,255,0.75)',
+    color: Colors.textSecondary,
     marginTop: 2,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -621,43 +581,41 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: 32,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: Colors.border,
   },
   scrollView: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: Colors.background,
   },
   scrollContent: {
-    padding: 16,
+    padding: Spacing.lg,
   },
   // Compact Stats Grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 20,
+    marginBottom: Spacing.xl,
     gap: 10,
   },
   statCard: {
     flex: 1,
     minWidth: (width - 52) / 2,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
   statGradient: {
     width: 48,
     height: 48,
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: Spacing.md,
   },
   statContent: {
     flex: 1,
@@ -665,124 +623,45 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#1f2937',
+    color: Colors.text,
     marginBottom: 2,
   },
   statLabel: {
     fontSize: 11,
-    color: '#6b7280',
+    color: Colors.textSecondary,
     fontWeight: '600',
   },
   // Section Container
   sectionContainer: {
-    marginBottom: 20,
+    marginBottom: Spacing.xl,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1f2937',
+    ...Typography.sectionTitle,
   },
   seeAllText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#3b82f6',
-  },
-  // Compact Department Cards
-  departmentList: {
-    gap: 10,
-  },
-  compactDeptCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
-  deptCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  deptIconWrapper: {
-    marginRight: 10,
-  },
-  deptIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  deptInfo: {
-    flex: 1,
-  },
-  deptName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1f2937',
-  },
-  deptEmployees: {
-    fontSize: 11,
-    color: '#6b7280',
-    marginTop: 2,
-  },
-  deptBadge: {
-    backgroundColor: '#dcfce7',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  deptGrowth: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#10b981',
-  },
-  progressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  progressTrack: {
-    flex: 1,
-    height: 6,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  progressText: {
-    fontSize: 11,
-    color: '#6b7280',
-    fontWeight: '700',
-    minWidth: 32,
+    color: Colors.primary,
   },
   // Compact Activities
   activitiesList: {
-    gap: 8,
+    gap: Spacing.sm,
   },
   compactActivityCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
   activityIconSmall: {
     width: 40,
@@ -798,17 +677,17 @@ const styles = StyleSheet.create({
   activityUserName: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1f2937',
+    color: Colors.text,
   },
   activityDeptName: {
     fontSize: 11,
-    color: '#6b7280',
+    color: Colors.textSecondary,
     marginTop: 2,
   },
   activityStatusBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: BorderRadius.sm,
   },
   activityStatusText: {
     fontSize: 10,
@@ -825,9 +704,9 @@ const styles = StyleSheet.create({
     minHeight: 300,
   },
   loadingText: {
-    marginTop: 16,
+    marginTop: Spacing.lg,
     fontSize: 14,
-    color: '#6b7280',
+    color: Colors.textSecondary,
     fontWeight: '600',
   },
   errorContainer: {
@@ -838,18 +717,18 @@ const styles = StyleSheet.create({
     minHeight: 300,
   },
   errorText: {
-    marginTop: 16,
+    marginTop: Spacing.lg,
     fontSize: 14,
-    color: '#ef4444',
+    color: Colors.error,
     fontWeight: '600',
     textAlign: 'center',
   },
   retryButton: {
-    marginTop: 20,
-    backgroundColor: '#3b82f6',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
+    marginTop: Spacing.xl,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.xxl,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
   },
   retryText: {
     fontSize: 14,
@@ -858,23 +737,21 @@ const styles = StyleSheet.create({
   },
   // Department Info Card
   departmentInfoCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.xl,
     flexDirection: 'row',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
   departmentIconLarge: {
     width: 64,
     height: 64,
-    borderRadius: 16,
+    borderRadius: BorderRadius.lg,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: Spacing.lg,
   },
   departmentInfoContent: {
     flex: 1,
@@ -882,13 +759,13 @@ const styles = StyleSheet.create({
   departmentInfoName: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1f2937',
-    marginBottom: 12,
+    color: Colors.text,
+    marginBottom: Spacing.md,
   },
   departmentInfoRow: {
     flexDirection: 'row',
-    gap: 16,
-    marginBottom: 8,
+    gap: Spacing.lg,
+    marginBottom: Spacing.sm,
   },
   departmentInfoItem: {
     flexDirection: 'row',
@@ -897,7 +774,7 @@ const styles = StyleSheet.create({
   },
   departmentInfoText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: Colors.textSecondary,
     fontWeight: '600',
   },
   // Empty State
@@ -908,8 +785,8 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 14,
-    color: '#9ca3af',
-    marginTop: 12,
+    color: Colors.textTertiary,
+    marginTop: Spacing.md,
     fontWeight: '600',
   },
 });

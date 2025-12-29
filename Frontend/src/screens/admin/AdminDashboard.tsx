@@ -4,21 +4,20 @@ import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { formatTimeIST, getDayMonthIST } from "../../utils/dateTime";
@@ -75,7 +74,6 @@ const defaultStats: DashboardStats = {
 };
 
 const AdminDashboard: React.FC = () => {
-  const { isDarkMode, colors } = useTheme();
   const navigation = useNavigation<any>();
   const { logout, user } = useAuth();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
@@ -94,7 +92,7 @@ const AdminDashboard: React.FC = () => {
     try {
       setError(null);
       const response = await apiService.getDashboardByRole('admin');
-      
+
       // Map API response to our stats structure
       const mappedStats: DashboardStats = {
         totalEmployees: response.total_employees || response.totalEmployees || 0,
@@ -125,7 +123,7 @@ const AdminDashboard: React.FC = () => {
           icon: getActivityIcon(activity.type || activity.activity_type || 'check-in'),
         })),
       };
-      
+
       setStats(mappedStats);
     } catch (err: any) {
       console.error('Failed to fetch dashboard data:', err);
@@ -246,308 +244,307 @@ const AdminDashboard: React.FC = () => {
 
         {/* Modern Sophisticated Header */}
         <View style={styles.headerGradient}>
-        {/* Background Pattern */}
-        <View style={styles.headerPattern}>
-          <View style={[styles.patternCircle, { top: -20, right: -20, width: 120, height: 120 }]} />
-          <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 150, height: 150 }]} />
-          <View style={[styles.patternCircle, { top: 40, right: 60, width: 80, height: 80 }]} />
-        </View>
-
-        <Animated.View
-          style={[
-            styles.headerContent,
-            {
-              opacity: headerAnim,
-              transform: [
-                {
-                  translateY: headerAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          {/* Header Top Section */}
-          <View style={styles.headerTopSection}>
-            <View style={styles.headerLeft}>
-              <View style={styles.iconBadge}>
-                <LinearGradient
-                  colors={['rgba(255,255,255,0.3)', 'rgba(255,255,255,0.1)']}
-                  style={styles.iconBadgeGradient}
-                >
-                  <Ionicons name="speedometer" size={24} color="#fff" />
-                </LinearGradient>
-              </View>
-              <View style={styles.headerTextSection}>
-                <Text style={styles.headerTitle}>Dashboard</Text>
-                <Text style={styles.headerSubtitle}>Administrator Control Panel</Text>
-              </View>
-            </View>
-            <View style={styles.headerRight}>
-              <View style={styles.dateTimeContainer}>
-                <Text style={styles.timeText}>{formatTimeIST(new Date())}</Text>
-                <Text style={styles.dateText}>{getDayMonthIST(new Date())}</Text>
-              </View>
-            </View>
+          {/* Background Pattern */}
+          <View style={styles.headerPattern}>
+            <View style={[styles.patternCircle, { top: -20, right: -20, width: 120, height: 120 }]} />
+            <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 150, height: 150 }]} />
+            <View style={[styles.patternCircle, { top: 40, right: 60, width: 80, height: 80 }]} />
           </View>
 
-          {/* Stats Overview Bar */}
-          <View style={styles.statsOverviewBar}>
-            <View style={styles.miniStatItem}>
-              <Ionicons name="people-outline" size={14} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{stats.totalEmployees}</Text>
-              <Text style={styles.miniStatLabel}>Staff</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.miniStatItem}>
-              <Ionicons name="trending-up-outline" size={14} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{stats.attendanceRate}%</Text>
-              <Text style={styles.miniStatLabel}>Active</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.miniStatItem}>
-              <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{stats.activeTasks}</Text>
-              <Text style={styles.miniStatLabel}>Tasks</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.miniStatItem}>
-              <Ionicons name="briefcase-outline" size={14} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{stats.departments}</Text>
-              <Text style={styles.miniStatLabel}>Depts</Text>
-            </View>
-          </View>
-        </Animated.View>
-      </View>
-
-      {/* Main Content */}
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: tabBarVisible ? tabBarHeight + 24 : 24 },
-        ]}
-        onScroll={onScroll}
-        scrollEventThrottle={scrollEventThrottle}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#667eea']} />
-        }
-      >
-        {/* Error Message */}
-        {error && (
-          <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle" size={20} color="#ef4444" />
-            <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity onPress={onRefresh} style={styles.retryButton}>
-              <Text style={styles.retryText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Compact Stats Grid */}
-        <Animated.View
-          style={[
-            styles.statsGrid,
-            {
-              opacity: statsAnim,
-              transform: [
-                {
-                  translateY: statsAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [20, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          {/* Stat Card - Present Today */}
-          <TouchableOpacity style={styles.statCard} onPress={() => goTo('Attendance')} activeOpacity={0.7}>
-            <LinearGradient colors={['#10b981', '#059669']} style={styles.statGradient}>
-              <Ionicons name="people" size={18} color="#fff" />
-            </LinearGradient>
-            <View style={styles.statContent}>
-              <Text style={styles.statValue}>{stats.presentToday}</Text>
-              <Text style={styles.statLabel}>Present</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-          </TouchableOpacity>
-
-          {/* Stat Card - On Leave */}
-          <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
-            <LinearGradient colors={['#f59e0b', '#d97706']} style={styles.statGradient}>
-              <Ionicons name="calendar" size={18} color="#fff" />
-            </LinearGradient>
-            <View style={styles.statContent}>
-              <Text style={styles.statValue}>{stats.onLeave}</Text>
-              <Text style={styles.statLabel}>On Leave</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-          </TouchableOpacity>
-
-          {/* Stat Card - Active Tasks */}
-          <TouchableOpacity style={styles.statCard} onPress={() => goTo('Tasks')} activeOpacity={0.7}>
-            <LinearGradient colors={['#3b82f6', '#2563eb']} style={styles.statGradient}>
-              <Ionicons name="checkbox" size={18} color="#fff" />
-            </LinearGradient>
-            <View style={styles.statContent}>
-              <Text style={styles.statValue}>{stats.activeTasks}</Text>
-              <Text style={styles.statLabel}>Tasks</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-          </TouchableOpacity>
-
-          {/* Stat Card - Pending Leaves */}
-          <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
-            <LinearGradient colors={['#8b5cf6', '#7c3aed']} style={styles.statGradient}>
-              <Ionicons name="time" size={18} color="#fff" />
-            </LinearGradient>
-            <View style={styles.statContent}>
-              <Text style={styles.statValue}>{stats.pendingLeaves}</Text>
-              <Text style={styles.statLabel}>Pending Leave</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Department Performance - Compact */}
-        {stats.departmentPerformance.length > 0 && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Top Departments</Text>
-              <TouchableOpacity onPress={() => goTo('Departments')}>
-                <Text style={styles.seeAllText}>See All</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.departmentList}>
-              {stats.departmentPerformance.slice(0, 3).map((dept, index) => (
+          <Animated.View
+            style={[
+              styles.headerContent,
+              {
+                opacity: headerAnim,
+                transform: [
+                  {
+                    translateY: headerAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-20, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {/* Header Top Section */}
+            <View style={styles.headerTopSection}>
+              <View style={styles.headerLeft}>
                 <TouchableOpacity
-                  key={dept.name}
-                  onPress={() => navigation.navigate('Reports', { department: dept.name })}
+                  style={styles.backButton}
+                  onPress={() => navigation.goBack()}
                   activeOpacity={0.7}
                 >
-                  <Animated.View
-                    style={[
-                      styles.compactDeptCard,
-                      {
-                        opacity: cardsAnim[index] || new Animated.Value(1),
-                        transform: [
-                          {
-                            translateX: (cardsAnim[index] || new Animated.Value(1)).interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [-20, 0],
-                            }),
-                          },
-                        ],
-                      },
-                    ]}
-                  >
-                    <View style={styles.deptCardHeader}>
-                      <View style={styles.deptIconWrapper}>
-                        <LinearGradient
-                          colors={
-                            index === 0
-                              ? ['#3b82f6', '#2563eb']
-                              : index === 1
-                              ? ['#10b981', '#059669']
-                              : ['#f59e0b', '#d97706']
-                          }
-                          style={styles.deptIcon}
-                        >
-                          <Ionicons name="briefcase" size={16} color="#fff" />
-                        </LinearGradient>
-                      </View>
-                      <View style={styles.deptInfo}>
-                        <Text style={styles.deptName}>{dept.name}</Text>
-                        <Text style={styles.deptEmployees}>{dept.employees} employees</Text>
-                      </View>
-                      <View style={styles.deptBadge}>
-                        <Text style={styles.deptGrowth}>{dept.growth}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.progressContainer}>
-                      <View style={styles.progressTrack}>
-                        <LinearGradient
-                          colors={
-                            index === 0
-                              ? ['#3b82f6', '#2563eb']
-                              : index === 1
-                              ? ['#10b981', '#059669']
-                              : ['#f59e0b', '#d97706']
-                          }
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 0 }}
-                          style={[styles.progressFill, { width: `${dept.performance}%` }]}
-                        />
-                      </View>
-                      <Text style={styles.progressText}>{dept.performance}%</Text>
-                    </View>
-                  </Animated.View>
+                  <Ionicons name="chevron-back" size={24} color="#fff" />
                 </TouchableOpacity>
-              ))}
+                <View style={styles.headerTextSection}>
+                  <Text style={styles.headerTitle}>Dashboard</Text>
+                  <Text style={styles.headerSubtitle}>Administrator Control Panel</Text>
+                </View>
+              </View>
+              <View style={styles.headerRight}>
+                <View style={styles.dateTimeContainer}>
+                  <Text style={styles.timeText}>{formatTimeIST(new Date())}</Text>
+                  <Text style={styles.dateText}>{getDayMonthIST(new Date())}</Text>
+                </View>
+              </View>
             </View>
-          </View>
-        )}
 
-        {/* Empty State for Departments */}
-        {stats.departmentPerformance.length === 0 && !loading && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Top Departments</Text>
+            {/* Stats Overview Bar */}
+            <View style={styles.statsOverviewBar}>
+              <View style={styles.miniStatItem}>
+                <Ionicons name="people-outline" size={14} color="rgba(255,255,255,0.9)" />
+                <Text style={styles.miniStatValue}>{stats.totalEmployees}</Text>
+                <Text style={styles.miniStatLabel}>Staff</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.miniStatItem}>
+                <Ionicons name="trending-up-outline" size={14} color="rgba(255,255,255,0.9)" />
+                <Text style={styles.miniStatValue}>{stats.attendanceRate}%</Text>
+                <Text style={styles.miniStatLabel}>Active</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.miniStatItem}>
+                <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.9)" />
+                <Text style={styles.miniStatValue}>{stats.activeTasks}</Text>
+                <Text style={styles.miniStatLabel}>Tasks</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.miniStatItem}>
+                <Ionicons name="briefcase-outline" size={14} color="rgba(255,255,255,0.9)" />
+                <Text style={styles.miniStatValue}>{stats.departments}</Text>
+                <Text style={styles.miniStatLabel}>Depts</Text>
+              </View>
             </View>
-            <View style={styles.emptyState}>
-              <Ionicons name="briefcase-outline" size={40} color="#9ca3af" />
-              <Text style={styles.emptyStateText}>No department data available</Text>
-            </View>
-          </View>
-        )}
+          </Animated.View>
+        </View>
 
-        {/* Recent Activities - Compact */}
-        {stats.recentActivities.length > 0 && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Activities</Text>
-              <TouchableOpacity onPress={() => goTo('RecentActivities')}>
-                <Text style={styles.seeAllText}>View All</Text>
+        {/* Main Content */}
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: tabBarVisible ? tabBarHeight + 24 : 24 },
+          ]}
+          onScroll={onScroll}
+          scrollEventThrottle={scrollEventThrottle}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#667eea']} />
+          }
+        >
+          {/* Error Message */}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={20} color="#ef4444" />
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={onRefresh} style={styles.retryButton}>
+                <Text style={styles.retryText}>Retry</Text>
               </TouchableOpacity>
             </View>
+          )}
 
-            <View style={styles.activitiesList}>
-              {stats.recentActivities.map((activity) => (
-                <View key={activity.id} style={styles.compactActivityCard}>
-                  <View style={[styles.activityIconSmall, { backgroundColor: getIconBg(activity.type) }]}>
-                    <Ionicons name={activity.icon as any} size={16} color={getStatusColor(activity.status)} />
-                  </View>
-                  <View style={styles.activityInfo}>
-                    <Text style={styles.activityUserName}>{activity.user}</Text>
-                    <Text style={styles.activityDeptName}>{activity.dept} • {activity.time}</Text>
-                  </View>
-                  <View style={[styles.activityStatusBadge, { backgroundColor: getStatusColor(activity.status) }]}>
-                    <Text style={styles.activityStatusText}>{activity.status}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
+          {/* Compact Stats Grid */}
+          <Animated.View
+            style={[
+              styles.statsGrid,
+              {
+                opacity: statsAnim,
+                transform: [
+                  {
+                    translateY: statsAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {/* Stat Card - Present Today */}
+            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Attendance')} activeOpacity={0.7}>
+              <LinearGradient colors={['#10b981', '#059669']} style={styles.statGradient}>
+                <Ionicons name="people" size={18} color="#fff" />
+              </LinearGradient>
+              <View style={styles.statContent}>
+                <Text style={styles.statValue}>{stats.presentToday}</Text>
+                <Text style={styles.statLabel}>Present</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
+            </TouchableOpacity>
 
-        {/* Empty State for Activities */}
-        {stats.recentActivities.length === 0 && !loading && (
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Activities</Text>
+            {/* Stat Card - On Leave */}
+            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
+              <LinearGradient colors={['#f59e0b', '#d97706']} style={styles.statGradient}>
+                <Ionicons name="calendar" size={18} color="#fff" />
+              </LinearGradient>
+              <View style={styles.statContent}>
+                <Text style={styles.statValue}>{stats.onLeave}</Text>
+                <Text style={styles.statLabel}>On Leave</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
+            </TouchableOpacity>
+
+            {/* Stat Card - Active Tasks */}
+            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Tasks')} activeOpacity={0.7}>
+              <LinearGradient colors={['#3b82f6', '#2563eb']} style={styles.statGradient}>
+                <Ionicons name="checkbox" size={18} color="#fff" />
+              </LinearGradient>
+              <View style={styles.statContent}>
+                <Text style={styles.statValue}>{stats.activeTasks}</Text>
+                <Text style={styles.statLabel}>Tasks</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
+            </TouchableOpacity>
+
+            {/* Stat Card - Pending Leaves */}
+            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
+              <LinearGradient colors={['#8b5cf6', '#7c3aed']} style={styles.statGradient}>
+                <Ionicons name="time" size={18} color="#fff" />
+              </LinearGradient>
+              <View style={styles.statContent}>
+                <Text style={styles.statValue}>{stats.pendingLeaves}</Text>
+                <Text style={styles.statLabel}>Pending Leave</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* Department Performance - Compact */}
+          {stats.departmentPerformance.length > 0 && (
+            <View style={styles.sectionContainer}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Top Departments</Text>
+                <TouchableOpacity onPress={() => goTo('Departments')}>
+                  <Text style={styles.seeAllText}>See All</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.departmentList}>
+                {stats.departmentPerformance.slice(0, 3).map((dept, index) => (
+                  <TouchableOpacity
+                    key={dept.name}
+                    onPress={() => navigation.navigate('Reports', { department: dept.name })}
+                    activeOpacity={0.7}
+                  >
+                    <Animated.View
+                      style={[
+                        styles.compactDeptCard,
+                        {
+                          opacity: cardsAnim[index] || new Animated.Value(1),
+                          transform: [
+                            {
+                              translateX: (cardsAnim[index] || new Animated.Value(1)).interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [-20, 0],
+                              }),
+                            },
+                          ],
+                        },
+                      ]}
+                    >
+                      <View style={styles.deptCardHeader}>
+                        <View style={styles.deptIconWrapper}>
+                          <LinearGradient
+                            colors={
+                              index === 0
+                                ? ['#3b82f6', '#2563eb']
+                                : index === 1
+                                  ? ['#10b981', '#059669']
+                                  : ['#f59e0b', '#d97706']
+                            }
+                            style={styles.deptIcon}
+                          >
+                            <Ionicons name="briefcase" size={16} color="#fff" />
+                          </LinearGradient>
+                        </View>
+                        <View style={styles.deptInfo}>
+                          <Text style={styles.deptName}>{dept.name}</Text>
+                          <Text style={styles.deptEmployees}>{dept.employees} employees</Text>
+                        </View>
+                        <View style={styles.deptBadge}>
+                          <Text style={styles.deptGrowth}>{dept.growth}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.progressContainer}>
+                        <View style={styles.progressTrack}>
+                          <LinearGradient
+                            colors={
+                              index === 0
+                                ? ['#3b82f6', '#2563eb']
+                                : index === 1
+                                  ? ['#10b981', '#059669']
+                                  : ['#f59e0b', '#d97706']
+                            }
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={[styles.progressFill, { width: `${dept.performance}%` }]}
+                          />
+                        </View>
+                        <Text style={styles.progressText}>{dept.performance}%</Text>
+                      </View>
+                    </Animated.View>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-            <View style={styles.emptyState}>
-              <Ionicons name="time-outline" size={40} color="#9ca3af" />
-              <Text style={styles.emptyStateText}>No recent activities</Text>
+          )}
+
+          {/* Empty State for Departments */}
+          {stats.departmentPerformance.length === 0 && !loading && (
+            <View style={styles.sectionContainer}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Top Departments</Text>
+              </View>
+              <View style={styles.emptyState}>
+                <Ionicons name="briefcase-outline" size={40} color="#9ca3af" />
+                <Text style={styles.emptyStateText}>No department data available</Text>
+              </View>
             </View>
-          </View>
-        )}
-      </ScrollView>
+          )}
+
+          {/* Recent Activities - Compact */}
+          {stats.recentActivities.length > 0 && (
+            <View style={styles.sectionContainer}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent Activities</Text>
+                <TouchableOpacity onPress={() => goTo('RecentActivities')}>
+                  <Text style={styles.seeAllText}>View All</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.activitiesList}>
+                {stats.recentActivities.slice(0, 2).map((activity) => (
+                  <View key={activity.id} style={styles.compactActivityCard}>
+                    <View style={[styles.activityIconSmall, { backgroundColor: getIconBg(activity.type) }]}>
+                      <Ionicons name={activity.icon as any} size={16} color={getStatusColor(activity.status)} />
+                    </View>
+                    <View style={styles.activityInfo}>
+                      <Text style={styles.activityUserName}>{activity.user}</Text>
+                      <Text style={styles.activityDeptName}>{activity.dept} • {activity.time}</Text>
+                    </View>
+                    <View style={[styles.activityStatusBadge, { backgroundColor: getStatusColor(activity.status) }]}>
+                      <Text style={styles.activityStatusText}>{activity.status}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Empty State for Activities */}
+          {stats.recentActivities.length === 0 && !loading && (
+            <View style={styles.sectionContainer}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent Activities</Text>
+              </View>
+              <View style={styles.emptyState}>
+                <Ionicons name="time-outline" size={40} color="#9ca3af" />
+                <Text style={styles.emptyStateText}>No recent activities</Text>
+              </View>
+            </View>
+          )}
+        </ScrollView>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -612,17 +609,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  iconBadge: {
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: 14,
-  },
-  iconBadgeGradient: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
   },
   headerTextSection: {
     flex: 1,

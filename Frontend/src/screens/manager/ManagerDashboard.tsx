@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import { apiService } from "../../lib/api";
 import { formatTimeIST, getDayMonthIST, getRelativeTime } from "../../utils/dateTime";
@@ -50,7 +49,6 @@ interface TeamStats {
 }
 
 const ManagerDashboard: React.FC = () => {
-  const { isDarkMode, colors } = useTheme();
   const navigation = useNavigation<any>();
   const { logout, user } = useAuth();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
@@ -298,6 +296,9 @@ const ManagerDashboard: React.FC = () => {
         >
           {/* Header Top Section */}
           <View style={styles.headerTopSection}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </TouchableOpacity>
             <View style={styles.headerLeft}>
               <View style={styles.iconBadge}>
                 <LinearGradient
@@ -514,7 +515,7 @@ const ManagerDashboard: React.FC = () => {
 
               {stats.recentActivities.length > 0 ? (
                 <View style={styles.activitiesList}>
-                  {stats.recentActivities.map((activity) => (
+                  {stats.recentActivities.slice(0, 2).map((activity) => (
                     <View key={activity.id} style={styles.compactActivityCard}>
                       <View style={[styles.activityIconSmall, { backgroundColor: getIconBg(activity.type) }]}>
                         <Ionicons name={activity.icon as any} size={16} color={getStatusColor(activity.status)} />
@@ -572,6 +573,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     position: 'relative',
     zIndex: 1,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
   },
   // Header Top Section
   headerTopSection: {

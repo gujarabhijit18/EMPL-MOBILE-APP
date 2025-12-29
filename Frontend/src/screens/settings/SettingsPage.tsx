@@ -22,7 +22,7 @@ import {
 } from "react-native";
 import RNPickerSelect from "react-native-picker-select";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ColorTheme, ThemeMode, useTheme } from "../../contexts/ThemeContext";
+
 import { apiService, UserSettings } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 
@@ -36,8 +36,7 @@ interface LanguageItem {
 export default function SettingsScreen() {
   const navigation = useNavigation();
 
-  // Use global theme context
-  const { themeMode, setThemeMode, colorTheme, setColorTheme, isDarkMode } = useTheme();
+
 
   // Tab bar visibility with auto-hide on scroll
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll({
@@ -100,16 +99,12 @@ export default function SettingsScreen() {
 
         const settings = await apiService.getSettingsByUserId(user.user_id);
 
-        setThemeMode((settings.theme_mode as ThemeMode) || "system");
-        setColorTheme((settings.color_theme as ColorTheme) || "default");
         setLanguage(settings.language || "en");
         setEmailNotifications(settings.email_notifications ?? true);
         setPushNotifications(settings.push_notifications ?? true);
         setTwoFactorEnabled(settings.two_factor_enabled ?? false);
 
         await AsyncStorage.multiSet([
-          ["themeMode", settings.theme_mode || "system"],
-          ["userColorTheme", settings.color_theme || "default"],
           ["language", settings.language || "en"],
           ["emailNotifications", JSON.stringify(settings.email_notifications ?? true)],
           ["pushNotifications", JSON.stringify(settings.push_notifications ?? true)],
@@ -123,19 +118,15 @@ export default function SettingsScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [setThemeMode, setColorTheme]);
+  }, []);
 
   const loadLocalSettings = async () => {
     try {
-      const storedTheme = await AsyncStorage.getItem("themeMode");
-      const storedColor = await AsyncStorage.getItem("userColorTheme");
       const storedLang = await AsyncStorage.getItem("language");
       const email = await AsyncStorage.getItem("emailNotifications");
       const push = await AsyncStorage.getItem("pushNotifications");
       const twofa = await AsyncStorage.getItem("twoFactorEnabled");
 
-      if (storedTheme) setThemeMode(storedTheme as ThemeMode);
-      if (storedColor) setColorTheme(storedColor as ColorTheme);
       if (storedLang) setLanguage(storedLang);
       if (email) setEmailNotifications(JSON.parse(email));
       if (push) setPushNotifications(JSON.parse(push));
@@ -155,8 +146,6 @@ export default function SettingsScreen() {
       if (!userId) {
         try {
           await AsyncStorage.multiSet([
-            ["themeMode", themeMode],
-            ["userColorTheme", colorTheme],
             ["language", language],
             ["emailNotifications", JSON.stringify(emailNotifications)],
             ["pushNotifications", JSON.stringify(pushNotifications)],
@@ -173,18 +162,14 @@ export default function SettingsScreen() {
         const updatedSettings = await apiService.updateSettingsByUserId(userId, settingsData);
 
         await AsyncStorage.multiSet([
-          ["themeMode", updatedSettings.theme_mode],
-          ["userColorTheme", updatedSettings.color_theme],
-          ["language", updatedSettings.language],
-          ["emailNotifications", JSON.stringify(updatedSettings.email_notifications)],
-          ["pushNotifications", JSON.stringify(updatedSettings.push_notifications)],
-          ["twoFactorEnabled", JSON.stringify(updatedSettings.two_factor_enabled)],
+          ["language", updatedSettings.language || "en"],
+          ["emailNotifications", JSON.stringify(updatedSettings.email_notifications ?? true)],
+          ["pushNotifications", JSON.stringify(updatedSettings.push_notifications ?? true)],
+          ["twoFactorEnabled", JSON.stringify(updatedSettings.two_factor_enabled ?? false)],
         ]);
       } catch (error) {
         try {
           await AsyncStorage.multiSet([
-            ["themeMode", themeMode],
-            ["userColorTheme", colorTheme],
             ["language", language],
             ["emailNotifications", JSON.stringify(emailNotifications)],
             ["pushNotifications", JSON.stringify(pushNotifications)],
@@ -197,7 +182,7 @@ export default function SettingsScreen() {
         setIsSaving(false);
       }
     },
-    [userId, themeMode, colorTheme, language, emailNotifications, pushNotifications, twoFactorEnabled]
+    [userId, language, emailNotifications, pushNotifications, twoFactorEnabled]
   );
 
   const showToast = (message: string) => {
@@ -208,19 +193,8 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleThemeModeChange = (value: ThemeMode) => {
-    setThemeMode(value);
-    saveSettings({ theme_mode: value });
-    showToast(`${value.charAt(0).toUpperCase() + value.slice(1)} mode applied`);
-  };
-
-  const handleColorThemeChange = (value: ColorTheme, label: string) => {
-    setColorTheme(value);
-    saveSettings({ color_theme: value });
-    showToast(`${label} theme applied`);
-  };
-
-  const handleLanguageChange = (value: string) => {
+  const handleLanguageChange = (value: string | null) => {
+    if (!value) return; // Ignore null/undefined values
     setLanguage(value);
     saveSettings({ language: value });
     showToast(`${value.toUpperCase()} selected`);
@@ -243,21 +217,6 @@ export default function SettingsScreen() {
     saveSettings({ two_factor_enabled: value });
     showToast(`Two-Factor Authentication ${value ? "enabled" : "disabled"}`);
   };
-
-  const themeModes = [
-    { label: "Light", value: "light" as ThemeMode, icon: "sunny-outline" },
-    { label: "Dark", value: "dark" as ThemeMode, icon: "moon-outline" },
-    { label: "System", value: "system" as ThemeMode, icon: "phone-portrait-outline" },
-  ];
-
-  const colorThemes = [
-    { label: "Blue", value: "default" as ColorTheme, color: "#3B82F6" },
-    { label: "Purple", value: "purple" as ColorTheme, color: "#8B5CF6" },
-    { label: "Green", value: "green" as ColorTheme, color: "#10B981" },
-    { label: "Orange", value: "orange" as ColorTheme, color: "#F97316" },
-    { label: "Pink", value: "pink" as ColorTheme, color: "#EC4899" },
-    { label: "Cyan", value: "cyan" as ColorTheme, color: "#06B6D4" },
-  ];
 
   const languages: LanguageItem[] = [
     { label: "English", value: "en" },
@@ -352,83 +311,6 @@ export default function SettingsScreen() {
             ],
           }}
         >
-          {/* Display Mode Section */}
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <View style={[styles.sectionIconBg, { backgroundColor: "#fef3c7" }]}>
-                <Ionicons name="contrast-outline" size={18} color="#f59e0b" />
-              </View>
-              <View>
-                <Text style={styles.sectionTitle}>Display Mode</Text>
-                <Text style={styles.sectionSubtitle}>Choose Light / Dark / System</Text>
-              </View>
-            </View>
-
-            <View style={styles.themeModeContainer}>
-              {themeModes.map((mode) => (
-                <TouchableOpacity
-                  key={mode.value}
-                  style={[styles.themeModeCard, themeMode === mode.value && styles.themeModeCardActive]}
-                  onPress={() => handleThemeModeChange(mode.value)}
-                  activeOpacity={0.7}
-                >
-                  <LinearGradient
-                    colors={themeMode === mode.value ? ["#6366f1", "#4f46e5"] : ["#f9fafb", "#f3f4f6"]}
-                    style={styles.themeModeGradient}
-                  >
-                    <Ionicons
-                      name={mode.icon as any}
-                      size={28}
-                      color={themeMode === mode.value ? "#fff" : "#6b7280"}
-                    />
-                    <Text style={[styles.themeModeText, themeMode === mode.value && styles.themeModeTextActive]}>
-                      {mode.label}
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Color Theme Section */}
-          <View style={styles.sectionContainer}>
-            <View style={styles.sectionHeader}>
-              <View style={[styles.sectionIconBg, { backgroundColor: "#ede9fe" }]}>
-                <Ionicons name="color-palette-outline" size={18} color="#8b5cf6" />
-              </View>
-              <View>
-                <Text style={styles.sectionTitle}>Color Theme</Text>
-                <Text style={styles.sectionSubtitle}>Choose your accent color</Text>
-              </View>
-            </View>
-
-            <View style={styles.colorThemeCard}>
-              <View style={styles.colorThemeGrid}>
-                {colorThemes.map((theme) => (
-                  <TouchableOpacity
-                    key={theme.value}
-                    style={styles.colorThemeItem}
-                    onPress={() => handleColorThemeChange(theme.value, theme.label)}
-                    activeOpacity={0.7}
-                  >
-                    <View
-                      style={[
-                        styles.colorCircle,
-                        { backgroundColor: theme.color },
-                        colorTheme === theme.value && styles.colorCircleActive,
-                      ]}
-                    >
-                      {colorTheme === theme.value && <Ionicons name="checkmark" size={18} color="#fff" />}
-                    </View>
-                    <Text style={[styles.colorLabel, colorTheme === theme.value && { color: theme.color }]}>
-                      {theme.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-
           {/* Language Section */}
           <View style={styles.sectionContainer}>
             <View style={styles.sectionHeader}>
@@ -444,9 +326,11 @@ export default function SettingsScreen() {
             <View style={styles.languageCard}>
               <View style={styles.pickerWrapper}>
                 <RNPickerSelect
-                  onValueChange={(value: string) => handleLanguageChange(value)}
+                  onValueChange={(value) => handleLanguageChange(value)}
                   items={languages}
-                  value={language}
+                  value={language || "en"}
+                  placeholder={{}}
+                  useNativeAndroidPickerStyle={false}
                   style={{
                     inputIOS: styles.pickerInput,
                     inputAndroid: styles.pickerInput,
@@ -649,82 +533,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#6b7280",
     marginTop: 2,
-  },
-  themeModeContainer: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  themeModeCard: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  themeModeCardActive: {
-    shadowColor: "#6366f1",
-    shadowOpacity: 0.3,
-    elevation: 4,
-  },
-  themeModeGradient: {
-    paddingVertical: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  themeModeText: {
-    marginTop: 8,
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#6b7280",
-  },
-  themeModeTextActive: {
-    color: "#fff",
-  },
-  colorThemeCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  colorThemeGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-  colorThemeItem: {
-    width: (width - 80) / 3,
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  colorCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 3,
-    borderColor: "transparent",
-  },
-  colorCircleActive: {
-    borderColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  colorLabel: {
-    marginTop: 8,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6b7280",
   },
   languageCard: {
     backgroundColor: "#fff",

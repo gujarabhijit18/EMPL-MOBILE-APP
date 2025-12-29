@@ -5,19 +5,20 @@ import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useCallback, useState } from "react";
 import {
-    Alert,
-    Animated,
-    Dimensions,
-    Easing,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Animated,
+  Dimensions,
+  Easing,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth, UserRole } from "../../contexts/AuthContext";
+import { useModuleBadges, ModuleType } from "../../contexts/ModuleBadgeContext";
 import { apiService, Employee } from "../../lib/api";
 
 const { width } = Dimensions.get("window");
@@ -114,7 +115,7 @@ const allFeatures: FeatureItem[] = [
     route: "Reports",
     gradient: ["#6366f1", "#4f46e5"],
     iconBg: "#eef2ff",
-    roles: ["admin", "hr", "manager", "team_lead"],
+    roles: ["admin"],
   },
   {
     id: "shifts",
@@ -134,7 +135,7 @@ const allFeatures: FeatureItem[] = [
     route: "Teams",
     gradient: ["#f59e0b", "#d97706"],
     iconBg: "#fffbeb",
-    roles: ["manager", "team_lead"],
+    roles: [],
   },
   {
     id: "teamshifts",
@@ -144,18 +145,19 @@ const allFeatures: FeatureItem[] = [
     route: "TeamShifts",
     gradient: ["#06b6d4", "#0891b2"],
     iconBg: "#ecfeff",
-    roles: ["team_lead", "employee"],
+    roles: ["employee"],
   },
   {
-    id: "profile",
-    icon: "person-circle",
+    id: "chat",
+    icon: "chatbubbles",
     iconType: "ionicons",
-    label: "Profile",
-    route: "Profile",
-    gradient: ["#8b5cf6", "#7c3aed"],
-    iconBg: "#f5f3ff",
+    label: "Chat",
+    route: "ChatList",
+    gradient: ["#2563eb", "#1d4ed8"],
+    iconBg: "#eff6ff",
     roles: ["admin", "hr", "manager", "team_lead", "employee"],
   },
+
   {
     id: "settings",
     icon: "settings-sharp",
@@ -170,15 +172,46 @@ const allFeatures: FeatureItem[] = [
 
 const RoleDashboard: React.FC = () => {
   const { user, logout } = useAuth();
+  const { lightColors } = require("../../constants/theme");
+  const colors = lightColors;
+
+  // Dynamic styles based on theme
+  const dynamicStyles = {
+    container: { backgroundColor: colors.info },
+    headerGradient: {
+      colors: [colors.info, colors.infoDark],
+    },
+    contentContainer: { backgroundColor: colors.background },
+    scrollView: { backgroundColor: colors.background },
+    card: { backgroundColor: colors.surface, borderColor: colors.cardBorder },
+    text: { color: colors.textPrimary },
+    textSecondary: { color: colors.textSecondary },
+  };
   const navigation = useNavigation<any>();
   const role = user?.role || "employee";
 
   // Filter features based on user role
   const features = allFeatures.filter((f) => f.roles.includes(role));
 
-  // Real notification counts from API
-  const [notifications, setNotifications] = useState<Record<string, number>>({});
+  // Get badge counts from ModuleBadgeContext
+  const { badges, refreshBadgesFromAPI, resetBadge } = useModuleBadges();
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
+
+  // Map feature IDs to module types for badge display
+  const featureToModule: Record<string, ModuleType> = {
+    "home": "home",
+    "attendance": "attendance",
+    "leaves": "leaves",
+    "tasks": "tasks",
+    "employees": "employees",
+    "departments": "employees",
+    "hiring": "hiring",
+    "reports": "reports",
+    "shifts": "shifts",
+    "teams": "teams",
+    "teamshifts": "shifts",
+    "chat": "chat",
+  };
 
   // Search functionality
   const [searchQuery, setSearchQuery] = useState("");
@@ -191,49 +224,18 @@ const RoleDashboard: React.FC = () => {
   const [employeeAttendance, setEmployeeAttendance] = useState<any[]>([]);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
-  // Fetch real notification counts from API
+  // Refresh badge counts from API using the context
   const fetchNotificationCounts = useCallback(async () => {
     if (!user) return;
-    
     setIsLoadingNotifications(true);
-    const counts: Record<string, number> = {};
-
     try {
-      // Fetch pending tasks assigned to user
-      const tasks = await apiService.getMyTasks();
-      const pendingTasks = Array.isArray(tasks) 
-        ? tasks.filter((t: any) => t.status === "Pending" || t.status === "In Progress").length 
-        : 0;
-      if (pendingTasks > 0) counts.tasks = pendingTasks;
-
-      // For admin/hr/manager - fetch pending leave approvals
-      if (["admin", "hr", "manager"].includes(role)) {
-        try {
-          const teamLeaves = await apiService.getTeamLeaves(1, 100, "Pending");
-          if (teamLeaves.total > 0) counts.leaves = teamLeaves.total;
-        } catch (e) {
-          console.log("Could not fetch pending leaves:", e);
-        }
-      }
-
-      // For admin/hr - fetch pending hiring candidates
-      if (["admin", "hr"].includes(role)) {
-        try {
-          const candidates = await apiService.getCandidates(undefined, "Applied");
-          const pendingCandidates = Array.isArray(candidates) ? candidates.length : 0;
-          if (pendingCandidates > 0) counts.hiring = pendingCandidates;
-        } catch (e) {
-          console.log("Could not fetch pending candidates:", e);
-        }
-      }
-
-      setNotifications(counts);
+      await refreshBadgesFromAPI();
     } catch (error) {
       console.log("Error fetching notification counts:", error);
     } finally {
       setIsLoadingNotifications(false);
     }
-  }, [user, role]);
+  }, [user, refreshBadgesFromAPI]);
 
   // Fetch notifications on mount and when screen is focused
   useFocusEffect(
@@ -245,7 +247,7 @@ const RoleDashboard: React.FC = () => {
   // Search employees by name or ID
   const handleSearch = useCallback(async (query: string) => {
     setSearchQuery(query);
-    
+
     if (!query.trim()) {
       setSearchResults([]);
       setShowSearchResults(false);
@@ -278,11 +280,11 @@ const RoleDashboard: React.FC = () => {
     try {
       setSelectedEmployee(employee);
       setEmployeeDetails(employee);
-      
+
       // Fetch all tasks and filter by employee
       try {
         const allTasks = await apiService.getAllTasks?.();
-        const employeeTasks = Array.isArray(allTasks) 
+        const employeeTasks = Array.isArray(allTasks)
           ? allTasks.filter((t: any) => t.assigned_to === employee.id || t.assigned_to_id === employee.user_id)
           : [];
         setEmployeeTasks(employeeTasks);
@@ -347,9 +349,16 @@ const RoleDashboard: React.FC = () => {
     });
   }, []);
 
-  const handleFeaturePress = (route: string) => {
+  const handleFeaturePress = (route: string, featureId?: string) => {
     try {
       navigation.navigate(route);
+      // Reset badge when navigating to the feature
+      if (featureId) {
+        const moduleType = featureToModule[featureId];
+        if (moduleType) {
+          resetBadge(moduleType);
+        }
+      }
     } catch (e) {
       console.log("Navigation error:", e);
     }
@@ -365,7 +374,7 @@ const RoleDashboard: React.FC = () => {
   const getRoleLabel = (role: UserRole) => {
     const labels: Record<UserRole, string> = {
       admin: "Administrator",
-      hr: "HR Manager",
+      hr: "HR",
       manager: "Manager",
       team_lead: "Team Lead",
       employee: "Employee",
@@ -375,7 +384,9 @@ const RoleDashboard: React.FC = () => {
 
   const renderFeatureCard = (feature: FeatureItem, index: number) => {
     const animValue = cardAnims[index] || new Animated.Value(1);
-    const notificationCount = notifications[feature.id] || 0;
+    // Get badge count from context using feature-to-module mapping
+    const moduleType = featureToModule[feature.id];
+    const notificationCount = moduleType ? badges[moduleType] : 0;
 
     return (
       <Animated.View
@@ -403,7 +414,7 @@ const RoleDashboard: React.FC = () => {
       >
         <TouchableOpacity
           style={styles.featureCard}
-          onPress={() => handleFeaturePress(feature.route)}
+          onPress={() => handleFeaturePress(feature.route, feature.id)}
           activeOpacity={0.7}
         >
           <View style={[styles.iconContainer, { backgroundColor: feature.iconBg }]}>
@@ -439,7 +450,7 @@ const RoleDashboard: React.FC = () => {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar style="dark" />
-        
+
         {/* Header with back button */}
         <View style={styles.detailsHeader}>
           <TouchableOpacity onPress={closeEmployeeDetails}>
@@ -600,14 +611,11 @@ const RoleDashboard: React.FC = () => {
               )}
             </View>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.helpButton}
-            onPress={() => Alert.alert(
-              "User Information",
-              `Name: ${user?.name || "N/A"}\nEmail: ${user?.email || "N/A"}\nRole: ${getRoleLabel(role)}\nDepartment: ${user?.department || "N/A"}\nDesignation: ${user?.designation || "N/A"}`,
-              [{ text: "OK", style: "default" }]
-            )}
+            onPress={() => navigation.navigate("HelpSupport")}
           >
+
             <Ionicons name="help-circle-outline" size={28} color="#667eea" />
           </TouchableOpacity>
         </View>
@@ -633,41 +641,43 @@ const RoleDashboard: React.FC = () => {
           {features.map((feature, index) => renderFeatureCard(feature, index))}
         </View>
 
-        {/* Quick Actions */}
-        <View style={styles.quickActionsSection}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActionsRow}>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => navigation.navigate("Attendance")}
-            >
-              <LinearGradient
-                colors={["#10b981", "#059669"]}
-                style={styles.quickActionGradient}
+        {/* Quick Actions - Hidden for admin role */}
+        {role !== "admin" && (
+          <View style={styles.quickActionsSection}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.quickActionsRow}>
+              <TouchableOpacity
+                style={styles.quickActionButton}
+                onPress={() => navigation.navigate("Attendance")}
               >
-                <Ionicons name="finger-print" size={24} color="#fff" />
-                <Text style={styles.quickActionText}>Check In</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={["#10b981", "#059669"]}
+                  style={styles.quickActionGradient}
+                >
+                  <Ionicons name="finger-print" size={24} color="#fff" />
+                  <Text style={styles.quickActionText}>Check In</Text>
+                </LinearGradient>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => navigation.navigate("Leaves")}
-            >
-              <LinearGradient
-                colors={["#f59e0b", "#d97706"]}
-                style={styles.quickActionGradient}
+              <TouchableOpacity
+                style={styles.quickActionButton}
+                onPress={() => navigation.navigate("Leaves")}
               >
-                <Ionicons name="calendar" size={24} color="#fff" />
-                <Text style={styles.quickActionText}>Apply Leave</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={["#f59e0b", "#d97706"]}
+                  style={styles.quickActionGradient}
+                >
+                  <Ionicons name="calendar" size={24} color="#fff" />
+                  <Text style={styles.quickActionText}>Apply Leave</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Logout Button */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+          <Ionicons name="log-out-outline" size={20} color={colors.error} />
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -1077,13 +1087,13 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: "#9ca3af",
+    color: "#94a3b8",
     textAlign: "center",
     paddingVertical: 20,
   },
   emptyText: {
     fontSize: 14,
-    color: "#9ca3af",
+    color: "#94a3b8",
     textAlign: "center",
     paddingVertical: 20,
   },

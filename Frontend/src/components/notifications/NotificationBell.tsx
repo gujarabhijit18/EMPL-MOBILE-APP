@@ -10,7 +10,8 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { Badge, Button, Divider, useTheme } from "react-native-paper";
-import { formatDistanceToNow } from "date-fns/formatDistanceToNow";
+import { getCurrentISTISOString, toISTISOString, getRelativeTime } from "../../utils/dateTime";
+import { useModuleBadges } from "../../contexts/ModuleBadgeContext";
 
 // ✅ Notification type definition
 interface Notification {
@@ -25,6 +26,7 @@ interface Notification {
 
 export const NotificationBell = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const { totalUnread } = useModuleBadges();
 
   // ✅ Local notifications (no API)
   const [notifications, setNotifications] = useState<Notification[]>([
@@ -34,7 +36,7 @@ export const NotificationBell = () => {
       message: "Your leave request for 3 days has been approved ✅",
       type: "leave",
       read: false,
-      createdAt: new Date().toISOString(),
+      createdAt: getCurrentISTISOString(),
     },
     {
       id: "2",
@@ -42,7 +44,7 @@ export const NotificationBell = () => {
       message: "A new task has been added to your list.",
       type: "task",
       read: false,
-      createdAt: new Date().toISOString(),
+      createdAt: getCurrentISTISOString(),
     },
     {
       id: "3",
@@ -50,11 +52,13 @@ export const NotificationBell = () => {
       message: "Don’t forget to check in today!",
       type: "warning",
       read: true,
-      createdAt: new Date(Date.now() - 3600 * 1000).toISOString(),
+      createdAt: toISTISOString(new Date(Date.now() - 3600 * 1000)),
     },
   ]);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // Use total unread from context, fallback to local count
+  const localUnreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = totalUnread > 0 ? totalUnread : localUnreadCount;
   const theme = useTheme();
 
   // ✅ Utility functions
@@ -182,9 +186,7 @@ export const NotificationBell = () => {
                         {item.message}
                       </Text>
                       <Text style={styles.time}>
-                        {formatDistanceToNow(new Date(item.createdAt), {
-                          addSuffix: true,
-                        })}
+                        {getRelativeTime(item.createdAt)}
                       </Text>
                     </View>
 

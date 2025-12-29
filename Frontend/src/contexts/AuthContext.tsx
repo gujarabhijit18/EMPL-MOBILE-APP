@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Alert } from "react-native";
+import { getCurrentISTISOString } from "../utils/dateTime";
 
 /**
  * 🧠 User Types (can be expanded for your app)
@@ -74,7 +75,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const map: Record<string, UserRole> = {
       "admin": "admin",
       "Admin": "admin",
-      "hr": "hr", 
+      "hr": "hr",
       "HR": "hr",
       "manager": "manager",
       "Manager": "manager",
@@ -108,21 +109,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: normalizeRole(userData.role || "employee"),
         department: userData.department || "",
         designation: userData.designation || "",
-        joiningDate: userData.joining_date || new Date().toISOString(),
+        joiningDate: userData.joining_date || getCurrentISTISOString(),
         status: "active",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: getCurrentISTISOString(),
+        updatedAt: getCurrentISTISOString(),
       };
 
       await AsyncStorage.setItem("user", JSON.stringify(userObj));
       setUser(userObj);
-      
+
       // iOS fix: Ensure API service has the latest token after login
       // Add a small delay to ensure AsyncStorage write is complete
       await new Promise(resolve => setTimeout(resolve, 200));
       const { apiService } = await import("../lib/api");
       await apiService.refreshTokenCache();
-      
+
       // Alert is shown in Login.tsx after successful login
       console.log(`✅ Login Successful: ${userObj.name} (${userObj.role})`);
     } catch (error) {

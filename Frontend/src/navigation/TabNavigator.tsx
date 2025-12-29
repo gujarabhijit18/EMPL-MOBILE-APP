@@ -6,7 +6,7 @@ import {
 } from "@react-navigation/bottom-tabs";
 import { ParamListBase, TabNavigationState } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import React from "react";
+import React, { useEffect } from "react";
 import {
     Animated,
     Easing,
@@ -19,6 +19,7 @@ import {
 
 // Screens
 import { useAuth } from "../contexts/AuthContext";
+import { useModuleBadges, ModuleType } from "../contexts/ModuleBadgeContext";
 import AdminDashboard from "../screens/admin/AdminDashboard";
 import AttendanceWrapper from "../screens/attendance/AttendanceWrapper";
 import CreateDepartmentForm from "../screens/departments/CreateDepartmentForm";
@@ -36,6 +37,7 @@ import ShiftScheduleManagement from "../screens/shifts/ShiftScheduleManagement";
 import TeamShifts from "../screens/shifts/TeamShifts";
 import TaskManagement from "../screens/tasks/TaskManagement";
 import TeamLeadDashboard from "../screens/team_lead/TeamLeadDashboard";
+import TeamMembersList from "../screens/team_lead/TeamMembersList";
 import TeamManagement from "../screens/teams/TeamManagement";
 import {
     TAB_BAR_HEIGHT,
@@ -53,6 +55,7 @@ export type TabParamList = {
   Hiring: undefined;
   Shifts: undefined;
   Teams: undefined;
+  TeamMembersList: undefined;
   Reports: undefined;
   Profile: undefined;
   Settings: undefined;
@@ -60,23 +63,34 @@ export type TabParamList = {
 
 const Tab = createBottomTabNavigator<TabParamList>();
 const DepartmentStack = createNativeStackNavigator();
+const TeamLeadStack = createNativeStackNavigator();
 const TAB_BAR_HIDE_TRANSLATE = TAB_BAR_HEIGHT + 36;
 const ANIMATION_DURATION = 220;
 
-// Define notification data interface
-interface NotificationData {
-  [key: string]: number; // Tab name as key, notification count as value
-}
+// Map tab names to module types for badge system
+const tabToModule: Record<string, ModuleType> = {
+  "Home": "home",
+  "Attendance": "attendance",
+  "Leaves": "leaves",
+  "Tasks": "tasks",
+  "TeamShifts": "shifts",
+  "Employees": "employees",
+  "Hiring": "hiring",
+  "Shifts": "shifts",
+  "Teams": "teams",
+  "Reports": "reports",
+};
 
 // Custom Tab Bar Component
 type CustomTabBarProps = BottomTabBarProps & {
   state: TabNavigationState<ParamListBase>;
   descriptors: Record<string, { options: BottomTabNavigationOptions; navigation: any }>;
   navigation: any;
-  notificationData?: NotificationData;
 };
 
-function CustomTabBar({ state, descriptors, navigation, notificationData = {} }: CustomTabBarProps) {
+function CustomTabBar({ state, descriptors, navigation }: CustomTabBarProps) {
+  // Get badge counts from context
+  const { badges, resetBadge } = useModuleBadges();
   // Filter out hidden tabs first
   const visibleRoutes = state.routes.filter(
     route => route.name !== "Profile" && route.name !== "Settings"
@@ -100,8 +114,17 @@ function CustomTabBar({ state, descriptors, navigation, notificationData = {} }:
 
           if (!isFocused && !event.defaultPrevented) {
             navigation.navigate(route.name);
+            // Reset badge when navigating to the tab
+            const moduleType = tabToModule[route.name];
+            if (moduleType) {
+              resetBadge(moduleType);
+            }
           }
         };
+
+        // Get badge count for this tab from context
+        const moduleType = tabToModule[route.name];
+        const badgeCount = moduleType ? badges[moduleType] : 0;
 
         // Define icon and color based on route name
         let icon: React.ReactNode;
@@ -155,13 +178,11 @@ function CustomTabBar({ state, descriptors, navigation, notificationData = {} }:
           >
             <View style={styles.iconContainer}>
               {icon}
-              {notificationData[route.name] && notificationData[route.name] > 0 && (
+              {badgeCount > 0 && (
                 <View style={styles.notificationBadge}>
-                  {notificationData[route.name] > 9 ? (
-                    <Text style={styles.notificationText}>9+</Text>
-                  ) : (
-                    <Text style={styles.notificationText}>{notificationData[route.name]}</Text>
-                  )}
+                  <Text style={styles.notificationText}>
+                    {badgeCount > 9 ? "9+" : badgeCount}
+                  </Text>
                 </View>
               )}
             </View>
@@ -193,6 +214,23 @@ const DepartmentStackNavigator = () => (
   </DepartmentStack.Navigator>
 );
 
+const TeamLeadStackNavigator = () => (
+  <TeamLeadStack.Navigator
+    screenOptions={{
+      headerShown: false,
+    }}
+  >
+    <TeamLeadStack.Screen
+      name="TeamLeadDashboardScreen"
+      component={TeamLeadDashboard}
+    />
+    <TeamLeadStack.Screen
+      name="TeamMembersListScreen"
+      component={TeamMembersList}
+    />
+  </TeamLeadStack.Navigator>
+);
+
 export default function TabNavigator() {
   const { user } = useAuth();
   const role = user?.role || "employee";
@@ -205,18 +243,17 @@ export default function TabNavigator() {
       : role === "manager"
       ? ManagerDashboard
       : role === "team_lead"
-      ? TeamLeadDashboard
+      ? TeamLeadStackNavigator
       : EmployeeDashboard;
-  // Sample notification data - replace with your actual notification state management
-  const [notificationData, setNotificationData] = React.useState<NotificationData>({
-    Home: role === "admin" ? 0 : 3, // Admin only sees Reports
-    Attendance: 0,
-    Leaves: 2,
-    Tasks: 5,
-    ...((role === "team_lead" || role === "employee") && { TeamShifts: 0 }),
-    ...(role !== "employee" && role !== "admin" && { Reports: 0 }), // Admin doesn't need separate Reports tab
-    ...(role === "manager" && { Shifts: 0, Teams: 0 }),
-  });
+
+  // Get badge context for refreshing on mount
+  const { refreshBadgesFromAPI } = useModuleBadges();
+
+  // Refresh badges when tab navigator mounts
+  useEffect(() => {
+    refreshBadgesFromAPI();
+  }, []);
+
   const canAccessEmployeesTab = role === "hr"; // Admin only sees Reports
   const translateY = React.useRef(new Animated.Value(0)).current;
   const isHidden = React.useRef(false);
@@ -314,7 +351,7 @@ export default function TabNavigator() {
             ]}
             pointerEvents={tabBarVisible ? "auto" : "none"}
           >
-            <CustomTabBar {...props} notificationData={notificationData} />
+            <CustomTabBar {...props} />
           </Animated.View>
         )}
       >
@@ -346,16 +383,16 @@ export default function TabNavigator() {
           name="Profile" 
           component={Profile} 
           options={{
-            tabBarButton: () => null, // Hide from tab bar
-            tabBarStyle: { display: 'none' } // Alternative way to hide
+            tabBarButton: () => null,
+            tabBarStyle: { display: 'none' }
           }} 
         />
         <Tab.Screen 
           name="Settings" 
           component={Settings} 
           options={{
-            tabBarButton: () => null, // Hide from tab bar
-            tabBarStyle: { display: 'none' } // Alternative way to hide
+            tabBarButton: () => null,
+            tabBarStyle: { display: 'none' }
           }} 
         />
       </Tab.Navigator>

@@ -1,43 +1,125 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
+# ========================
+# Dependencies
+# ========================
 node_modules/
+.pnp/
+.pnp.js
+.yarn/
 
-# Expo
+# ========================
+# Expo / React Native
+# ========================
 .expo/
 dist/
 web-build/
 expo-env.d.ts
+*.hbc
 
-# Native
-.kotlin/
-*.orig.*
+# ========================
+# Native builds
+# ========================
+# iOS
+ios/
+*.xcworkspace
+*.xcodeproj
+Pods/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Android
+android/
+*.apk
+*.aab
+*.keystore
 *.jks
+local.properties
+
+# Kotlin
+.kotlin/
+
+# ========================
+# Metro bundler
+# ========================
+.metro-health-check*
+
+# ========================
+# Build outputs
+# ========================
+build/
+*.orig.*
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.pem
 
-# Metro
-.metro-health-check*
-
-# debug
+# ========================
+# Debug logs
+# ========================
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.log
+logs/
 
-# macOS
-.DS_Store
-*.pem
-
-# local env files
+# ========================
+# Environment files
+# ========================
+.env
+.env.*
 .env*.local
+!.env.example
 
-# typescript
+# ========================
+# TypeScript
+# ========================
 *.tsbuildinfo
+tsconfig.tsbuildinfo
 
-app-example
+# ========================
+# IDE / Editor
+# ========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
 
-# generated native folders
-/ios
-/android
+# ========================
+# OS generated files
+# ========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+$null
+
+# ========================
+# Testing
+# ========================
+coverage/
+.nyc_output/
+jest/
+
+# ========================
+# Misc
+# ========================
+*.tmp
+*.temp
+.cache/
+.parcel-cache/
+app-example/
+
+# ========================
+# EAS Build
+# ========================
+.eas/

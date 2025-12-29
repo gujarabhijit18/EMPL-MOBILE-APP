@@ -18,7 +18,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import type { TabParamList } from "../../navigation/TabNavigator";
 import { apiService } from "../../lib/api";
@@ -59,7 +58,6 @@ type TeamLeadNavigationParam = BottomTabNavigationProp<TabParamList>;
 const TeamLeadDashboard = () => {
   const navigation = useNavigation<TeamLeadNavigationParam>();
   const { user, logout } = useAuth();
-  const { isDarkMode, colors } = useTheme();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
 
   const [stats, setStats] = useState<TeamStats | null>(null);
@@ -275,9 +273,9 @@ const TeamLeadDashboard = () => {
 
   const goTo = (routeName: string) => {
     try {
-      navigation.navigate(routeName as never);
+      (navigation as any).navigate(routeName);
     } catch (_) {
-      (navigation as any).getParent?.()?.navigate(routeName as never);
+      (navigation as any).getParent?.()?.navigate(routeName);
     }
   };
 
@@ -342,6 +340,9 @@ const TeamLeadDashboard = () => {
         >
           {/* Header Top Section */}
           <View style={styles.headerTopSection}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </TouchableOpacity>
             <View style={styles.headerLeft}>
               <View style={styles.iconBadge}>
                 <LinearGradient
@@ -522,13 +523,13 @@ const TeamLeadDashboard = () => {
               <View style={styles.sectionContainer}>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>Team Members</Text>
-                  <TouchableOpacity onPress={() => navigation.navigate("Teams")}>
+                  <TouchableOpacity onPress={() => (navigation as any).navigate("TeamMembersListScreen")}>
                     <Text style={styles.seeAllText}>View All</Text>
                   </TouchableOpacity>
                 </View>
 
                 <View style={styles.membersList}>
-                  {stats.topPerformers.map((member) => (
+                  {stats.topPerformers.slice(0, 3).map((member) => (
                     <View key={member.id} style={styles.memberCard}>
                       <View style={styles.memberLeft}>
                         <View style={styles.memberAvatar}>
@@ -563,6 +564,18 @@ const TeamLeadDashboard = () => {
                     </View>
                   ))}
                 </View>
+
+                {stats.topPerformers.length > 3 && (
+                  <TouchableOpacity 
+                    style={styles.viewAllButton}
+                    onPress={() => (navigation as any).navigate("TeamMembersListScreen")}
+                  >
+                    <Text style={styles.viewAllButtonText}>
+                      View All {stats.topPerformers.length} Members
+                    </Text>
+                    <Ionicons name="arrow-forward" size={16} color="#8b5cf6" />
+                  </TouchableOpacity>
+                )}
               </View>
             )}
 
@@ -577,7 +590,7 @@ const TeamLeadDashboard = () => {
 
               {stats.recentActivities.length > 0 ? (
                 <View style={styles.activitiesList}>
-                  {stats.recentActivities.map((activity) => (
+                  {stats.recentActivities.slice(0, 2).map((activity) => (
                     <View key={activity.id} style={styles.compactActivityCard}>
                       <View style={[styles.activityIconSmall, { backgroundColor: getIconBg(activity.type) }]}>
                         <Ionicons name={activity.icon as any} size={16} color={getStatusColor(activity.status)} />
@@ -637,6 +650,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     position: "relative",
     zIndex: 1,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
   },
   // Header Top Section
   headerTopSection: {
@@ -960,6 +982,24 @@ const styles = StyleSheet.create({
   memberStatusText: {
     fontSize: 11,
     fontWeight: "700",
+  },
+  viewAllButton: {
+    marginTop: 12,
+    backgroundColor: "#f3f4f6",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#e5e7eb",
+  },
+  viewAllButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#8b5cf6",
   },
   // Activities
   activitiesList: {

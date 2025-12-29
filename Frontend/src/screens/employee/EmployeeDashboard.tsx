@@ -18,11 +18,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../contexts/AuthContext";
-import { useTheme } from "../../contexts/ThemeContext";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
 import type { TabParamList } from "../../navigation/TabNavigator";
 import { apiService } from "../../lib/api";
 import { formatTimeIST, getDayMonthIST, getRelativeTime } from "../../utils/dateTime";
+import { Colors, Shadows, BorderRadius, Spacing, Typography, Gradients } from "../../constants/designSystem";
 
 const { width } = Dimensions.get("window");
 
@@ -54,7 +54,6 @@ type EmployeeNavigationParam = BottomTabNavigationProp<TabParamList>;
 const EmployeeDashboard = () => {
   const navigation = useNavigation<EmployeeNavigationParam>();
   const { user, logout } = useAuth();
-  const { isDarkMode, colors } = useTheme();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
 
   const [stats, setStats] = useState<EmployeeStats | null>(null);
@@ -68,9 +67,9 @@ const EmployeeDashboard = () => {
   // Set status bar to match header color
   useEffect(() => {
     if (Platform.OS === "android") {
-      setStatusBarBackgroundColor("#3b82f6", true);
+      setStatusBarBackgroundColor(Colors.surface, true);
     }
-    setStatusBarStyle("light");
+    setStatusBarStyle("dark");
   }, []);
 
   useEffect(() => {
@@ -285,73 +284,41 @@ const EmployeeDashboard = () => {
       case "completed":
       case "approved":
       case "present": 
-        return "#10b981";
+        return Colors.success;
       case "pending": 
-        return "#f59e0b";
+        return Colors.warning;
       case "in_progress": 
-        return "#3b82f6";
+        return Colors.primary;
       case "rejected":
-        return "#ef4444";
+        return Colors.error;
       default: 
-        return "#6b7280";
+        return Colors.textSecondary;
     }
   };
 
   const getIconBg = (type: string) => {
     switch (type) {
-      case "success": return "#d1fae5";
-      case "warning": return "#fef3c7";
-      case "error": return "#fee2e2";
-      case "info": return "#dbeafe";
-      default: return "#f3f4f6";
+      case "success": return Colors.successLight;
+      case "warning": return Colors.warningLight;
+      case "error": return Colors.errorLight;
+      case "info": return Colors.primaryLight;
+      default: return Colors.backgroundAlt;
     }
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: "#3b82f6" }]} edges={["top"]}>
-      <StatusBar style="light" backgroundColor="#3b82f6" translucent={false} />
+    <SafeAreaView style={[styles.container, { backgroundColor: Colors.surface }]} edges={["top"]}>
+      <StatusBar style="dark" backgroundColor={Colors.surface} translucent={false} />
 
-      {/* Modern Employee Header */}
-      <LinearGradient
-        colors={["#3b82f6", "#1e40af"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        {/* Background Pattern */}
-        <View style={styles.headerPattern}>
-          <View style={[styles.patternCircle, { top: -20, right: -20, width: 120, height: 120 }]} />
-          <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 150, height: 150 }]} />
-          <View style={[styles.patternCircle, { top: 40, right: 60, width: 80, height: 80 }]} />
-        </View>
-
-        <Animated.View
-          style={[
-            styles.headerContent,
-            {
-              opacity: headerAnim,
-              transform: [
-                {
-                  translateY: headerAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
+      {/* Modern White Header */}
+      <View style={styles.headerContainer}>
+        <View style={styles.headerContent}>
           {/* Header Top Section */}
           <View style={styles.headerTopSection}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+            </TouchableOpacity>
             <View style={styles.headerLeft}>
-              <View style={styles.iconBadge}>
-                <LinearGradient
-                  colors={["rgba(255,255,255,0.3)", "rgba(255,255,255,0.1)"]}
-                  style={styles.iconBadgeGradient}
-                >
-                  <Ionicons name="person" size={24} color="#fff" />
-                </LinearGradient>
-              </View>
               <View style={styles.headerTextSection}>
                 <Text style={styles.headerTitle}>My Dashboard</Text>
                 <Text style={styles.headerSubtitle}>Personal Workspace</Text>
@@ -372,31 +339,31 @@ const EmployeeDashboard = () => {
           {/* Stats Overview Bar */}
           <View style={styles.statsOverviewBar}>
             <View style={styles.miniStatItem}>
-              <Ionicons name="clipboard-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="clipboard-outline" size={14} color={Colors.primary} />
               <Text style={styles.miniStatValue}>{stats?.totalTasks || 0}</Text>
               <Text style={styles.miniStatLabel}>Tasks</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.miniStatItem}>
-              <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="checkmark-circle-outline" size={14} color={Colors.success} />
               <Text style={styles.miniStatValue}>{stats?.completedTasks || 0}</Text>
               <Text style={styles.miniStatLabel}>Done</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.miniStatItem}>
-              <Ionicons name="calendar-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="calendar-outline" size={14} color={Colors.warning} />
               <Text style={styles.miniStatValue}>{stats?.approvedLeaves || 0}</Text>
               <Text style={styles.miniStatLabel}>Leaves</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.miniStatItem}>
-              <Ionicons name="speedometer-outline" size={14} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="speedometer-outline" size={14} color={Colors.purple} />
               <Text style={styles.miniStatValue}>{stats?.attendancePercentage || 0}%</Text>
               <Text style={styles.miniStatLabel}>Attendance</Text>
             </View>
           </View>
-        </Animated.View>
-      </LinearGradient>
+        </View>
+      </View>
 
       {/* Main Content */}
       <ScrollView
@@ -431,28 +398,28 @@ const EmployeeDashboard = () => {
               </View>
 
               <View style={styles.performanceCard}>
-                <LinearGradient colors={["#3b82f6", "#1e40af"]} style={styles.performanceIconLarge}>
+                <LinearGradient colors={[...Gradients.primary]} style={styles.performanceIconLarge}>
                   <Ionicons name="stats-chart" size={28} color="#fff" />
                 </LinearGradient>
                 <View style={styles.performanceContent}>
                   <Text style={styles.performanceName}>Your Performance</Text>
                   <View style={styles.performanceRow}>
                     <View style={styles.performanceItem}>
-                      <Ionicons name="clipboard" size={14} color="#6b7280" />
+                      <Ionicons name="clipboard" size={14} color={Colors.textSecondary} />
                       <Text style={styles.performanceText}>{stats.totalTasks} Total Tasks</Text>
                     </View>
                     <View style={styles.performanceItem}>
-                      <Ionicons name="checkbox" size={14} color="#10b981" />
+                      <Ionicons name="checkbox" size={14} color={Colors.success} />
                       <Text style={styles.performanceText}>{stats.completedTasks} Completed</Text>
                     </View>
                   </View>
                   <View style={styles.performanceRow}>
                     <View style={styles.performanceItem}>
-                      <Ionicons name="calendar" size={14} color="#6b7280" />
+                      <Ionicons name="calendar" size={14} color={Colors.textSecondary} />
                       <Text style={styles.performanceText}>{stats.presentDays}/{stats.totalDays} Days Present</Text>
                     </View>
                     <View style={styles.performanceItem}>
-                      <Ionicons name="time" size={14} color="#f59e0b" />
+                      <Ionicons name="time" size={14} color={Colors.warning} />
                       <Text style={styles.performanceText}>{stats.inProgressTasks} In Progress</Text>
                     </View>
                   </View>
@@ -471,26 +438,26 @@ const EmployeeDashboard = () => {
 
               <View style={styles.leaveStatsRow}>
                 <View style={styles.leaveStatCard}>
-                  <View style={[styles.leaveStatIcon, { backgroundColor: "#d1fae5" }]}>
-                    <Ionicons name="checkmark-circle" size={20} color="#059669" />
+                  <View style={[styles.leaveStatIcon, { backgroundColor: Colors.successLight }]}>
+                    <Ionicons name="checkmark-circle" size={20} color={Colors.successDark} />
                   </View>
-                  <Text style={[styles.leaveStatValue, { color: "#059669" }]}>{stats.approvedLeaves}</Text>
+                  <Text style={[styles.leaveStatValue, { color: Colors.successDark }]}>{stats.approvedLeaves}</Text>
                   <Text style={styles.leaveStatLabel}>Approved</Text>
                 </View>
 
                 <View style={styles.leaveStatCard}>
-                  <View style={[styles.leaveStatIcon, { backgroundColor: "#fef3c7" }]}>
-                    <Ionicons name="time" size={20} color="#d97706" />
+                  <View style={[styles.leaveStatIcon, { backgroundColor: Colors.warningLight }]}>
+                    <Ionicons name="time" size={20} color={Colors.warningDark} />
                   </View>
-                  <Text style={[styles.leaveStatValue, { color: "#d97706" }]}>{stats.pendingLeaves}</Text>
+                  <Text style={[styles.leaveStatValue, { color: Colors.warningDark }]}>{stats.pendingLeaves}</Text>
                   <Text style={styles.leaveStatLabel}>Pending</Text>
                 </View>
 
                 <View style={styles.leaveStatCard}>
-                  <View style={[styles.leaveStatIcon, { backgroundColor: "#fee2e2" }]}>
-                    <Ionicons name="close-circle" size={20} color="#dc2626" />
+                  <View style={[styles.leaveStatIcon, { backgroundColor: Colors.errorLight }]}>
+                    <Ionicons name="close-circle" size={20} color={Colors.errorDark} />
                   </View>
-                  <Text style={[styles.leaveStatValue, { color: "#dc2626" }]}>{stats.rejectedLeaves}</Text>
+                  <Text style={[styles.leaveStatValue, { color: Colors.errorDark }]}>{stats.rejectedLeaves}</Text>
                   <Text style={styles.leaveStatLabel}>Rejected</Text>
                 </View>
               </View>
@@ -537,106 +504,83 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  headerGradient: {
-    paddingTop: 16,
-    paddingBottom: 24,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    position: "relative",
-    overflow: "hidden",
-  },
-  // Decorative Pattern
-  headerPattern: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  patternCircle: {
-    position: "absolute",
-    borderRadius: 9999,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  headerContainer: {
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    paddingBottom: Spacing.lg,
   },
   headerContent: {
-    paddingHorizontal: 20,
-    position: "relative",
-    zIndex: 1,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.lg,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   // Header Top Section
   headerTopSection: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
   },
-  iconBadge: {
-    marginRight: 14,
-  },
-  iconBadgeGradient: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.2)",
-  },
   headerTextSection: {
     flex: 1,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#fff",
-    letterSpacing: 0.3,
+    ...Typography.screenTitle,
   },
   headerSubtitle: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.85)",
+    ...Typography.secondary,
     marginTop: 2,
-    fontWeight: "500",
-    letterSpacing: 0.2,
   },
   headerRight: {
     alignItems: "flex-end",
   },
   dateTimeContainer: {
-    backgroundColor: "rgba(255,255,255,0.15)",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: "#bfdbfe",
   },
   timeText: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#fff",
+    color: Colors.primaryDark,
     letterSpacing: 0.5,
   },
   dateText: {
     fontSize: 10,
-    color: "rgba(255,255,255,0.8)",
+    color: Colors.primary,
     marginTop: 2,
     fontWeight: "600",
   },
   // Stats Overview Bar
   statsOverviewBar: {
     flexDirection: "row",
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderRadius: 14,
-    padding: 12,
+    backgroundColor: Colors.backgroundAlt,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
     justifyContent: "space-around",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: Colors.border,
   },
   miniStatItem: {
     alignItems: "center",
@@ -645,13 +589,13 @@ const styles = StyleSheet.create({
   miniStatValue: {
     fontSize: 16,
     fontWeight: "800",
-    color: "#fff",
+    color: Colors.text,
     marginTop: 4,
     letterSpacing: 0.3,
   },
   miniStatLabel: {
     fontSize: 9,
-    color: "rgba(255,255,255,0.75)",
+    color: Colors.textSecondary,
     marginTop: 2,
     fontWeight: "600",
     textTransform: "uppercase",
@@ -660,97 +604,50 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: 32,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: Colors.border,
   },
   scrollView: {
     flex: 1,
-    backgroundColor: "#f8fafc",
+    backgroundColor: Colors.background,
   },
   scrollContent: {
-    padding: 16,
-  },
-  // Compact Stats Grid
-  statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginBottom: 20,
-    gap: 10,
-  },
-  statCard: {
-    flex: 1,
-    minWidth: (width - 52) / 2,
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  statGradient: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  statContent: {
-    flex: 1,
-  },
-  statValue: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#1f2937",
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: "#6b7280",
-    fontWeight: "600",
+    padding: Spacing.lg,
   },
   // Section Container
   sectionContainer: {
-    marginBottom: 20,
+    marginBottom: Spacing.xl,
   },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#1f2937",
+    ...Typography.sectionTitle,
   },
   seeAllText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#3b82f6",
+    color: Colors.primary,
   },
   // Performance Card
   performanceCard: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
     flexDirection: "row",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
   performanceIconLarge: {
     width: 60,
     height: 60,
-    borderRadius: 16,
+    borderRadius: BorderRadius.lg,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 14,
+    marginRight: Spacing.md,
   },
   performanceContent: {
     flex: 1,
@@ -758,13 +655,13 @@ const styles = StyleSheet.create({
   performanceName: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#1f2937",
-    marginBottom: 8,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
   },
   performanceRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: Spacing.md,
     marginBottom: 6,
   },
   performanceItem: {
@@ -774,7 +671,7 @@ const styles = StyleSheet.create({
   },
   performanceText: {
     fontSize: 12,
-    color: "#6b7280",
+    color: Colors.textSecondary,
     fontWeight: "500",
   },
   // Leave Stats Row
@@ -784,23 +681,21 @@ const styles = StyleSheet.create({
   },
   leaveStatCard: {
     flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
   leaveStatIcon: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   leaveStatValue: {
     fontSize: 20,
@@ -809,7 +704,7 @@ const styles = StyleSheet.create({
   },
   leaveStatLabel: {
     fontSize: 11,
-    color: "#6b7280",
+    color: Colors.textSecondary,
     fontWeight: "600",
   },
   // Activities List
@@ -817,16 +712,14 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   compactActivityCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
     flexDirection: "row",
     alignItems: "flex-start",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
   activityIconSmall: {
     width: 36,
@@ -834,7 +727,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
+    marginRight: Spacing.md,
   },
   activityInfo: {
     flex: 1,
@@ -842,17 +735,17 @@ const styles = StyleSheet.create({
   activityTitle: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#1f2937",
+    color: Colors.text,
     marginBottom: 3,
   },
   activityDescription: {
     fontSize: 12,
-    color: "#6b7280",
+    color: Colors.textSecondary,
     marginBottom: 3,
   },
   activityTime: {
     fontSize: 11,
-    color: "#9ca3af",
+    color: Colors.textTertiary,
     fontWeight: "500",
   },
   // Loading & Error States
@@ -863,9 +756,9 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: Spacing.md,
     fontSize: 14,
-    color: "#6b7280",
+    color: Colors.textSecondary,
     fontWeight: "500",
   },
   errorContainer: {
@@ -875,19 +768,19 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   errorText: {
-    marginTop: 12,
+    marginTop: Spacing.md,
     fontSize: 14,
-    color: "#ef4444",
+    color: Colors.error,
     fontWeight: "500",
     textAlign: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.xl,
   },
   retryButton: {
-    marginTop: 16,
-    backgroundColor: "#3b82f6",
-    paddingHorizontal: 24,
+    marginTop: Spacing.lg,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.xxl,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: BorderRadius.sm,
   },
   retryText: {
     color: "#fff",
@@ -899,9 +792,9 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   emptyStateText: {
-    marginTop: 12,
+    marginTop: Spacing.md,
     fontSize: 14,
-    color: "#9ca3af",
+    color: Colors.textTertiary,
     fontWeight: "500",
   },
 });

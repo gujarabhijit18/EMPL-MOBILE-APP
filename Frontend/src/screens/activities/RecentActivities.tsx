@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -12,25 +11,38 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTheme } from "../../contexts/ThemeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
+import {
+  Colors,
+  Spacing,
+  BorderRadius,
+  Shadows,
+  Typography,
+  HeaderStyles,
+  CardStyles,
+  CommonStyles,
+  getStatusBadgeStyle,
+  getRoleBadgeColor,
+} from "../../constants/designSystem";
 
 interface Activity {
-  id: number;
+  id: string;
   type: string;
   user: string;
   dept: string;
+  role: string;
   time: string;
   status: string;
   icon: string;
+  description?: string;
 }
 
 const RecentActivities: React.FC = () => {
-  const { colors } = useTheme();
   const navigation = useNavigation<any>();
   const { onScroll, scrollEventThrottle, tabBarVisible, tabBarHeight } = useAutoHideTabBarOnScroll();
 
@@ -59,15 +71,22 @@ const RecentActivities: React.FC = () => {
       setError(null);
       const response = await apiService.getDashboardByRole('admin');
       
-      const mappedActivities: Activity[] = (response.recent_activities || response.recentActivities || []).map((activity: any, index: number) => ({
-        id: activity.id || index + 1,
-        type: activity.type || activity.activity_type || 'check-in',
-        user: activity.user || activity.user_name || activity.employee_name || 'Unknown',
-        dept: activity.dept || activity.department || 'N/A',
-        time: activity.time || activity.created_at || 'N/A',
-        status: activity.status || 'completed',
-        icon: getActivityIcon(activity.type || activity.activity_type || 'check-in'),
-      }));
+      const mappedActivities: Activity[] = (response.recent_activities || response.recentActivities || []).map((activity: any) => {
+        const dept = activity.department || activity.dept || 'N/A';
+        const role = activity.role || 'Employee';
+        
+        return {
+          id: activity.id,
+          type: activity.type || 'check-in',
+          user: activity.user || 'Unknown',
+          dept: dept,
+          role: role,
+          time: activity.time || 'N/A',
+          status: activity.status || 'completed',
+          icon: getActivityIcon(activity.type || 'check-in'),
+          description: activity.description,
+        };
+      });
       
       setActivities(mappedActivities);
     } catch (err: any) {
@@ -110,24 +129,25 @@ const RecentActivities: React.FC = () => {
     ]).start();
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'on-time': case 'completed': case 'approved': return '#10b981';
-      case 'pending': return '#f59e0b';
-      case 'late': return '#ef4444';
-      case 'new': return '#3b82f6';
-      default: return '#6b7280';
+  const getIconBg = (type: string) => {
+    switch (type) {
+      case 'check-in': return Colors.successLight;
+      case 'check-out': return Colors.warningLight;
+      case 'leave': return Colors.warningLight;
+      case 'task': return Colors.primaryLight;
+      case 'hire': return Colors.purpleLight;
+      default: return Colors.backgroundAlt;
     }
   };
 
-  const getIconBg = (type: string) => {
+  const getIconColor = (type: string) => {
     switch (type) {
-      case 'check-in': return '#dcfce7';
-      case 'check-out': return '#fef3c7';
-      case 'leave': return '#fef3c7';
-      case 'task': return '#dbeafe';
-      case 'hire': return '#e0e7ff';
-      default: return '#f3f4f6';
+      case 'check-in': return Colors.success;
+      case 'check-out': return Colors.warning;
+      case 'leave': return Colors.warning;
+      case 'task': return Colors.primary;
+      case 'hire': return Colors.purple;
+      default: return Colors.textSecondary;
     }
   };
 
@@ -144,77 +164,66 @@ const RecentActivities: React.FC = () => {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.header }]} edges={['top']}>
-        <StatusBar style="light" />
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerGradient}
-        >
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#fff" />
-            <Text style={styles.loadingText}>Loading Activities...</Text>
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <StatusBar style="dark" />
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+          </TouchableOpacity>
+          <View style={styles.headerTextSection}>
+            <Text style={styles.headerTitle}>Recent Activities</Text>
+            <Text style={styles.headerSubtitle}>Loading...</Text>
           </View>
-        </LinearGradient>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading Activities...</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.header }]} edges={['top']}>
-      <StatusBar style="light" />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar style="dark" />
 
-      {/* Header */}
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
+      {/* White Header */}
+      <Animated.View
+        style={[
+          styles.header,
+          {
+            opacity: headerAnim,
+            transform: [
+              {
+                translateY: headerAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [-20, 0],
+                }),
+              },
+            ],
+          },
+        ]}
       >
-        <View style={styles.headerPattern}>
-          <View style={[styles.patternCircle, { top: -20, right: -20, width: 100, height: 100 }]} />
-          <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 120, height: 120 }]} />
-        </View>
-
-        <Animated.View
-          style={[
-            styles.headerContent,
-            {
-              opacity: headerAnim,
-              transform: [
-                {
-                  translateY: headerAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-20, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
+        <TouchableOpacity 
+          style={styles.backButton} 
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.7}
         >
-          <View style={styles.headerTopSection}>
-            <TouchableOpacity 
-              style={styles.backButton} 
-              onPress={() => navigation.goBack()}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="arrow-back" size={24} color="#fff" />
-            </TouchableOpacity>
-            <View style={styles.headerTextSection}>
-              <Text style={styles.headerTitle}>Recent Activities</Text>
-              <Text style={styles.headerSubtitle}>{activities.length} activities</Text>
-            </View>
-            <TouchableOpacity 
-              style={styles.refreshButton} 
-              onPress={onRefresh}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="refresh" size={22} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </LinearGradient>
+          <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+        </TouchableOpacity>
+        <View style={styles.headerTextSection}>
+          <Text style={styles.headerTitle}>Recent Activities</Text>
+          <Text style={styles.headerSubtitle}>{activities.length} activities</Text>
+        </View>
+        <TouchableOpacity 
+          style={styles.refreshButton} 
+          onPress={onRefresh}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="refresh" size={20} color={Colors.primary} />
+        </TouchableOpacity>
+      </Animated.View>
 
       {/* Content */}
       <ScrollView
@@ -227,13 +236,13 @@ const RecentActivities: React.FC = () => {
         scrollEventThrottle={scrollEventThrottle}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#667eea']} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />
         }
       >
         {/* Error Message */}
         {error && (
           <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle" size={20} color="#ef4444" />
+            <Ionicons name="alert-circle" size={20} color={Colors.error} />
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity onPress={onRefresh} style={styles.retryButton}>
               <Text style={styles.retryText}>Retry</Text>
@@ -260,50 +269,76 @@ const RecentActivities: React.FC = () => {
         >
           {activities.length === 0 ? (
             <View style={styles.emptyState}>
-              <Ionicons name="time-outline" size={48} color="#9ca3af" />
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="time-outline" size={48} color={Colors.textTertiary} />
+              </View>
               <Text style={styles.emptyStateTitle}>No Recent Activities</Text>
               <Text style={styles.emptyStateText}>Activities will appear here as they happen</Text>
             </View>
           ) : (
-            activities.map((activity, index) => (
-              <Animated.View
-                key={activity.id}
-                style={[
-                  styles.activityCard,
-                  {
-                    opacity: contentAnim,
-                    transform: [
-                      {
-                        translateX: contentAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [-20, 0],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <View style={[styles.activityIcon, { backgroundColor: getIconBg(activity.type) }]}>
-                  <Ionicons name={activity.icon as any} size={20} color={getStatusColor(activity.status)} />
-                </View>
-                <View style={styles.activityContent}>
-                  <View style={styles.activityHeader}>
-                    <Text style={styles.activityUser}>{activity.user}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(activity.status) }]}>
-                      <Text style={styles.statusText}>{activity.status}</Text>
+            activities.map((activity, index) => {
+              const statusStyle = getStatusBadgeStyle(activity.status);
+              const roleColor = getRoleBadgeColor(activity.role);
+              
+              return (
+                <Animated.View
+                  key={activity.id}
+                  style={[
+                    styles.activityCard,
+                    {
+                      opacity: contentAnim,
+                      transform: [
+                        {
+                          translateX: contentAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [-20, 0],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={[styles.activityIcon, { backgroundColor: getIconBg(activity.type) }]}>
+                    <Ionicons name={activity.icon as any} size={20} color={getIconColor(activity.type)} />
+                  </View>
+                  <View style={styles.activityContent}>
+                    <View style={styles.activityHeader}>
+                      <View style={styles.userInfoContainer}>
+                        <View style={styles.userNameRow}>
+                          <Text style={styles.activityUser} numberOfLines={1}>{activity.user}</Text>
+                          <View style={[statusStyle.container, styles.statusBadge]}>
+                            <Text style={statusStyle.text}>{activity.status}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.userMetaBadges}>
+                          <View style={styles.departmentBadge}>
+                            <Ionicons name="business-outline" size={12} color={Colors.primary} />
+                            <Text style={styles.departmentText}>{activity.dept}</Text>
+                          </View>
+                          <View style={[styles.roleBadge, { backgroundColor: roleColor.bg }]}>
+                            <Ionicons name="person-circle-outline" size={11} color={roleColor.text} />
+                            <Text style={[styles.roleText, { color: roleColor.text }]}>{activity.role}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                    <View style={styles.activityTypeSection}>
+                      <View style={[styles.activityTypeIcon, { backgroundColor: getIconBg(activity.type) }]}>
+                        <Ionicons name={activity.icon as any} size={14} color={getIconColor(activity.type)} />
+                      </View>
+                      <Text style={styles.activityType}>{getTypeLabel(activity.type)}</Text>
+                    </View>
+                    {activity.description && (
+                      <Text style={styles.activityDescription}>{activity.description}</Text>
+                    )}
+                    <View style={styles.activityMeta}>
+                      <Ionicons name="time-outline" size={12} color={Colors.textTertiary} />
+                      <Text style={styles.activityTime}>{activity.time}</Text>
                     </View>
                   </View>
-                  <Text style={styles.activityType}>{getTypeLabel(activity.type)}</Text>
-                  <View style={styles.activityMeta}>
-                    <Ionicons name="business-outline" size={12} color="#9ca3af" />
-                    <Text style={styles.activityDept}>{activity.dept}</Text>
-                    <Text style={styles.activityDot}>•</Text>
-                    <Ionicons name="time-outline" size={12} color="#9ca3af" />
-                    <Text style={styles.activityTime}>{activity.time}</Text>
-                  </View>
-                </View>
-              </Animated.View>
-            ))
+                </Animated.View>
+              );
+            })
           )}
         </Animated.View>
       </ScrollView>
@@ -314,152 +349,117 @@ const RecentActivities: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: Colors.background,
   },
-  headerGradient: {
-    paddingTop: 8,
-    paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    position: 'relative',
-    overflow: 'hidden',
+  // Header - White design
+  header: {
+    ...HeaderStyles.containerWithSafeArea,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 10 : 16,
   },
+  backButton: {
+    ...HeaderStyles.backButton,
+  },
+  headerTextSection: {
+    flex: 1,
+    marginLeft: Spacing.md,
+  },
+  headerTitle: {
+    ...Typography.screenTitle,
+  },
+  headerSubtitle: {
+    ...Typography.secondary,
+    marginTop: 2,
+  },
+  refreshButton: {
+    ...HeaderStyles.iconButton,
+  },
+  // Loading
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 80,
   },
   loadingText: {
-    color: '#fff',
-    marginTop: 12,
+    color: Colors.primary,
+    marginTop: Spacing.lg,
     fontSize: 16,
     fontWeight: '600',
   },
-  headerPattern: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  patternCircle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  headerContent: {
-    paddingHorizontal: 16,
-    position: 'relative',
-    zIndex: 1,
-  },
-  headerTopSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  headerTextSection: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: 0.3,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
-  },
-  refreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  // Content
   scrollView: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: Colors.background,
   },
   scrollContent: {
-    padding: 16,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xl,
   },
+  // Error
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fef2f2',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 16,
-    gap: 8,
+    backgroundColor: Colors.errorLighter,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.error,
+    padding: 14,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.lg,
+    gap: Spacing.md,
   },
   errorText: {
     flex: 1,
-    color: '#ef4444',
+    color: Colors.errorDark,
     fontSize: 13,
+    fontWeight: '500',
   },
   retryButton: {
-    backgroundColor: '#ef4444',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
+    backgroundColor: Colors.error,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.sm,
   },
   retryText: {
     color: '#fff',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
+  // Activities
   activitiesContainer: {
-    gap: 12,
+    gap: Spacing.md,
+    paddingBottom: Spacing.xl,
   },
+  // Empty State
   emptyState: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+    ...CommonStyles.emptyState.container,
+    marginTop: 40,
+  },
+  emptyIconContainer: {
+    ...CommonStyles.emptyState.iconContainer,
   },
   emptyStateTitle: {
-    marginTop: 16,
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#374151',
+    ...CommonStyles.emptyState.title,
   },
   emptyStateText: {
-    marginTop: 8,
-    fontSize: 14,
-    color: '#9ca3af',
-    textAlign: 'center',
+    ...CommonStyles.emptyState.subtitle,
   },
+  // Activity Card
   activityCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 14,
+    ...CardStyles.containerAccent,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    minHeight: 100,
   },
   activityIcon: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: Spacing.md,
+    marginTop: 2,
   },
   activityContent: {
     flex: 1,
@@ -467,47 +467,103 @@ const styles = StyleSheet.create({
   activityHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  userInfoContainer: {
+    flex: 1,
+    gap: Spacing.sm,
+  },
+  userNameRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    justifyContent: 'space-between',
+    gap: 10,
   },
   activityUser: {
     fontSize: 15,
-    fontWeight: '600',
-    color: '#1f2937',
+    fontWeight: '700',
+    color: Colors.text,
+    flex: 1,
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    // Additional styles if needed
   },
-  statusText: {
+  userMetaBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    flexWrap: 'wrap',
+  },
+  departmentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.sm,
+    gap: 4,
+  },
+  departmentText: {
     fontSize: 10,
-    color: '#fff',
-    fontWeight: '700',
+    fontWeight: '600',
+    color: Colors.primaryDark,
     textTransform: 'capitalize',
   },
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.sm,
+    gap: 3,
+  },
+  roleText: {
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  activityTypeSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: 10,
+    backgroundColor: Colors.backgroundAlt,
+    borderRadius: BorderRadius.sm,
+  },
+  activityTypeIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: BorderRadius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   activityType: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginBottom: 6,
+    fontSize: 12,
+    color: Colors.text,
+    fontWeight: '600',
+    flex: 1,
+  },
+  activityDescription: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 6,
+    fontWeight: '500',
+    lineHeight: 18,
   },
   activityMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-  },
-  activityDept: {
-    fontSize: 12,
-    color: '#9ca3af',
-  },
-  activityDot: {
-    fontSize: 12,
-    color: '#9ca3af',
-    marginHorizontal: 4,
+    marginTop: 6,
   },
   activityTime: {
-    fontSize: 12,
-    color: '#9ca3af',
+    fontSize: 11,
+    color: Colors.textTertiary,
+    fontWeight: '500',
   },
 });
 

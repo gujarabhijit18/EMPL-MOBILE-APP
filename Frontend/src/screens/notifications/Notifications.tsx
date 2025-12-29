@@ -13,6 +13,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { Card } from "react-native-paper";
+import { lightColors as colors } from "../../constants/theme";
 
 interface Notification {
   id: string;
@@ -25,12 +26,23 @@ interface Notification {
 }
 
 const Notifications = () => {
+  const dynamicStyles = {
+    container: { backgroundColor: colors.info },
+    headerGradient: {
+      colors: [colors.info, colors.infoDark],
+    },
+    contentContainer: { backgroundColor: colors.background },
+    scrollView: { backgroundColor: colors.background },
+    card: { backgroundColor: colors.surface, borderColor: colors.cardBorder },
+    text: { color: colors.textPrimary },
+    textSecondary: { color: colors.textSecondary },
+  };
   const navigation = useNavigation();
-  
+
   // Animation values for header elements
   const headerOpacity = useRef(new Animated.Value(0)).current;
   const headerTranslateY = useRef(new Animated.Value(-20)).current;
-  
+
   // Animate header elements on component mount
   React.useEffect(() => {
     Animated.parallel([
@@ -141,8 +153,8 @@ const Notifications = () => {
     );
   };
 
-  const filteredNotifications = filter === 'all' 
-    ? notifications 
+  const filteredNotifications = filter === 'all'
+    ? notifications
     : notifications.filter(n => !n.read);
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -161,13 +173,13 @@ const Notifications = () => {
           styles.notificationIcon,
           { backgroundColor: getNotificationColor(item.type) }
         ]}>
-          <Ionicons 
-            name={getNotificationIcon(item.type) as any} 
-            size={20} 
-            color="#fff" 
+          <Ionicons
+            name={getNotificationIcon(item.type) as any}
+            size={20}
+            color="#fff"
           />
         </View>
-        
+
         <View style={styles.notificationText}>
           <View style={styles.notificationHeader}>
             <Text style={[
@@ -185,7 +197,7 @@ const Notifications = () => {
           <Text style={styles.notificationMessage}>{item.message}</Text>
           <Text style={styles.notificationTime}>{item.timestamp}</Text>
         </View>
-        
+
         {!item.read && <View style={styles.unreadDot} />}
       </View>
     </TouchableOpacity>
@@ -194,18 +206,18 @@ const Notifications = () => {
   return (
     <SafeAreaView style={styles.safeAreaContainer}>
       <StatusBar style="light" />
-      
+
       {/* Enhanced Header */}
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
-          <TouchableOpacity 
-            style={styles.backButton} 
+          <TouchableOpacity
+            style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          
-          <Animated.View 
+
+          <Animated.View
             style={[
               styles.headerTextContainer,
               { opacity: headerOpacity, transform: [{ translateY: headerTranslateY }] }
@@ -216,8 +228,8 @@ const Notifications = () => {
               {unreadCount} unread notifications
             </Text>
           </Animated.View>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.headerIconButton}
             onPress={markAllAsRead}
           >
@@ -243,7 +255,7 @@ const Notifications = () => {
               All ({notifications.length})
             </Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={[
               styles.filterTab,
@@ -272,7 +284,7 @@ const Notifications = () => {
               <Ionicons name="notifications-off" size={64} color="#cbd5e1" />
               <Text style={styles.emptyTitle}>No notifications</Text>
               <Text style={styles.emptySubtitle}>
-                {filter === 'unread' 
+                {filter === 'unread'
                   ? "All caught up! No unread notifications."
                   : "You don't have any notifications yet."
                 }
@@ -337,7 +349,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     flex: 1,
-    backgroundColor: "#ffffff",
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
     marginTop: -20,
@@ -386,7 +398,7 @@ const styles = StyleSheet.create({
   },
   unreadNotification: {
     borderLeftWidth: 4,
-    borderLeftColor: '#3b82f6',
+    borderLeftColor: colors.info,
     backgroundColor: '#fafbff',
   },
   notificationContent: {
@@ -420,10 +432,10 @@ const styles = StyleSheet.create({
   },
   unreadTitle: {
     fontWeight: '700',
-    color: '#111827',
+    color: colors.textPrimary,
   },
   priorityBadge: {
-    backgroundColor: '#ef4444',
+    backgroundColor: colors.error,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,
@@ -436,13 +448,13 @@ const styles = StyleSheet.create({
   },
   notificationMessage: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.textSecondary,
     lineHeight: 20,
     marginBottom: 8,
   },
   notificationTime: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: colors.textTertiary,
   },
   unreadDot: {
     position: 'absolute',
@@ -451,7 +463,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#3b82f6',
+    backgroundColor: colors.info,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -467,7 +479,7 @@ const styles = StyleSheet.create({
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.textSecondary,
     textAlign: 'center',
     paddingHorizontal: 40,
   },
