@@ -28,6 +28,8 @@ interface EditLeaveModalProps {
     start_date: string;
     end_date: string;
     reason: string;
+    days: number;
+    comments: string;
   }) => Promise<void>;
   loading: boolean;
   getTypeColor: (type: string) => string;
@@ -95,12 +97,23 @@ export const EditLeaveModal: React.FC<EditLeaveModalProps> = ({
       return;
     }
 
+    // Validate date range
+    if (form.startDate > form.endDate) {
+      Alert.alert("Invalid Date Range", "Start date must be before or equal to end date.");
+      return;
+    }
+
+    // Calculate days
+    const days = Math.ceil((form.endDate.getTime() - form.startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
     try {
       await onUpdate({
         leave_type: mapLeaveTypeToAPI(form.type), // Convert display type to API value
         start_date: formatIST(form.startDate, "yyyy-MM-dd"),
         end_date: formatIST(form.endDate, "yyyy-MM-dd"),
         reason: form.reason,
+        days,
+        comments: "",
       });
       onClose();
     } catch (err: any) {

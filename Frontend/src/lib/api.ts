@@ -104,13 +104,18 @@ export interface DepartmentManager {
   role: string;
 }
 
+// WeekOff Rule interfaces - MUST MATCH BACKEND DeptWeekOffRuleCreate/DeptWeekOffRuleOut
+export interface WeekOffRuleCreateRequest {
+  department: string;     // required
+  days: string[];         // required, array of weekday names e.g. ["Saturday", "Sunday"]
+}
+
 export interface WeekOffRule {
   id: number;
   department: string;
-  days: string[]; // Array of day names like ["Saturday", "Sunday"]
+  days: string[];         // Array of day names like ["Saturday", "Sunday"]
   is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
+  created_at: string;     // ISO datetime
 }
 
 export interface LeaveRequestData {
@@ -131,7 +136,7 @@ export interface LeaveRequestResponse {
   start_date: string;
   end_date: string;
   reason: string;
-  status: string;
+  status: "Pending" | "Approved" | "Rejected" | "Cancelled";
   created_at: string;
   updated_at?: string;
   user_id?: number;
@@ -207,35 +212,26 @@ export interface NotificationsResponse {
   unread_count: number;
 }
 
-// Holiday interfaces
-export interface HolidayData {
+// Holiday interfaces - MUST MATCH BACKEND CompanyHolidayCreate/CompanyHolidayOut
+export interface HolidayCreateRequest {
+  date: string;           // YYYY-MM-DD format (required)
+  name: string;           // required, minLength: 1
+  description?: string;   // optional
+  is_recurring?: boolean; // optional, defaults to false
+}
+
+export interface Holiday {
+  id: number;
+  date: string;           // YYYY-MM-DD format
   name: string;
-  date: string;  // YYYY-MM-DD format
-  description?: string;
+  description: string | null;
+  is_recurring: boolean;
+  created_at: string;     // ISO datetime
 }
 
-export interface HolidayResponse {
-  holiday_id: number;
-  name: string;
-  date: string;
-  description?: string;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
-  created_by?: number;
-  // Add fields from Holiday interface if missing
-  year?: number;
-  is_optional?: boolean;
-}
-
-export type Holiday = HolidayResponse;
-
-export interface HolidayUpdate {
-  name?: string;
-  date?: string;
-  description?: string;
-  is_active?: boolean;
-}
+// Legacy alias for backward compatibility
+export type HolidayResponse = Holiday;
+export type HolidayData = HolidayCreateRequest;
 
 export interface LeaveAllocation {
   annual: number;
@@ -1191,7 +1187,7 @@ class ApiService {
   }
 
   // 4. GET - Get My Leave Summary (calculated from /leave/ list)
-  // 4. GET - Get My Leave Summary (Calculated Client-Side as endpoint is missing)
+  // API: Calculated client-side from leave list as dedicated endpoint may not exist
   async getMyLeaveSummary(): Promise<LeaveSummary> {
     console.log("📥 Fetching leave summary (calculating locally)");
     try {
@@ -1210,12 +1206,26 @@ class ApiService {
         leave_by_type: {}
       };
 
+      // Calculate days and leave_by_type breakdown
       leaves.forEach((l: any) => {
-        const days = l.days || 1; // Simplify duration calc
-        if (l.status === 'Approved') summary.total_days_approved += days;
-        if (l.status === 'Pending') summary.total_days_pending += days;
-        // Add type counting logic if needed
+        const days = l.days || 1;
+        const leaveType = l.leave_type || "Annual Leave";
+        
+        // Initialize leave type if not exists
+        if (!summary.leave_by_type[leaveType]) {
+          summary.leave_by_type[leaveType] = { taken: 0, remaining: 0 };
+        }
+        
+        if (l.status === 'Approved') {
+          summary.total_days_approved += days;
+          summary.total_days_taken += days;
+          summary.leave_by_type[leaveType].taken += days;
+        }
+        if (l.status === 'Pending') {
+          summary.total_days_pending += days;
+        }
       });
+      
       return summary;
 
     } catch (error: any) {
@@ -1245,14 +1255,33 @@ class ApiService {
   }
 
   // 6. PUT - Update Leave Request
-  // 6. PUT - Update Leave Request
+  // API: PUT /leave/{leave_id} - Updates leave with proper fields per OpenAPI spec
   async updateLeaveRequest(leaveId: number, leaveData: Partial<LeaveRequestData>): Promise<LeaveRequestResponse> {
     console.log("📤 Updating leave request:", leaveId, leaveData);
     // openapi: PUT /leave/{leave_id}
+    // Required fields: leave_type, start_date, end_date, days, reason, comments
     const endpoint = `/leave/${leaveId}`;
+    
+    // Calculate days if not provided
+    let days = leaveData.days;
+    if (!days && leaveData.start_date && leaveData.end_date) {
+      const start = new Date(leaveData.start_date);
+      const end = new Date(leaveData.end_date);
+      days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    }
+    
+    const updatePayload = {
+      leave_type: leaveData.leave_type,
+      start_date: leaveData.start_date,
+      end_date: leaveData.end_date,
+      days: days || 1,
+      reason: leaveData.reason || "",
+      comments: leaveData.comments || "",
+    };
+    
     return this.request(endpoint, {
       method: "PUT",
-      body: JSON.stringify(leaveData),
+      body: JSON.stringify(updatePayload),
     });
   }
 
@@ -1321,27 +1350,29 @@ class ApiService {
     }
   }
 
-  // 9. POST - Approve Leave Request (New endpoint with comments)
-  // 9. POST - Approve Leave Request
+  // 9. PUT - Approve Leave Request
+  // API: PUT /leave/{leave_id}/approve - No request body required per OpenAPI spec
   async approveLeaveRequest(leaveId: number, comments?: string): Promise<LeaveRequestResponse> {
     console.log("✅ Approving leave request:", leaveId);
-    // openapi: PUT /leave/{leave_id}/approve (Note: PUT, not POST)
+    // openapi: PUT /leave/{leave_id}/approve - accepts optional comments in body
     const endpoint = `/leave/${leaveId}/approve`;
+    // Send comments only if provided, otherwise send empty body
+    const body = comments ? { comments } : {};
     return this.request(endpoint, {
       method: "PUT",
-      body: JSON.stringify({ approved: true, comments: comments || "Approved" }),
+      body: JSON.stringify(body),
     });
   }
 
-  // 10. POST - Reject Leave Request
-  // 10. POST - Reject Leave Request
+  // 10. PUT - Reject Leave Request
+  // API: PUT /leave/{leave_id}/reject - Uses dedicated reject endpoint
   async rejectLeaveRequest(leaveId: number, rejectionReason: string): Promise<LeaveRequestResponse> {
     console.log("❌ Rejecting leave request:", leaveId);
-    // Using update endpoint as before: PUT /leave/{id}
-    const endpoint = `/leave/${leaveId}`;
+    // openapi: PUT /leave/{leave_id}/reject with rejection_reason in body
+    const endpoint = `/leave/${leaveId}/reject`;
     return this.request(endpoint, {
       method: "PUT",
-      body: JSON.stringify({ status: "Rejected", comments: rejectionReason }),
+      body: JSON.stringify({ rejection_reason: rejectionReason || "No reason provided" }),
     });
   }
 
@@ -1420,58 +1451,93 @@ class ApiService {
   // 🔹 Holiday APIs
   // ======================
 
-  // Get all holidays
-  // Get all holidays
-  async getHolidays(activeOnly: boolean = true): Promise<Holiday[]> {
-    // openapi: GET /calendar/holidays
-    const endpoint = `/calendar/holidays`;
+  /**
+   * Get all holidays with optional date range filtering
+   * @param startDate - Optional start date filter (YYYY-MM-DD)
+   * @param endDate - Optional end date filter (YYYY-MM-DD)
+   * @returns Array of Holiday objects, empty array on failure
+   */
+  async getHolidays(startDate?: string, endDate?: string): Promise<Holiday[]> {
+    // Build query params - only attach if provided
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    
+    const queryString = params.toString();
+    const endpoint = `/calendar/holidays${queryString ? `?${queryString}` : ''}`;
 
     console.log("📥 Fetching holidays:", endpoint);
     try {
       const response = await this.request(endpoint, { method: 'GET' }, 0, true);
-      return this.handleListResponse(response);
+      // Handle response - expect array, return empty array if not
+      return Array.isArray(response) ? response : [];
     } catch (error) {
-      console.log("⚠️ Holiday fetch failed, using empty list");
+      console.log("⚠️ Holiday fetch failed, returning empty list");
       return [];
     }
   }
 
-  // Get holiday by ID
-  async getHolidayById(holidayId: number): Promise<HolidayResponse> {
-    console.log("📥 Fetching holiday:", holidayId);
-    return this.request(`/calendar/holidays/${holidayId}`);
-  }
-
-  // Create a new holiday
-  async createHoliday(holidayData: HolidayData): Promise<HolidayResponse> {
+  /**
+   * Create a new holiday
+   * @param holidayData - Holiday creation data (date, name required; description, is_recurring optional)
+   * @returns Created Holiday object
+   */
+  async createHoliday(holidayData: HolidayCreateRequest): Promise<Holiday> {
     console.log("📤 Creating holiday:", holidayData);
+    
+    // Validate required fields before sending
+    if (!holidayData.date || !holidayData.name) {
+      throw new Error("Holiday date and name are required");
+    }
+    
+    // Build request body - only include defined values, no null/undefined
+    const requestBody: Record<string, any> = {
+      date: holidayData.date,
+      name: holidayData.name,
+    };
+    
+    // Add optional fields only if they have values
+    if (holidayData.description !== undefined && holidayData.description !== null) {
+      requestBody.description = holidayData.description;
+    }
+    if (holidayData.is_recurring !== undefined && holidayData.is_recurring !== null) {
+      requestBody.is_recurring = Boolean(holidayData.is_recurring);
+    }
+    
     return this.request("/calendar/holidays", {
       method: "POST",
-      body: JSON.stringify(holidayData),
+      body: JSON.stringify(requestBody),
     });
   }
 
-  // Update a holiday
-  async updateHoliday(holidayId: number, data: Partial<Holiday>): Promise<Holiday> {
-    console.log("📤 Updating holiday:", holidayId, data);
-    // openapi: PUT /calendar/holidays/{holiday_id} DOES NOT EXIST.
-    // There is DELETE /calendar/holidays/{id} and POST /calendar/holidays.
-    // So update might not be supported or is via delete+create.
-    // For now, we'll try PUT /calendar/holidays/{id} but expect it to fail (405).
-    // Or maybe we should disable editing in frontend?
-    return this.request(`/calendar/holidays/${holidayId}`, { // Warning: Likely will fail
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-  }
-
-  // Delete a holiday
-  async deleteHoliday(holidayId: number): Promise<{ message: string }> {
+  /**
+   * Delete a holiday by ID
+   * @param holidayId - The holiday ID (must be a number)
+   * @returns Success message response
+   */
+  async deleteHoliday(holidayId: number): Promise<{ message?: string }> {
+    // Validate holidayId is a number
+    if (typeof holidayId !== 'number' || isNaN(holidayId)) {
+      throw new Error("Holiday ID must be a valid number");
+    }
+    
     console.log("🗑️ Deleting holiday:", holidayId);
-    // openapi: DELETE /calendar/holidays/{holiday_id}
     return this.request(`/calendar/holidays/${holidayId}`, {
       method: "DELETE",
     });
+  }
+
+  // Legacy method - kept for backward compatibility
+  async getHolidayById(holidayId: number): Promise<Holiday> {
+    console.log("📥 Fetching holiday by ID:", holidayId);
+    // Note: This endpoint may not exist in the backend per OpenAPI spec
+    // Fallback: fetch all and filter
+    const holidays = await this.getHolidays();
+    const holiday = holidays.find(h => h.id === holidayId);
+    if (!holiday) {
+      throw new Error(`Holiday with ID ${holidayId} not found`);
+    }
+    return holiday;
   }
 
   // ======================
@@ -3841,21 +3907,80 @@ class ApiService {
   // 🔹 Leave Allocation APIs (Global Configuration)
   // ======================
 
-  async getGlobalLeaveAllocation(): Promise<Record<string, string>> {
+  /**
+   * Get current leave allocation configuration
+   * @returns Current leave allocation values
+   */
+  async getGlobalLeaveAllocation(): Promise<any> {
     console.log("📥 Fetching global leave allocation");
-    // openapi: GET /leave/config/allocation/current
+    // GET /leave/config/allocation/current - returns current allocation values
     return this.request("/leave/config/allocation/current");
   }
 
+  /**
+   * Get leave allocation config with ID (for updates)
+   * @returns Leave allocation config including ID
+   */
+  async getLeaveAllocationConfig(): Promise<any> {
+    console.log("📥 Fetching leave allocation config");
+    // GET /leave/config/allocation - returns config with ID
+    return this.request("/leave/config/allocation");
+  }
+
+  /**
+   * Update global leave allocation
+   * Uses PUT /calendar/allocation endpoint which doesn't require config_id
+   * @param allocationData - Leave allocation data to update
+   */
   async updateGlobalLeaveAllocation(allocationData: {
-    total_annual_leave?: number;
-    sick_leave_allocation?: number;
-    casual_leave_allocation?: number;
-    other_leave_allocation?: number;
+    total_annual_leave: number;
+    sick_leave_allocation: number;
+    casual_leave_allocation: number;
+    other_leave_allocation: number;
   }): Promise<any> {
     console.log("📤 Updating global leave allocation:", allocationData);
-    return this.request("/leave/config/allocation/current", {
+    
+    // Use PUT /calendar/allocation which doesn't require config_id
+    return this.request("/calendar/allocation", {
       method: "PUT",
+      body: JSON.stringify(allocationData),
+    });
+  }
+
+  /**
+   * Update leave allocation by config ID
+   * @param configId - The config ID to update
+   * @param allocationData - Leave allocation data to update
+   */
+  async updateLeaveAllocationById(
+    configId: number,
+    allocationData: {
+      total_annual_leave?: number;
+      sick_leave_allocation?: number;
+      casual_leave_allocation?: number;
+      other_leave_allocation?: number;
+    }
+  ): Promise<any> {
+    console.log("📤 Updating leave allocation config:", configId, allocationData);
+    return this.request(`/leave/config/allocation/${configId}`, {
+      method: "PUT",
+      body: JSON.stringify(allocationData),
+    });
+  }
+
+  /**
+   * Create new leave allocation configuration
+   * @param allocationData - Leave allocation data to create
+   */
+  async createLeaveAllocationConfig(allocationData: {
+    total_annual_leave: number;
+    sick_leave_allocation: number;
+    casual_leave_allocation: number;
+    other_leave_allocation: number;
+  }): Promise<any> {
+    console.log("📤 Creating leave allocation config:", allocationData);
+    return this.request("/leave/config/allocation", {
+      method: "POST",
       body: JSON.stringify(allocationData),
     });
   }
@@ -3885,37 +4010,114 @@ class ApiService {
   // 🔹 Department Week-Off APIs
   // ======================
 
-  async getDepartmentWeekOff(departmentId: number): Promise<WeekOffRule[]> {
-    console.log("📥 Fetching department week-off:", departmentId);
-    try {
-      // Use the correct path consistent with updates
-      const data = await this.request(`/leave/config/week-off/${departmentId}`, { method: 'GET' }, 0, true);
+  /**
+   * Get all department week-off rules with optional department filtering
+   * @param department - Optional department name to filter by
+   * @returns Array of WeekOffRule objects, empty array on failure
+   */
+  async getWeekOffRules(department?: string): Promise<WeekOffRule[]> {
+    // Build query params - only attach if provided
+    const params = new URLSearchParams();
+    if (department) params.append('department', department);
+    
+    const queryString = params.toString();
+    const endpoint = `/calendar/weekoffs${queryString ? `?${queryString}` : ''}`;
 
-      // Handle the case where the API might return a single rule object or a list
-      if (data && !Array.isArray(data) && typeof data === 'object') {
-        return [data];
-      }
-      return this.handleListResponse(data);
-    } catch (e) {
-      console.warn(`⚠️ Failed to fetch week-off for dept ${departmentId}:`, e);
+    console.log("📥 Fetching week-off rules:", endpoint);
+    try {
+      const response = await this.request(endpoint, { method: 'GET' }, 0, true);
+      // Handle response - expect array, return empty array if not
+      return Array.isArray(response) ? response : [];
+    } catch (error) {
+      console.log("⚠️ Week-off rules fetch failed, returning empty list");
       return [];
     }
+  }
+
+  /**
+   * Set/Create a department week-off rule
+   * @param weekOffData - Week-off rule data (department and days required)
+   * @returns Created WeekOffRule object
+   */
+  async setWeekOffRule(weekOffData: WeekOffRuleCreateRequest): Promise<WeekOffRule> {
+    console.log("📤 Setting week-off rule:", weekOffData);
+    
+    // Validate required fields
+    if (!weekOffData.department || typeof weekOffData.department !== 'string') {
+      throw new Error("Department name is required");
+    }
+    if (!Array.isArray(weekOffData.days) || weekOffData.days.length === 0) {
+      throw new Error("Days must be a non-empty array of weekday names");
+    }
+    
+    // Validate weekday names
+    const validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const invalidDays = weekOffData.days.filter(day => !validDays.includes(day));
+    if (invalidDays.length > 0) {
+      throw new Error(`Invalid weekday names: ${invalidDays.join(', ')}. Valid values: ${validDays.join(', ')}`);
+    }
+    
+    // Remove duplicate days
+    const uniqueDays = [...new Set(weekOffData.days)];
+    
+    const requestBody: WeekOffRuleCreateRequest = {
+      department: weekOffData.department,
+      days: uniqueDays,
+    };
+    
+    return this.request("/calendar/weekoffs", {
+      method: "POST",
+      body: JSON.stringify(requestBody),
+    });
+  }
+
+  /**
+   * Delete a week-off rule by ID
+   * @param ruleId - The week-off rule ID (must be a number)
+   * @returns Success message response
+   */
+  async deleteWeekOffRule(ruleId: number): Promise<{ message?: string }> {
+    // Validate ruleId is a number
+    if (typeof ruleId !== 'number' || isNaN(ruleId)) {
+      throw new Error("Rule ID must be a valid number");
+    }
+    
+    console.log("🗑️ Deleting week-off rule:", ruleId);
+    return this.request(`/calendar/weekoffs/${ruleId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Legacy methods - kept for backward compatibility
+  async getDepartmentWeekOff(departmentId: number): Promise<WeekOffRule[]> {
+    console.log("📥 Fetching department week-off (legacy):", departmentId);
+    // This legacy method used departmentId, but new API uses department name
+    // Return all rules and let caller filter if needed
+    return this.getWeekOffRules();
   }
 
   async updateDepartmentWeekOff(
     departmentId: number,
     weekOffData: { week_off_days: string[] }
   ): Promise<any> {
-    console.log("📤 Updating department week-off:", departmentId, weekOffData);
-    return this.request(`/leave/config/week-off/${departmentId}`, {
-      method: "PUT",
-      body: JSON.stringify(weekOffData),
-    });
+    console.log("📤 Updating department week-off (legacy):", departmentId, weekOffData);
+    // Legacy endpoint - may not exist in new API
+    // Try the old endpoint for backward compatibility
+    try {
+      return await this.request(`/leave/config/week-off/${departmentId}`, {
+        method: "PUT",
+        body: JSON.stringify(weekOffData),
+      });
+    } catch (error) {
+      console.warn("⚠️ Legacy week-off update failed, endpoint may not exist");
+      throw error;
+    }
   }
 
-  async getAllDepartmentWeekOffs(): Promise<any[]> {
+  async getAllDepartmentWeekOffs(): Promise<WeekOffRule[]> {
     console.log("📥 Fetching all department week-offs");
-    return this.request("/leave/week-off/all");
+    // Use the new API endpoint
+    return this.getWeekOffRules();
   }
 
   async getGlobalLeaveConfig(): Promise<any> {

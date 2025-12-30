@@ -5,14 +5,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
-  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LeaveRequestResponse } from '../lib/api';
 import { formatDateIST, getDayMonthIST } from '../utils/dateTime';
 import { normalizeLeaveType } from '../utils/leaveTypeMapper';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface LeaveHistoryCardProps {
   leave: LeaveRequestResponse;
@@ -37,18 +34,20 @@ const getStatusIcon = (status: string): any => {
   }
 };
 
-const getStatusIconColor = (status: string): string => {
-  switch (status?.toLowerCase()) {
-    case 'approved':
-      return '#10b981';
-    case 'rejected':
-      return '#ef4444';
-    case 'pending':
-      return '#f59e0b';
-    case 'cancelled':
-      return '#6b7280';
-    default:
-      return '#9ca3af';
+// Format date for display
+const formatApprovalDate = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-IN', { 
+      day: '2-digit', 
+      month: 'short', 
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch {
+    return dateStr;
   }
 };
 
@@ -61,7 +60,14 @@ export const LeaveHistoryCard: React.FC<LeaveHistoryCardProps> = ({
 }) => {
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
   const isPending = leave.status === 'Pending';
+  const isApproved = leave.status === 'Approved';
+  const isRejected = leave.status === 'Rejected';
   const displayLeaveType = normalizeLeaveType(leave.leave_type || '');
+
+  // Get approver info
+  const approverName = leave.approver?.name || null;
+  const approvalDate = leave.approved_at;
+  const rejectionReason = leave.rejection_reason;
 
   const handlePressIn = () => {
     Animated.spring(scaleAnim, {
@@ -177,6 +183,52 @@ export const LeaveHistoryCard: React.FC<LeaveHistoryCardProps> = ({
               <Text style={styles.reasonText} numberOfLines={2}>
                 {leave.reason}
               </Text>
+            </View>
+          )}
+
+          {/* Created Date */}
+          {leave.created_at && (
+            <View style={styles.createdDateSection}>
+              <Ionicons name="time-outline" size={12} color="#9ca3af" />
+              <Text style={styles.createdDateText}>
+                Requested on {formatApprovalDate(leave.created_at)}
+              </Text>
+            </View>
+          )}
+
+          {/* Approver/Rejector Info - Show for Approved or Rejected */}
+          {(isApproved || isRejected) && (approverName || rejectionReason) && (
+            <View style={[
+              styles.approverSection,
+              isApproved ? styles.approverSectionApproved : styles.approverSectionRejected
+            ]}>
+              <View style={styles.approverHeader}>
+                <Ionicons 
+                  name={isApproved ? "person-circle" : "person-circle-outline"} 
+                  size={18} 
+                  color={isApproved ? "#059669" : "#dc2626"} 
+                />
+                <Text style={[
+                  styles.approverLabel,
+                  { color: isApproved ? "#059669" : "#dc2626" }
+                ]}>
+                  {isApproved ? "Approved by" : "Rejected by"}
+                </Text>
+              </View>
+              {approverName && (
+                <Text style={styles.approverName}>{approverName}</Text>
+              )}
+              {approvalDate && (
+                <Text style={styles.approvalDate}>
+                  {formatApprovalDate(approvalDate)}
+                </Text>
+              )}
+              {isRejected && rejectionReason && (
+                <View style={styles.rejectionReasonContainer}>
+                  <Text style={styles.rejectionReasonLabel}>Reason:</Text>
+                  <Text style={styles.rejectionReasonText}>{rejectionReason}</Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -355,6 +407,74 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#374151',
     lineHeight: 18,
+  },
+
+  // Created Date Section
+  createdDateSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 12,
+  },
+  createdDateText: {
+    fontSize: 11,
+    color: '#9ca3af',
+  },
+
+  // Approver Section
+  approverSection: {
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  approverSectionApproved: {
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+  },
+  approverSectionRejected: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  approverHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  approverLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  approverName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginLeft: 24,
+  },
+  approvalDate: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginLeft: 24,
+    marginTop: 2,
+  },
+  rejectionReasonContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#fecaca',
+  },
+  rejectionReasonLabel: {
+    fontSize: 11,
+    color: '#dc2626',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  rejectionReasonText: {
+    fontSize: 12,
+    color: '#7f1d1d',
+    lineHeight: 16,
   },
 
   // Action Row

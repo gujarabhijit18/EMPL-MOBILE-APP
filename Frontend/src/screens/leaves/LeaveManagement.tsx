@@ -250,18 +250,16 @@ export default function LeaveManagement() {
 
     setLoading(true);
     try {
-      // Find the ID for the selected department
-      const selectedDept = departments.find(d => d.name === selectedDeptForWeekOff);
-      const departmentId = selectedDept ? selectedDept.id : (departments.length > 0 ? departments[0].id : 1);
-
+      // Use the new calendar/weekoffs endpoint with department name
       const weekOffData = {
-        week_off_days: selectedWeekOffs,
+        department: selectedDeptForWeekOff,
+        days: selectedWeekOffs,
       };
 
-      console.log("📤 Saving week-off configuration for department:", departmentId, selectedDeptForWeekOff, weekOffData);
+      console.log("📤 Saving week-off configuration for department:", selectedDeptForWeekOff, weekOffData);
 
-      // Save to backend using new week-off endpoint
-      await apiService.updateDepartmentWeekOff(departmentId, weekOffData);
+      // Save to backend using new week-off endpoint (POST /calendar/weekoffs)
+      await apiService.setWeekOffRule(weekOffData);
 
       // Refresh data
       await Promise.all([fetchMyLeaves(), fetchTeamLeaves(), fetchDepartmentWeekOff()]);
@@ -360,10 +358,10 @@ export default function LeaveManagement() {
 
       const formattedHolidays: Holiday[] = holidaysData
         .map((h: HolidayResponse) => ({
-          holiday_id: h.holiday_id,
+          holiday_id: h.id,
           date: new Date(h.date),
           name: h.name,
-          description: h.description,
+          description: h.description ?? undefined,
         }))
         .filter((h) => {
           // Keep only current and future holidays
@@ -376,15 +374,15 @@ export default function LeaveManagement() {
       const expiredHolidays = holidaysData.filter((h: HolidayResponse) => {
         const holidayDate = new Date(h.date);
         holidayDate.setHours(0, 0, 0, 0);
-        return holidayDate < today && h.holiday_id !== undefined && h.holiday_id !== null;
+        return holidayDate < today && h.id !== undefined && h.id !== null;
       });
 
       if (expiredHolidays.length > 0 && isAdmin) {
         console.log("🗑️ Auto-removing expired holidays:", expiredHolidays.length);
         for (const expiredHoliday of expiredHolidays) {
           try {
-            console.log("🗑️ Deleting holiday:", expiredHoliday.holiday_id, expiredHoliday.name);
-            await apiService.deleteHoliday(expiredHoliday.holiday_id);
+            console.log("🗑️ Deleting holiday:", expiredHoliday.id, expiredHoliday.name);
+            await apiService.deleteHoliday(expiredHoliday.id);
             console.log("✅ Expired holiday deleted:", expiredHoliday.name);
           } catch (err: any) {
             console.log("⚠️ Could not delete expired holiday:", err.message);
@@ -456,30 +454,21 @@ export default function LeaveManagement() {
     try {
       console.log(`📥 Fetching week-off settings for department: ${selectedDeptForWeekOff}`);
 
-      // Find the ID for the currently selected department name
-      const selectedDept = departments.find(d => d.name === selectedDeptForWeekOff);
-      const departmentId = selectedDept ? selectedDept.id : 1;
-
-      const weekOffRules = await apiService.getDepartmentWeekOff(departmentId);
+      // Use the new calendar/weekoffs endpoint with department filter
+      const weekOffRules = await apiService.getWeekOffRules(selectedDeptForWeekOff);
 
       // API returns an array of week-off rules
-      // Find the rule that matches the current selected department name if possible
+      // Find the rule that matches the current selected department name
       let weekOff = weekOffRules.find(rule => rule.department === selectedDeptForWeekOff);
 
-      // Fallback: if no exact match found, but we have rules, use the first one if it's the only one
+      // Fallback: if no exact match found, but we have rules, use the first one
       if (!weekOff && weekOffRules.length > 0) {
         weekOff = weekOffRules[0];
       }
 
-      if (weekOff) {
-        // Extract days - the API might return an array or a comma-separated string
-        const days = Array.isArray(weekOff.days)
-          ? weekOff.days
-          : (typeof (weekOff as any).week_off_days === 'object' && Array.isArray((weekOff as any).week_off_days)
-            ? (weekOff as any).week_off_days
-            : (typeof (weekOff.days as any) === 'string'
-              ? (weekOff.days as any).split(',').map((d: string) => d.trim())
-              : ["Saturday", "Sunday"]));
+      if (weekOff && weekOff.is_active) {
+        // Extract days - API returns array of day names
+        const days = Array.isArray(weekOff.days) ? weekOff.days : ["Saturday", "Sunday"];
 
         // Prevent redundant state updates
         setSelectedWeekOffs(prev => {
@@ -488,14 +477,14 @@ export default function LeaveManagement() {
         });
         console.log(`✅ Week-off settings loaded for ${selectedDeptForWeekOff}:`, weekOff.days);
       } else {
-        console.log(`⚠️ No week-off settings found for ${selectedDeptForWeekOff}, using defaults`);
+        console.log(`⚠️ No active week-off settings found for ${selectedDeptForWeekOff}, using defaults`);
         setSelectedWeekOffs(["Saturday", "Sunday"]);
       }
     } catch (err: any) {
       console.log("⚠️ Could not fetch week-off settings:", err.message);
       setSelectedWeekOffs(["Saturday", "Sunday"]);
     }
-  }, [isAdmin, selectedDeptForWeekOff, departments]);
+  }, [isAdmin, selectedDeptForWeekOff]);
 
   // Effect to automatically fetch week-off rules when department selection changes
   useEffect(() => {
@@ -579,6 +568,12 @@ export default function LeaveManagement() {
       return;
     }
 
+    // Validate date range
+    if (form.startDate > form.endDate) {
+      Alert.alert("Invalid Date Range", "Start date must be before or equal to end date.");
+      return;
+    }
+
     // Validate leave application against strict rules
     const validationResult = validateLeaveApplication({
       leaveType: form.type,
@@ -617,7 +612,8 @@ export default function LeaveManagement() {
       });
       Alert.alert("✅ Success", "Leave request submitted successfully.");
       setForm({ type: "Sick Leave", startDate: new Date(), endDate: new Date(), reason: "" });
-      await fetchMyLeaves();
+      // Refresh leave list and summary after successful submission
+      await Promise.all([fetchMyLeaves(), fetchLeaveSummary()]);
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to submit leave request.");
     } finally {
@@ -626,6 +622,13 @@ export default function LeaveManagement() {
   };
 
   const handleApprove = async (leaveId: number) => {
+    // Find the leave to check its status
+    const leaveToApprove = teamLeaves.find(l => l.leave_id === leaveId);
+    if (leaveToApprove && leaveToApprove.status !== "Pending") {
+      Alert.alert("Cannot Approve", "Only pending leave requests can be approved.");
+      return;
+    }
+
     Alert.alert("Approve Leave", "Are you sure you want to approve this request?", [
       { text: "Cancel", style: "cancel" },
       {
@@ -635,7 +638,8 @@ export default function LeaveManagement() {
           try {
             await apiService.approveLeaveRequest(leaveId, "Approved by " + currentUser.name);
             Alert.alert("✅ Success", "Leave request approved.");
-            await Promise.all([fetchTeamLeaves(), fetchLeaveSummary()]);
+            // Refresh team leaves and summary after approval
+            await Promise.all([fetchTeamLeaves(), fetchLeaveSummary(), fetchMyLeaves()]);
           } catch (err: any) {
             Alert.alert("Error", err.message || "Failed to approve.");
           } finally {
@@ -654,12 +658,24 @@ export default function LeaveManagement() {
 
   const submitRejection = async () => {
     if (rejectingLeaveId === null) return;
+    
+    // Find the leave to check its status
+    const leaveToReject = teamLeaves.find(l => l.leave_id === rejectingLeaveId);
+    if (leaveToReject && leaveToReject.status !== "Pending") {
+      Alert.alert("Cannot Reject", "Only pending leave requests can be rejected.");
+      setRejectModalVisible(false);
+      setRejectingLeaveId(null);
+      setRejectionReason("");
+      return;
+    }
+
     setLoading(true);
     setRejectModalVisible(false);
     try {
       await apiService.rejectLeaveRequest(rejectingLeaveId, rejectionReason.trim() || "No reason provided");
       Alert.alert("✅ Success", "Leave request rejected.");
-      await Promise.all([fetchTeamLeaves(), fetchLeaveSummary()]);
+      // Refresh team leaves and summary after rejection
+      await Promise.all([fetchTeamLeaves(), fetchLeaveSummary(), fetchMyLeaves()]);
       setRejectingLeaveId(null);
       setRejectionReason("");
     } catch (err: any) {
@@ -670,18 +686,28 @@ export default function LeaveManagement() {
   };
 
   const handleDeleteLeave = async (leaveId: number) => {
-    Alert.alert("Delete Request", "Are you sure you want to delete this request?", [
+    // Find the leave to check its status
+    const leaveToDelete = myLeaves.find(l => l.leave_id === leaveId);
+    if (leaveToDelete && leaveToDelete.status !== "Pending") {
+      Alert.alert("Cannot Delete", "Only pending leave requests can be deleted.");
+      return;
+    }
+
+    Alert.alert("Delete Request", "Are you sure you want to delete this leave request?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete", style: "destructive",
         onPress: async () => {
           setLoading(true);
           try {
-            await apiService.deleteLeaveRequest(leaveId);
-            Alert.alert("Success", "Leave request deleted.");
-            await fetchMyLeaves();
+            const response = await apiService.deleteLeaveRequest(leaveId);
+            Alert.alert("✅ Success", response?.message || "Leave request deleted successfully.");
+            // Remove from local state immediately for instant UI feedback
+            setMyLeaves(prev => prev.filter(l => l.leave_id !== leaveId));
+            // Refresh summary after deletion
+            await fetchLeaveSummary();
           } catch (err: any) {
-            Alert.alert("Error", err.message || "Failed to delete.");
+            Alert.alert("Error", err.message || "Failed to delete leave request.");
           } finally {
             setLoading(false);
           }
@@ -691,6 +717,11 @@ export default function LeaveManagement() {
   };
 
   const handleEditLeave = (leave: LeaveRequestResponse) => {
+    // Only allow editing if status is Pending
+    if (leave.status !== "Pending") {
+      Alert.alert("Cannot Edit", "Only pending leave requests can be edited.");
+      return;
+    }
     setEditingLeave(leave);
     setEditModalVisible(true);
   };
@@ -700,8 +731,16 @@ export default function LeaveManagement() {
     start_date: string;
     end_date: string;
     reason: string;
+    days: number;
+    comments: string;
   }) => {
     if (!editingLeave) return;
+
+    // Only allow update if status is Pending
+    if (editingLeave.status !== "Pending") {
+      Alert.alert("Cannot Update", "Only pending leave requests can be updated.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -709,7 +748,8 @@ export default function LeaveManagement() {
       Alert.alert("✅ Success", "Leave request updated successfully.");
       setEditingLeave(null);
       setEditModalVisible(false);
-      await fetchMyLeaves();
+      // Refresh both leave list and summary after update
+      await Promise.all([fetchMyLeaves(), fetchLeaveSummary()]);
     } catch (err: any) {
       throw err;
     } finally {
@@ -762,10 +802,10 @@ export default function LeaveManagement() {
       setHolidays(prevHolidays => [
         ...prevHolidays,
         {
-          holiday_id: response.holiday_id,
+          holiday_id: response.id,
           date: new Date(dateStr),
           name: response.name,
-          description: response.description,
+          description: response.description ?? undefined,
         }
       ]);
 
@@ -854,20 +894,33 @@ export default function LeaveManagement() {
     setLoading(true);
     try {
       const dateStr = formatIST(editingHoliday.date, "yyyy-MM-dd");
-      const updateData = {
+      
+      // Backend doesn't support PUT for holidays, so we delete and recreate
+      // First delete the old holiday
+      console.log("🗑️ Deleting old holiday for update:", editingHoliday.holiday_id);
+      await apiService.deleteHoliday(editingHoliday.holiday_id);
+      
+      // Then create the new holiday with updated data
+      const createData = {
         name: editingHoliday.name.trim(),
         date: dateStr,
+        description: editingHoliday.description,
       };
-
-      console.log("📤 Updating holiday:", editingHoliday.holiday_id, updateData);
-      const response = await apiService.updateHoliday(editingHoliday.holiday_id, updateData);
-      console.log("✅ Holiday updated from backend:", response);
+      
+      console.log("📤 Creating updated holiday:", createData);
+      const response = await apiService.createHoliday(createData);
+      console.log("✅ Holiday updated (delete+create) from backend:", response);
 
       // Immediately update local state for instant UI feedback
       setHolidays(prevHolidays =>
         prevHolidays.map((h) =>
           h.holiday_id === editingHoliday.holiday_id
-            ? { ...editingHoliday, date: new Date(dateStr) }
+            ? { 
+                holiday_id: response.id, 
+                date: new Date(dateStr),
+                name: response.name,
+                description: response.description ?? undefined,
+              }
             : h
         )
       );
@@ -1012,6 +1065,21 @@ export default function LeaveManagement() {
   const [historyRange, setHistoryRange] = useState<HistoryRange>("Current Month");
   const [historySheetVisible, setHistorySheetVisible] = useState(false);
   const [viewAllHistoryVisible, setViewAllHistoryVisible] = useState(false);
+  const [recentDecisionsModalVisible, setRecentDecisionsModalVisible] = useState(false);
+  
+  // Date filter state for View All History modal
+  const [historyFilterStartDate, setHistoryFilterStartDate] = useState<Date | null>(null);
+  const [historyFilterEndDate, setHistoryFilterEndDate] = useState<Date | null>(null);
+  const [showHistoryStartDatePicker, setShowHistoryStartDatePicker] = useState(false);
+  const [showHistoryEndDatePicker, setShowHistoryEndDatePicker] = useState(false);
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<string>("All");
+  
+  // Recent Decisions filter state
+  const [decisionsFilterStartDate, setDecisionsFilterStartDate] = useState<Date | null>(null);
+  const [decisionsFilterEndDate, setDecisionsFilterEndDate] = useState<Date | null>(null);
+  const [showDecisionsStartDatePicker, setShowDecisionsStartDatePicker] = useState(false);
+  const [showDecisionsEndDatePicker, setShowDecisionsEndDatePicker] = useState(false);
+  const [decisionsStatusFilter, setDecisionsStatusFilter] = useState<string>("All");
 
   const today = new Date();
   const rangeStart = (() => {
@@ -1492,21 +1560,21 @@ export default function LeaveManagement() {
                 {/* Section Title & Refresh */}
                 <View style={styles.sectionHeaderContainer}>
                   <View>
-                    <Text style={styles.sectionHeaderTitle}>Leave Requests</Text>
-                    <Text style={styles.sectionHeaderSubtitle}>Review and manage employee leaves</Text>
+                    <Text style={styles.sectionHeaderTitle}>Leave Approval Requests</Text>
+                    <Text style={styles.sectionHeaderSubtitle}>Pending requests awaiting your decision</Text>
                   </View>
                   <TouchableOpacity style={styles.refreshIconBtn} onPress={fetchTeamLeaves} activeOpacity={0.7}>
                     <Ionicons name="sync" size={18} color="#6b7280" />
                   </TouchableOpacity>
                 </View>
 
-                {/* Approval List */}
+                {/* Approval List - Only Pending */}
                 {loading && !refreshing ? (
                   <View style={styles.loadingState}>
                     <ActivityIndicator size="large" color="#7c3aed" />
                     <Text style={styles.loadingText}>Syncing requests...</Text>
                   </View>
-                ) : teamLeaves.length === 0 ? (
+                ) : teamLeaves.filter(l => l.status === "Pending").length === 0 ? (
                   <View style={styles.emptyStateContainer}>
                     <Image
                       source={{ uri: "https://cdn-icons-png.flaticon.com/512/7486/7486744.png" }}
@@ -1518,7 +1586,7 @@ export default function LeaveManagement() {
                   </View>
                 ) : (
                   <View style={styles.requestsList}>
-                    {teamLeaves.map((req) => (
+                    {teamLeaves.filter(l => l.status === "Pending").map((req) => (
                       <LeaveApprovalCard
                         key={req.leave_id}
                         leave={req}
@@ -1530,6 +1598,26 @@ export default function LeaveManagement() {
                     ))}
                   </View>
                 )}
+
+                {/* Recent Decisions Button */}
+                <TouchableOpacity 
+                  style={styles.recentDecisionsButton}
+                  onPress={() => setRecentDecisionsModalVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.recentDecisionsButtonContent}>
+                    <View style={styles.recentDecisionsButtonIcon}>
+                      <Ionicons name="time" size={22} color="#7c3aed" />
+                    </View>
+                    <View style={styles.recentDecisionsButtonText}>
+                      <Text style={styles.recentDecisionsButtonTitle}>Recent Decisions</Text>
+                      <Text style={styles.recentDecisionsButtonSubtitle}>
+                        View history of approved & rejected leaves
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                </TouchableOpacity>
               </View>
             )}
 
@@ -2015,6 +2103,237 @@ export default function LeaveManagement() {
           </View>
         </Modal>
 
+        {/* Recent Decisions Modal */}
+        <Modal visible={recentDecisionsModalVisible} animationType="slide" presentationStyle="pageSheet">
+          <SafeAreaView style={styles.viewAllHistoryModalContainer}>
+            {/* Header */}
+            <LinearGradient colors={["#059669", "#10b981"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.viewAllHistoryModalHeader}>
+              <View style={styles.viewAllHistoryModalHeaderContent}>
+                <TouchableOpacity
+                  style={styles.viewAllHistoryModalBackBtn}
+                  onPress={() => {
+                    setRecentDecisionsModalVisible(false);
+                    setDecisionsFilterStartDate(null);
+                    setDecisionsFilterEndDate(null);
+                    setDecisionsStatusFilter("All");
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="chevron-back" size={24} color="#fff" />
+                </TouchableOpacity>
+                <View style={styles.viewAllHistoryModalHeaderText}>
+                  <Text style={styles.viewAllHistoryModalTitle}>Recent Decisions</Text>
+                  <Text style={styles.viewAllHistoryModalSubtitle}>
+                    {teamLeaves.filter(l => l.status === "Approved" || l.status === "Rejected").length} decisions total
+                  </Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.viewAllHistoryModalFilterBtn}
+                  onPress={() => {
+                    setDecisionsFilterStartDate(null);
+                    setDecisionsFilterEndDate(null);
+                    setDecisionsStatusFilter("All");
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="refresh" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+
+            {/* Date Filter Section */}
+            <View style={styles.historyFilterSection}>
+              <View style={styles.historyDateFilterRow}>
+                <TouchableOpacity 
+                  style={styles.historyDateFilterBtn}
+                  onPress={() => setShowDecisionsStartDatePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="calendar-outline" size={16} color="#059669" />
+                  <Text style={styles.historyDateFilterText}>
+                    {decisionsFilterStartDate ? format(decisionsFilterStartDate, 'dd MMM yyyy') : 'Start Date'}
+                  </Text>
+                </TouchableOpacity>
+                <Ionicons name="arrow-forward" size={16} color="#9ca3af" />
+                <TouchableOpacity 
+                  style={styles.historyDateFilterBtn}
+                  onPress={() => setShowDecisionsEndDatePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="calendar-outline" size={16} color="#059669" />
+                  <Text style={styles.historyDateFilterText}>
+                    {decisionsFilterEndDate ? format(decisionsFilterEndDate, 'dd MMM yyyy') : 'End Date'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Status Filter Pills */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.historyStatusFilterRow}>
+                {["All", "Approved", "Rejected"].map((status) => (
+                  <TouchableOpacity
+                    key={status}
+                    style={[
+                      styles.historyStatusPill,
+                      decisionsStatusFilter === status && styles.historyStatusPillActive,
+                      status === "Approved" && decisionsStatusFilter === status && { backgroundColor: '#d1fae5', borderColor: '#10b981' },
+                      status === "Rejected" && decisionsStatusFilter === status && { backgroundColor: '#fee2e2', borderColor: '#ef4444' },
+                    ]}
+                    onPress={() => setDecisionsStatusFilter(status)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[
+                      styles.historyStatusPillText,
+                      decisionsStatusFilter === status && styles.historyStatusPillTextActive,
+                      status === "Approved" && decisionsStatusFilter === status && { color: '#059669' },
+                      status === "Rejected" && decisionsStatusFilter === status && { color: '#dc2626' },
+                    ]}>
+                      {status}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Date Pickers */}
+            {showDecisionsStartDatePicker && (
+              <DateTimePicker
+                value={decisionsFilterStartDate || new Date()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, date) => {
+                  setShowDecisionsStartDatePicker(Platform.OS === 'ios');
+                  if (date) setDecisionsFilterStartDate(date);
+                }}
+                maximumDate={decisionsFilterEndDate || new Date()}
+              />
+            )}
+            {showDecisionsEndDatePicker && (
+              <DateTimePicker
+                value={decisionsFilterEndDate || new Date()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, date) => {
+                  setShowDecisionsEndDatePicker(Platform.OS === 'ios');
+                  if (date) setDecisionsFilterEndDate(date);
+                }}
+                minimumDate={decisionsFilterStartDate || undefined}
+                maximumDate={new Date()}
+              />
+            )}
+
+            {/* Stats Summary */}
+            <View style={styles.viewAllHistoryStatsRow}>
+              <View style={[styles.viewAllHistoryStat, { backgroundColor: '#d1fae5' }]}>
+                <Ionicons name="checkmark-circle" size={16} color="#059669" />
+                <Text style={[styles.viewAllHistoryStatValue, { color: '#059669' }]}>
+                  {teamLeaves.filter(l => l.status === 'Approved').length}
+                </Text>
+                <Text style={styles.viewAllHistoryStatLabel}>Approved</Text>
+              </View>
+              <View style={[styles.viewAllHistoryStat, { backgroundColor: '#fee2e2' }]}>
+                <Ionicons name="close-circle" size={16} color="#dc2626" />
+                <Text style={[styles.viewAllHistoryStatValue, { color: '#dc2626' }]}>
+                  {teamLeaves.filter(l => l.status === 'Rejected').length}
+                </Text>
+                <Text style={styles.viewAllHistoryStatLabel}>Rejected</Text>
+              </View>
+            </View>
+
+            {/* Decisions List */}
+            <FlatList
+              data={teamLeaves.filter(leave => {
+                // Only show approved/rejected
+                if (leave.status !== "Approved" && leave.status !== "Rejected") return false;
+                // Apply status filter
+                if (decisionsStatusFilter !== "All" && leave.status !== decisionsStatusFilter) return false;
+                // Apply date filter
+                if (decisionsFilterStartDate || decisionsFilterEndDate) {
+                  const leaveDate = new Date(leave.start_date);
+                  leaveDate.setHours(0, 0, 0, 0);
+                  if (decisionsFilterStartDate) {
+                    const startDate = new Date(decisionsFilterStartDate);
+                    startDate.setHours(0, 0, 0, 0);
+                    if (leaveDate < startDate) return false;
+                  }
+                  if (decisionsFilterEndDate) {
+                    const endDate = new Date(decisionsFilterEndDate);
+                    endDate.setHours(23, 59, 59, 999);
+                    if (leaveDate > endDate) return false;
+                  }
+                }
+                return true;
+              })}
+              keyExtractor={(item) => item.leave_id.toString()}
+              contentContainerStyle={styles.viewAllHistoryList}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item: leave }) => (
+                <View style={styles.recentDecisionCard}>
+                  <View style={[
+                    styles.recentDecisionLeftBar,
+                    { backgroundColor: leave.status === "Approved" ? "#10b981" : "#ef4444" }
+                  ]} />
+                  <View style={styles.recentDecisionContent}>
+                    <View style={styles.recentDecisionTop}>
+                      <View style={styles.recentDecisionInfo}>
+                        <Text style={styles.recentDecisionName}>
+                          {leave.user?.name || leave.name || "Employee"}
+                        </Text>
+                        <View style={[
+                          styles.recentDecisionTypeBadge,
+                          { backgroundColor: getTypeColor(leave.leave_type || "Annual") + "20" }
+                        ]}>
+                          <Text style={[
+                            styles.recentDecisionTypeText,
+                            { color: getTypeColor(leave.leave_type || "Annual") }
+                          ]}>
+                            {leave.leave_type?.toLowerCase() || "annual"}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={[
+                        styles.recentDecisionStatusBadge,
+                        { backgroundColor: leave.status === "Approved" ? "#10b981" : "#ef4444" }
+                      ]}>
+                        <Text style={styles.recentDecisionStatusText}>{leave.status}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.recentDecisionBottom}>
+                      <Text style={styles.recentDecisionDate}>
+                        {getDayMonthIST(leave.start_date)} - {getDayMonthIST(leave.end_date)}
+                      </Text>
+                      <Text style={styles.recentDecisionDept}>
+                        • {leave.user?.department || leave.department || "Department"}
+                      </Text>
+                    </View>
+                    {/* Show approver info if available */}
+                    {leave.approver?.name && (
+                      <View style={styles.recentDecisionApproverRow}>
+                        <Ionicons name="person-circle-outline" size={14} color="#6b7280" />
+                        <Text style={styles.recentDecisionApproverText}>
+                          {leave.status === "Approved" ? "Approved" : "Rejected"} by {leave.approver.name}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              )}
+              ListEmptyComponent={
+                <View style={styles.viewAllHistoryEmpty}>
+                  <View style={styles.viewAllHistoryEmptyIcon}>
+                    <Ionicons name="document-text-outline" size={48} color="#d1d5db" />
+                  </View>
+                  <Text style={styles.viewAllHistoryEmptyTitle}>No Decisions Found</Text>
+                  <Text style={styles.viewAllHistoryEmptySubtitle}>
+                    {decisionsStatusFilter !== "All" || decisionsFilterStartDate || decisionsFilterEndDate 
+                      ? "No decisions match your filter criteria" 
+                      : "No approved or rejected leaves yet"}
+                  </Text>
+                </View>
+              }
+            />
+          </SafeAreaView>
+        </Modal>
+
         {/* View All Leave History Modal */}
         <Modal visible={viewAllHistoryVisible} animationType="slide" presentationStyle="pageSheet">
           <SafeAreaView style={styles.viewAllHistoryModalContainer}>
@@ -2023,7 +2342,13 @@ export default function LeaveManagement() {
               <View style={styles.viewAllHistoryModalHeaderContent}>
                 <TouchableOpacity
                   style={styles.viewAllHistoryModalBackBtn}
-                  onPress={() => setViewAllHistoryVisible(false)}
+                  onPress={() => {
+                    setViewAllHistoryVisible(false);
+                    // Reset filters when closing
+                    setHistoryFilterStartDate(null);
+                    setHistoryFilterEndDate(null);
+                    setHistoryStatusFilter("All");
+                  }}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="chevron-back" size={24} color="#fff" />
@@ -2034,9 +2359,104 @@ export default function LeaveManagement() {
                     {myLeaves.length} {myLeaves.length === 1 ? 'request' : 'requests'} total
                   </Text>
                 </View>
-                <View style={styles.viewAllHistoryModalHeaderSpacer} />
+                <TouchableOpacity 
+                  style={styles.viewAllHistoryModalFilterBtn}
+                  onPress={() => {
+                    // Clear all filters
+                    setHistoryFilterStartDate(null);
+                    setHistoryFilterEndDate(null);
+                    setHistoryStatusFilter("All");
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="refresh" size={20} color="#fff" />
+                </TouchableOpacity>
               </View>
             </LinearGradient>
+
+            {/* Date Filter Section */}
+            <View style={styles.historyFilterSection}>
+              <View style={styles.historyDateFilterRow}>
+                <TouchableOpacity 
+                  style={styles.historyDateFilterBtn}
+                  onPress={() => setShowHistoryStartDatePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="calendar-outline" size={16} color="#7c3aed" />
+                  <Text style={styles.historyDateFilterText}>
+                    {historyFilterStartDate ? format(historyFilterStartDate, 'dd MMM yyyy') : 'Start Date'}
+                  </Text>
+                </TouchableOpacity>
+                <Ionicons name="arrow-forward" size={16} color="#9ca3af" />
+                <TouchableOpacity 
+                  style={styles.historyDateFilterBtn}
+                  onPress={() => setShowHistoryEndDatePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="calendar-outline" size={16} color="#7c3aed" />
+                  <Text style={styles.historyDateFilterText}>
+                    {historyFilterEndDate ? format(historyFilterEndDate, 'dd MMM yyyy') : 'End Date'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Status Filter Pills */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.historyStatusFilterRow}>
+                {["All", "Pending", "Approved", "Rejected", "Cancelled"].map((status) => (
+                  <TouchableOpacity
+                    key={status}
+                    style={[
+                      styles.historyStatusPill,
+                      historyStatusFilter === status && styles.historyStatusPillActive,
+                      status === "Pending" && historyStatusFilter === status && { backgroundColor: '#fef3c7', borderColor: '#f59e0b' },
+                      status === "Approved" && historyStatusFilter === status && { backgroundColor: '#d1fae5', borderColor: '#10b981' },
+                      status === "Rejected" && historyStatusFilter === status && { backgroundColor: '#fee2e2', borderColor: '#ef4444' },
+                      status === "Cancelled" && historyStatusFilter === status && { backgroundColor: '#f3f4f6', borderColor: '#6b7280' },
+                    ]}
+                    onPress={() => setHistoryStatusFilter(status)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[
+                      styles.historyStatusPillText,
+                      historyStatusFilter === status && styles.historyStatusPillTextActive,
+                      status === "Pending" && historyStatusFilter === status && { color: '#d97706' },
+                      status === "Approved" && historyStatusFilter === status && { color: '#059669' },
+                      status === "Rejected" && historyStatusFilter === status && { color: '#dc2626' },
+                      status === "Cancelled" && historyStatusFilter === status && { color: '#4b5563' },
+                    ]}>
+                      {status}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Date Pickers */}
+            {showHistoryStartDatePicker && (
+              <DateTimePicker
+                value={historyFilterStartDate || new Date()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, date) => {
+                  setShowHistoryStartDatePicker(Platform.OS === 'ios');
+                  if (date) setHistoryFilterStartDate(date);
+                }}
+                maximumDate={historyFilterEndDate || new Date()}
+              />
+            )}
+            {showHistoryEndDatePicker && (
+              <DateTimePicker
+                value={historyFilterEndDate || new Date()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, date) => {
+                  setShowHistoryEndDatePicker(Platform.OS === 'ios');
+                  if (date) setHistoryFilterEndDate(date);
+                }}
+                minimumDate={historyFilterStartDate || undefined}
+                maximumDate={new Date()}
+              />
+            )}
 
             {/* Stats Summary */}
             <View style={styles.viewAllHistoryStatsRow}>
@@ -2063,9 +2483,30 @@ export default function LeaveManagement() {
               </View>
             </View>
 
-            {/* Leave History List */}
+            {/* Leave History List - with filters applied */}
             <FlatList
-              data={myLeaves}
+              data={myLeaves.filter(leave => {
+                // Apply status filter
+                if (historyStatusFilter !== "All" && leave.status !== historyStatusFilter) {
+                  return false;
+                }
+                // Apply date filter
+                if (historyFilterStartDate || historyFilterEndDate) {
+                  const leaveDate = new Date(leave.start_date);
+                  leaveDate.setHours(0, 0, 0, 0);
+                  if (historyFilterStartDate) {
+                    const startDate = new Date(historyFilterStartDate);
+                    startDate.setHours(0, 0, 0, 0);
+                    if (leaveDate < startDate) return false;
+                  }
+                  if (historyFilterEndDate) {
+                    const endDate = new Date(historyFilterEndDate);
+                    endDate.setHours(23, 59, 59, 999);
+                    if (leaveDate > endDate) return false;
+                  }
+                }
+                return true;
+              })}
               keyExtractor={(item) => item.leave_id.toString()}
               contentContainerStyle={styles.viewAllHistoryList}
               showsVerticalScrollIndicator={false}
@@ -2086,7 +2527,11 @@ export default function LeaveManagement() {
                     <Ionicons name="document-text-outline" size={48} color="#d1d5db" />
                   </View>
                   <Text style={styles.viewAllHistoryEmptyTitle}>No Leave History</Text>
-                  <Text style={styles.viewAllHistoryEmptySubtitle}>You haven't applied for any leaves yet</Text>
+                  <Text style={styles.viewAllHistoryEmptySubtitle}>
+                    {historyStatusFilter !== "All" || historyFilterStartDate || historyFilterEndDate 
+                      ? "No leaves match your filter criteria" 
+                      : "You haven't applied for any leaves yet"}
+                  </Text>
                 </View>
               }
             />
@@ -3221,5 +3666,50 @@ const styles = StyleSheet.create({
   viewAllHistoryEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
   viewAllHistoryEmptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   viewAllHistoryEmptyTitle: { fontSize: 18, fontWeight: '700', color: '#374151', marginBottom: 8 },
-  viewAllHistoryEmptySubtitle: { fontSize: 14, color: '#9ca3af', textAlign: 'center' },
+  viewAllHistoryEmptySubtitle: { fontSize: 14, color: '#9ca3af', textAlign: 'center', paddingHorizontal: 20 },
+
+  // History Filter Styles
+  historyFilterSection: { backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  historyDateFilterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 },
+  historyDateFilterBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#f8fafc', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0' },
+  historyDateFilterText: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  historyStatusFilterRow: { flexDirection: 'row', gap: 8 },
+  historyStatusPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' },
+  historyStatusPillActive: { backgroundColor: '#f5f3ff', borderColor: '#7c3aed' },
+  historyStatusPillText: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  historyStatusPillTextActive: { color: '#7c3aed' },
+
+  // Recent Decisions Styles
+  recentDecisionsSection: { marginTop: 24, paddingTop: 20, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  recentDecisionsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  recentDecisionsTitle: { fontSize: 18, fontWeight: '700', color: '#1e293b' },
+  recentDecisionsSubtitle: { fontSize: 13, color: '#64748b', marginTop: 2 },
+  recentDecisionsFilterBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#f8fafc', borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0' },
+  recentDecisionsFilterText: { fontSize: 13, color: '#374151', fontWeight: '500' },
+  recentDecisionsEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40, backgroundColor: '#f8fafc', borderRadius: 12 },
+  recentDecisionsEmptyText: { fontSize: 14, color: '#9ca3af', marginTop: 12 },
+  recentDecisionsList: { gap: 10 },
+  recentDecisionCard: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#f1f5f9', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.03, shadowRadius: 4, elevation: 1 },
+  recentDecisionLeftBar: { width: 4 },
+  recentDecisionContent: { flex: 1, padding: 14 },
+  recentDecisionTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  recentDecisionInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  recentDecisionName: { fontSize: 15, fontWeight: '600', color: '#1e293b' },
+  recentDecisionTypeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  recentDecisionTypeText: { fontSize: 11, fontWeight: '600' },
+  recentDecisionStatusBadge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
+  recentDecisionStatusText: { fontSize: 12, fontWeight: '600', color: '#fff' },
+  recentDecisionBottom: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  recentDecisionDate: { fontSize: 13, color: '#64748b' },
+  recentDecisionDept: { fontSize: 13, color: '#9ca3af', marginLeft: 4 },
+  recentDecisionApproverRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  recentDecisionApproverText: { fontSize: 12, color: '#6b7280' },
+
+  // Recent Decisions Button Styles
+  recentDecisionsButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', marginTop: 20, padding: 16, borderRadius: 14, borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  recentDecisionsButtonContent: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  recentDecisionsButtonIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#f5f3ff', alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  recentDecisionsButtonText: { flex: 1 },
+  recentDecisionsButtonTitle: { fontSize: 16, fontWeight: '600', color: '#1e293b', marginBottom: 2 },
+  recentDecisionsButtonSubtitle: { fontSize: 13, color: '#64748b' },
 });
