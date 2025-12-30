@@ -562,16 +562,65 @@ export default function LeaveManagement() {
   };
 
   const submitLeave = async () => {
-    // Validate reason
+    // Enhanced validation with business rules
+    const errors: { [key: string]: string } = {};
+    
+    // Reason validation - minimum 10 characters
     if (!form.reason.trim()) {
-      Alert.alert("Required", "Please enter a reason for leave.");
-      return;
+      errors.reason = "Please enter a reason for leave.";
+    } else if (form.reason.trim().length < 10) {
+      errors.reason = "Reason must be at least 10 characters long.";
     }
 
-    // Validate date range
+    // Date range validation
     if (form.startDate > form.endDate) {
-      Alert.alert("Invalid Date Range", "Start date must be before or equal to end date.");
-      return;
+      errors.dateRange = "Start date must be before or equal to end date.";
+    }
+
+    // Past date validation
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = new Date(form.startDate);
+    startDate.setHours(0, 0, 0, 0);
+    
+    if (startDate < today) {
+      errors.startDate = "Start date cannot be in the past.";
+    }
+
+    // Calculate requested days
+    const requestedDays = Math.ceil((form.endDate.getTime() - form.startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    
+    // Sick leave minimum days validation
+    if (form.type.toLowerCase().includes("sick") && requestedDays < 3) {
+      errors.sickLeave = "Sick leave must be for minimum 3 days.";
+    }
+
+    // Maximum consecutive days validation
+    if (requestedDays > 30) {
+      errors.maxDays = "Leave cannot exceed 30 consecutive days.";
+    }
+
+    // Advance notice validation
+    const currentTime = new Date();
+    const timeDiff = form.startDate.getTime() - currentTime.getTime();
+    const hoursDiff = timeDiff / (1000 * 60 * 60);
+    
+    if (form.type.toLowerCase().includes("sick")) {
+      if (hoursDiff < 2) {
+        errors.advanceNotice = "Sick leave requires at least 2 hours advance notice.";
+      }
+    } else {
+      if (hoursDiff < 24) {
+        errors.advanceNotice = "Leave requires at least 24 hours advance notice.";
+      }
+    }
+
+    // Leave balance check
+    if (leaveSummary) {
+      const availableBalance = parseInt(leaveAllocation.Total) - leaveCounts["Annual Leave"];
+      if (requestedDays > availableBalance) {
+        errors.balance = `Insufficient leave balance. Available: ${availableBalance} days, Requested: ${requestedDays} days.`;
+      }
     }
 
     // Validate leave application against strict rules
@@ -584,8 +633,7 @@ export default function LeaveManagement() {
     });
 
     if (!validationResult.isValid) {
-      Alert.alert("Validation Error", validationResult.error || "Please check your leave request.");
-      return;
+      errors.validation = validationResult.error || "Please check your leave request.";
     }
 
     // Validate leave overlap with existing leaves
@@ -596,7 +644,13 @@ export default function LeaveManagement() {
     });
 
     if (!overlapValidation.isValid) {
-      Alert.alert("Overlap Detected", overlapValidation.error || "Your leave dates overlap with an existing leave request.");
+      errors.overlap = overlapValidation.error || "Your leave dates overlap with an existing leave request.";
+    }
+
+    // Show all validation errors
+    if (Object.keys(errors).length > 0) {
+      const errorMessage = Object.values(errors).join('\n\n');
+      Alert.alert("Validation Error", errorMessage);
       return;
     }
 
@@ -604,17 +658,20 @@ export default function LeaveManagement() {
     try {
       await apiService.submitLeaveRequest({
         employee_id: employeeId,
-        leave_type: mapLeaveTypeToAPI(form.type), // Convert display type to API value
+        leave_type: mapLeaveTypeToAPI(form.type),
         start_date: formatIST(form.startDate, "yyyy-MM-dd"),
         end_date: formatIST(form.endDate, "yyyy-MM-dd"),
         reason: form.reason,
         status: "Pending",
       });
-      Alert.alert("✅ Success", "Leave request submitted successfully.");
+      
+      Alert.alert("✅ Success", `Leave request submitted successfully for ${requestedDays} day${requestedDays > 1 ? 's' : ''}.`);
       setForm({ type: "Sick Leave", startDate: new Date(), endDate: new Date(), reason: "" });
+      
       // Refresh leave list and summary after successful submission
       await Promise.all([fetchMyLeaves(), fetchLeaveSummary()]);
     } catch (err: any) {
+      // Display backend validation errors exactly as received
       Alert.alert("Error", err.message || "Failed to submit leave request.");
     } finally {
       setLoading(false);
@@ -1441,19 +1498,38 @@ export default function LeaveManagement() {
                       </Text>
                       <TextInput
                         style={styles.textAreaNew}
-                        placeholder="Describe the reason for your leave request..."
+                        placeholder="Describe the reason for your leave request (minimum 10 characters)..."
                         placeholderTextColor="#9ca3af"
                         value={form.reason}
                         onChangeText={(text) => setForm({ ...form, reason: text })}
                         multiline
                         numberOfLines={3}
                         textAlignVertical="top"
+                        maxLength={500}
                       />
-                      <Text style={styles.charCountText}>{form.reason.length}/500</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                        <Text style={[styles.charCountText, { color: form.reason.length < 10 ? '#ef4444' : form.reason.length > 450 ? '#f59e0b' : '#9ca3af' }]}>
+                          {form.reason.length}/500 characters {form.reason.length < 10 ? '(minimum 10)' : ''}
+                        </Text>
+                        {form.reason.length >= 10 && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="checkmark-circle" size={14} color="#10b981" />
+                            <Text style={{ fontSize: 11, color: '#10b981', fontWeight: '600' }}>Valid</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
 
                     {/* Submit Button */}
-                    <TouchableOpacity style={styles.submitBtnNew} onPress={submitLeave} disabled={loading} activeOpacity={0.85}>
+                    <TouchableOpacity 
+                      style={[
+                        styles.submitBtnNew, 
+                        (form.reason.length < 10 || loading) && { opacity: 0.6 }
+                      ]} 
+                      onPress={submitLeave} 
+                      disabled={loading || form.reason.length < 10} 
+                      activeOpacity={0.85}
+                    >
                       <LinearGradient
                         colors={["#7c3aed", "#6d28d9"]}
                         style={styles.submitBtnGradient}

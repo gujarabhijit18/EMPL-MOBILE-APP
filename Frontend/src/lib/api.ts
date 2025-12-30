@@ -681,7 +681,9 @@ class ApiService {
             detail: data?.detail
           });
         }
-        throw new Error(errorMessage);
+        const error = new Error(errorMessage);
+        (error as any).status = response.status;
+        throw error;
       }
 
       console.log(`✅ API Success: ${options.method || 'GET'} ${url}`);
@@ -1920,7 +1922,9 @@ class ApiService {
   async getAllTasks(): Promise<any[]> {
     console.log("📥 Fetching all tasks (admin view)");
     try {
-      const response = await this.request("/tasks/all");
+      // Try the /tasks/all endpoint first (some backends support it)
+      // If it fails with 405/404, fall back to /tasks/
+      const response = await this.request("/tasks/all", {}, 0, true);
       return this.handleListResponse(response);
     } catch (error: any) {
       if (error.status === 405 || error.status === 404) {

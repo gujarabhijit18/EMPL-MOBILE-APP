@@ -1248,6 +1248,19 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontWeight: '500',
   },
+  warningText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    marginTop: 6,
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  characterCounter: {
+    fontSize: 11,
+    color: '#9ca3af',
+    fontWeight: '600',
+    marginLeft: 'auto',
+  },
   textArea: {
     height: 110,
     textAlignVertical: 'top',
@@ -2985,14 +2998,7 @@ export default function TaskManagement() {
   }, []);
 
   const validateForm = () => {
-    const errors: { [key: string]: string } = {};
-    let isValid = true;
-    if (!newTask.title.trim()) { errors.title = "Title is required"; isValid = false; }
-    if (!newTask.description.trim()) { errors.description = "Description is required"; isValid = false; }
-    if (!newTask.deadline) { errors.deadline = "Please select a deadline"; isValid = false; }
-    if (!newTask.assignedTo) { errors.assignedTo = "Please assign to someone"; isValid = false; }
-    setFormErrors(errors);
-    return isValid;
+    return validateTaskForm();
   };
 
   const calculateProgress = () => {
@@ -3090,26 +3096,41 @@ export default function TaskManagement() {
         }
       }
 
-      const transformedTasks: Task[] = backendTasks.map((task: any) => {
-        const assignedToEmployee = allEmployeesList.find(emp => emp.user_id === task.assigned_to);
-        const assignedByEmployee = allEmployeesList.find(emp => emp.user_id === task.assigned_by);
-        return {
-          id: task.task_id.toString(),
-          title: task.title,
-          description: task.description,
-          priority: task.priority.toLowerCase() as "low" | "medium" | "high" | "urgent",
-          status: mapBackendStatus(task.status),
-          assignedTo: [assignedToEmployee?.email || user?.email || ""],
-          assignedToName: assignedToEmployee?.name || `User #${task.assigned_to}`,
-          assignedBy: assignedByEmployee?.name || `User #${task.assigned_by}`,
-          assignedByRole: assignedByEmployee?.role || assignedByEmployee?.department || "N/A",
-          deadline: task.due_date,
-          createdAt: task.created_at,
-          updatedAt: task.updated_at,
-          assigned_by: task.assigned_by,
-          assigned_to: task.assigned_to,
-        };
-      });
+      console.log("📊 Raw backend tasks:", backendTasks);
+      
+      const transformedTasks: Task[] = backendTasks
+        .map((task: any) => {
+          // Handle both task_id and id fields
+          const taskId = task.task_id || task.id;
+          
+          if (!taskId) {
+            console.warn("⚠️ Task missing ID:", task);
+            return null;
+          }
+
+          const assignedToEmployee = allEmployeesList.find(emp => emp.user_id === task.assigned_to);
+          const assignedByEmployee = allEmployeesList.find(emp => emp.user_id === task.assigned_by);
+          
+          return {
+            id: taskId.toString(),
+            title: task.title || "Untitled",
+            description: task.description || "",
+            priority: (task.priority || "medium").toLowerCase() as "low" | "medium" | "high" | "urgent",
+            status: mapBackendStatus(task.status),
+            assignedTo: [assignedToEmployee?.email || user?.email || ""],
+            assignedToName: assignedToEmployee?.name || `User #${task.assigned_to}`,
+            assignedBy: assignedByEmployee?.name || `User #${task.assigned_by}`,
+            assignedByRole: assignedByEmployee?.role || assignedByEmployee?.department || "N/A",
+            deadline: task.due_date,
+            createdAt: task.created_at,
+            updatedAt: task.updated_at,
+            assigned_by: task.assigned_by,
+            assigned_to: task.assigned_to,
+          } as Task;
+        })
+        .filter((task): task is Task => task !== null);
+      
+      console.log("✅ Transformed tasks:", transformedTasks);
       setTasks(transformedTasks);
     } catch (error: any) {
       console.error("Error loading tasks:", error);
@@ -3629,6 +3650,109 @@ export default function TaskManagement() {
     ]);
   };
 
+  // Enhanced validation with business rules
+  const validateTaskForm = () => {
+    const errors: { [key: string]: string } = {};
+    
+    // Title validation - minimum 5 characters
+    if (!newTask.title.trim()) {
+      errors.title = "Task title is required.";
+    } else if (newTask.title.trim().length < 5) {
+      errors.title = "Title must be at least 5 characters long.";
+    } else if (newTask.title.trim().length > 100) {
+      errors.title = "Title cannot exceed 100 characters.";
+    }
+
+    // Description validation - minimum 10 characters
+    if (!newTask.description.trim()) {
+      errors.description = "Task description is required.";
+    } else if (newTask.description.trim().length < 10) {
+      errors.description = "Description must be at least 10 characters long.";
+    } else if (newTask.description.trim().length > 500) {
+      errors.description = "Description cannot exceed 500 characters.";
+    }
+
+    // Deadline validation
+    if (!newTask.deadline) {
+      errors.deadline = "Please select a deadline.";
+    } else {
+      const deadlineDate = new Date(newTask.deadline);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      deadlineDate.setHours(0, 0, 0, 0);
+      
+      if (deadlineDate < today) {
+        errors.deadline = "Deadline cannot be in the past.";
+      }
+      
+      // Maximum 1 year in future
+      const maxDate = new Date();
+      maxDate.setFullYear(maxDate.getFullYear() + 1);
+      if (deadlineDate > maxDate) {
+        errors.deadline = "Deadline cannot be more than 1 year in the future.";
+      }
+    }
+
+    // Assignment validation
+    if (!newTask.assignedTo) {
+      errors.assignedTo = "Please assign the task to someone.";
+    }
+
+    // Priority validation
+    if (!["low", "medium", "high", "urgent"].includes(newTask.priority)) {
+      errors.priority = "Please select a valid priority level.";
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Enhanced task analytics
+  const getTaskAnalytics = () => {
+    const analytics = {
+      total: tasks.length,
+      todo: tasks.filter(t => t.status === 'todo').length,
+      inProgress: tasks.filter(t => t.status === 'in-progress').length,
+      completed: tasks.filter(t => t.status === 'completed').length,
+      cancelled: tasks.filter(t => t.status === 'cancelled').length,
+      overdue: tasks.filter(t => {
+        if (t.status === 'completed' || t.status === 'cancelled') return false;
+        const deadline = new Date(t.deadline);
+        const today = new Date();
+        return deadline < today;
+      }).length,
+      highPriority: tasks.filter(t => t.priority === 'high' || t.priority === 'urgent').length,
+      assignedToMe: tasks.filter(t => t.assignedTo.includes(user?.email || '')).length,
+      createdByMe: tasks.filter(t => t.assigned_by === user?.user_id).length,
+    };
+
+    return analytics;
+  };
+
+  // Enhanced task filtering
+  const getFilteredTasks = () => {
+    let filtered = tasks;
+
+    // Apply status filter
+    if (filter !== "all") {
+      filtered = filtered.filter(task => task.status === filter);
+    }
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(task =>
+        task.title.toLowerCase().includes(query) ||
+        task.description.toLowerCase().includes(query) ||
+        task.assignedToName?.toLowerCase().includes(query) ||
+        task.assignedBy?.toLowerCase().includes(query) ||
+        task.priority.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  };
+
   // Helper function to construct full URL
   const getFullAttachmentUrl = (url: string): string => {
     if (!url) return '';
@@ -4097,34 +4221,52 @@ export default function TaskManagement() {
 
   const createTask = async () => {
     Keyboard.dismiss();
-    if (!validateForm()) {
+    
+    // Enhanced validation with detailed error messages
+    if (!validateTaskForm()) {
+      // Show validation errors with animation
       Animated.sequence([
         Animated.timing(buttonScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
         Animated.timing(buttonScale, { toValue: 1, duration: 100, useNativeDriver: true }),
         Animated.timing(buttonScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
         Animated.timing(buttonScale, { toValue: 1, duration: 100, useNativeDriver: true }),
       ]).start();
+      
+      // Show first validation error
+      const firstError = Object.values(formErrors)[0];
+      if (firstError) {
+        showToast(firstError);
+      }
       return;
     }
 
     setIsSubmitting(true);
     try {
       const selectedEmployee = employees.find(emp => emp.email === newTask.assignedTo);
-      if (!selectedEmployee || !selectedEmployee.user_id) throw new Error("Selected employee not found");
+      if (!selectedEmployee || !selectedEmployee.user_id) {
+        throw new Error("Selected employee not found. Please refresh and try again.");
+      }
 
       let currentUserId = user?.user_id;
       if (!currentUserId && user?.id) currentUserId = parseInt(user.id);
-      if (!currentUserId || isNaN(currentUserId)) throw new Error("Current user ID not found");
+      if (!currentUserId || isNaN(currentUserId)) {
+        throw new Error("Authentication error. Please log out and log back in.");
+      }
 
       const priorityMap: { [key: string]: "Low" | "Medium" | "High" | "Urgent" } = {
         "low": "Low", "medium": "Medium", "high": "High", "urgent": "Urgent",
       };
 
+      // Calculate task duration for analytics
+      const deadlineDate = new Date(newTask.deadline);
+      const today = new Date();
+      const daysUntilDeadline = Math.ceil((deadlineDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
       if (isEditMode && editingTaskId) {
         // Update existing task
         await apiService.updateTask(parseInt(editingTaskId), {
-          title: newTask.title,
-          description: newTask.description,
+          title: newTask.title.trim(),
+          description: newTask.description.trim(),
           due_date: newTask.deadline,
           priority: priorityMap[newTask.priority],
           assigned_to: selectedEmployee.user_id,
@@ -4135,12 +4277,12 @@ export default function TaskManagement() {
           Animated.timing(buttonScale, { toValue: 1, duration: 200, useNativeDriver: true }),
         ]).start();
 
-        showToast("✅ Task updated successfully");
+        showToast(`✅ Task updated successfully${daysUntilDeadline <= 3 ? ' (Urgent deadline!)' : ''}`);
       } else {
         // Create new task
         await apiService.createTask({
-          title: newTask.title,
-          description: newTask.description,
+          title: newTask.title.trim(),
+          description: newTask.description.trim(),
           due_date: newTask.deadline,
           priority: priorityMap[newTask.priority],
           assigned_to: selectedEmployee.user_id,
@@ -4152,18 +4294,38 @@ export default function TaskManagement() {
           Animated.timing(buttonScale, { toValue: 1, duration: 200, useNativeDriver: true }),
         ]).start();
 
-        showToast("✅ Task created successfully");
+        showToast(`✅ Task created successfully${daysUntilDeadline <= 3 ? ' (Urgent deadline!)' : ''}`);
       }
 
+      // Reset form
       setNewTask({ title: "", description: "", priority: "medium", deadline: "", assignedTo: "", department: "", employeeId: "" });
+      setFormErrors({});
       setIsEditMode(false);
       setEditingTaskId(null);
+      
+      // Reload tasks and close modal
       await loadTasks();
-      setTimeout(() => { setModalVisible(false); setIsSubmitting(false); }, 500);
+      setTimeout(() => { 
+        setModalVisible(false); 
+        setIsSubmitting(false); 
+      }, 500);
     } catch (error: any) {
       console.error("Error creating/updating task:", error);
       setIsSubmitting(false);
-      showToast(error.message || `Failed to ${isEditMode ? 'update' : 'create'} task`);
+      
+      // Enhanced error handling
+      let errorMessage = error.message || `Failed to ${isEditMode ? 'update' : 'create'} task`;
+      
+      // Handle specific error cases
+      if (error.message?.includes('duplicate') || error.message?.includes('already exists')) {
+        errorMessage = "A task with this title already exists. Please use a different title.";
+      } else if (error.message?.includes('permission') || error.message?.includes('unauthorized')) {
+        errorMessage = "You don't have permission to assign tasks to this employee.";
+      } else if (error.message?.includes('network') || error.message?.includes('connection')) {
+        errorMessage = "Network error. Please check your connection and try again.";
+      }
+      
+      showToast(errorMessage);
     }
   };
 
@@ -4236,10 +4398,10 @@ export default function TaskManagement() {
   };
 
   // Common search filter applied to all views
-  const tasksFilteredBySearch = tasks.filter(t =>
-    t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.description.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const tasksFilteredBySearch = getFilteredTasks();
+
+  // Enhanced task analytics
+  const analytics = getTaskAnalytics();
 
   // Filtered and sorted tasks for the List/Table view (includes status filter)
   const filteredTasks = tasksFilteredBySearch
@@ -4846,15 +5008,14 @@ export default function TaskManagement() {
     }
   };
 
-  // Stats - Use tasksFilteredBySearch to reflect overall board state (respecting search)
-  const totalTasks = tasksFilteredBySearch.length;
-  const todoCount = tasksFilteredBySearch.filter(t => t.status === "todo").length;
-  const inProgressCount = tasksFilteredBySearch.filter(t => t.status === "in-progress").length;
-  const completedCount = tasksFilteredBySearch.filter(t => t.status === "completed").length;
-  const overdueCount = tasksFilteredBySearch.filter((t) => {
-    if (!t.deadline) return false;
-    return new Date(t.deadline) < new Date() && t.status !== "completed";
-  }).length;
+  // Stats - Use analytics for comprehensive task metrics
+  const totalTasks = analytics.total;
+  const todoCount = analytics.todo;
+  const inProgressCount = analytics.inProgress;
+  const completedCount = analytics.completed;
+  const overdueCount = analytics.overdue;
+  const highPriorityCount = analytics.highPriority;
+  const assignedToMeCount = analytics.assignedToMe;
 
   const statusFilterOptions: { label: string; value: "all" | Task["status"] }[] = [
     { label: "All Status", value: "all" },
@@ -5532,9 +5693,22 @@ export default function TaskManagement() {
                   <View style={styles.fieldLabelRow}>
                     <Ionicons name="document-text" size={18} color="#8B5CF6" style={styles.fieldIcon} />
                     <Text style={styles.fieldLabel}>Task Title <Text style={styles.required}>*</Text></Text>
+                    <Text style={[styles.characterCounter, newTask.title.length > 100 && { color: '#ef4444' }]}>
+                      {newTask.title.length}/100
+                    </Text>
                   </View>
-                  <TextInput placeholder="Enter task title" style={[styles.input, formErrors.title && styles.inputError]} value={newTask.title} onChangeText={(t) => updateField('title', t)} placeholderTextColor="#9ca3af" />
+                  <TextInput 
+                    placeholder="Enter task title (5-100 characters)" 
+                    style={[styles.input, formErrors.title && styles.inputError]} 
+                    value={newTask.title} 
+                    onChangeText={(t) => updateField('title', t)} 
+                    placeholderTextColor="#9ca3af"
+                    maxLength={100}
+                  />
                   {formErrors.title && <Text style={styles.errorText}>{formErrors.title}</Text>}
+                  {!formErrors.title && newTask.title.length > 0 && newTask.title.length < 5 && (
+                    <Text style={styles.warningText}>Minimum 5 characters required</Text>
+                  )}
                 </Animated.View>
 
                 {/* Description */}
@@ -5542,9 +5716,24 @@ export default function TaskManagement() {
                   <View style={styles.fieldLabelRow}>
                     <Ionicons name="document-text" size={18} color="#8B5CF6" style={styles.fieldIcon} />
                     <Text style={styles.fieldLabel}>Description <Text style={styles.required}>*</Text></Text>
+                    <Text style={[styles.characterCounter, newTask.description.length > 500 && { color: '#ef4444' }]}>
+                      {newTask.description.length}/500
+                    </Text>
                   </View>
-                  <TextInput placeholder="Enter task description" style={[styles.input, styles.textArea, formErrors.description && styles.inputError]} value={newTask.description} multiline numberOfLines={4} onChangeText={(t) => updateField('description', t)} placeholderTextColor="#9ca3af" />
+                  <TextInput 
+                    placeholder="Enter detailed task description (10-500 characters)" 
+                    style={[styles.input, styles.textArea, formErrors.description && styles.inputError]} 
+                    value={newTask.description} 
+                    multiline 
+                    numberOfLines={4} 
+                    onChangeText={(t) => updateField('description', t)} 
+                    placeholderTextColor="#9ca3af"
+                    maxLength={500}
+                  />
                   {formErrors.description && <Text style={styles.errorText}>{formErrors.description}</Text>}
+                  {!formErrors.description && newTask.description.length > 0 && newTask.description.length < 10 && (
+                    <Text style={styles.warningText}>Minimum 10 characters required</Text>
+                  )}
                 </Animated.View>
 
                 {/* Priority and Deadline Row */}
