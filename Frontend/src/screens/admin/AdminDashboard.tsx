@@ -9,6 +9,8 @@ import {
   Animated,
   Dimensions,
   Easing,
+  FlatList,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -20,7 +22,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from "../../contexts/AuthContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
-import { formatTimeIST, getDayMonthIST } from "../../utils/dateTime";
+import { formatTimeIST, getDayMonthIST, formatDateIST } from "../../utils/dateTime";
+import { Colors, Spacing, BorderRadius, Typography, Shadows, CardStyles, HeaderStyles } from "../../constants/designSystem";
 
 const { width } = Dimensions.get('window');
 
@@ -55,6 +58,24 @@ interface DashboardStats {
   }>;
 }
 
+// Recent Decision interface
+interface RecentDecision {
+  leave_id: number;
+  user: {
+    name: string;
+    department: string;
+  };
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  status: 'Approved' | 'Rejected';
+  approver?: {
+    name: string;
+  };
+  decision_date?: string;
+  days: number;
+}
+
 // Default empty state
 const defaultStats: DashboardStats = {
   totalEmployees: 0,
@@ -82,6 +103,8 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recentDecisions, setRecentDecisions] = useState<RecentDecision[]>([]);
+  const [recentDecisionsModalVisible, setRecentDecisionsModalVisible] = useState(false);
 
   // Animation values
   const headerAnim = useRef(new Animated.Value(0)).current;
@@ -131,6 +154,47 @@ const AdminDashboard: React.FC = () => {
     }
   }, []);
 
+  const fetchRecentDecisions = useCallback(async () => {
+    try {
+      // Fetch team leaves to get recent decisions
+      const response = await apiService.getTeamLeaves();
+      const teamLeaves = response.leaves || [];
+      
+      // Filter for recent approved/rejected leaves (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const decisions = teamLeaves
+        .filter((leave: any) => 
+          (leave.status === 'Approved' || leave.status === 'Rejected') &&
+          new Date(leave.updated_at || leave.created_at) >= thirtyDaysAgo
+        )
+        .sort((a: any, b: any) => 
+          new Date(b.updated_at || b.created_at).getTime() - 
+          new Date(a.updated_at || a.created_at).getTime()
+        )
+        .slice(0, 10) // Get latest 10 decisions
+        .map((leave: any) => ({
+          leave_id: leave.leave_id || leave.id,
+          user: {
+            name: leave.user?.name || leave.name || leave.employee_name || 'Unknown Employee',
+            department: leave.user?.department || leave.department || 'Unknown Department',
+          },
+          leave_type: leave.leave_type || 'Annual Leave',
+          start_date: leave.start_date,
+          end_date: leave.end_date,
+          status: leave.status,
+          approver: leave.approver || null,
+          decision_date: leave.updated_at || leave.created_at,
+          days: leave.days || 1,
+        }));
+
+      setRecentDecisions(decisions);
+    } catch (err: any) {
+      console.error('Failed to fetch recent decisions:', err);
+    }
+  }, []);
+
   const getActivityIcon = (type: string): string => {
     switch (type) {
       case 'check-in': return 'checkmark-circle';
@@ -144,18 +208,24 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await fetchDashboardData();
+      await Promise.all([
+        fetchDashboardData(),
+        fetchRecentDecisions()
+      ]);
       setLoading(false);
       startAnimations();
     };
     loadData();
-  }, [fetchDashboardData]);
+  }, [fetchDashboardData, fetchRecentDecisions]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchDashboardData();
+    await Promise.all([
+      fetchDashboardData(),
+      fetchRecentDecisions()
+    ]);
     setRefreshing(false);
-  }, [fetchDashboardData]);
+  }, [fetchDashboardData, fetchRecentDecisions]);
 
   const startAnimations = () => {
     // Header animation
@@ -195,94 +265,88 @@ const AdminDashboard: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'on-time': case 'completed': case 'approved': return '#10b981';
-      case 'pending': return '#f59e0b';
-      case 'late': return '#ef4444';
-      case 'new': return '#3b82f6';
-      default: return '#6b7280';
+      case 'on-time': case 'completed': case 'approved': return Colors.success;
+      case 'pending': return Colors.warning;
+      case 'late': return Colors.error;
+      case 'new': return Colors.primary;
+      default: return Colors.textSecondary;
+    }
+  };
+
+  const getLeaveTypeColor = (leaveType: string) => {
+    switch (leaveType.toLowerCase()) {
+      case 'annual leave': case 'annual': return Colors.primary;
+      case 'sick leave': case 'sick': return Colors.error;
+      case 'casual leave': case 'casual': return Colors.success;
+      case 'maternity leave': case 'maternity': return '#ec4899';
+      case 'paternity leave': case 'paternity': return Colors.purple;
+      case 'unpaid leave': case 'unpaid': return Colors.textSecondary;
+      default: return Colors.textSecondary;
     }
   };
 
   const getIconBg = (type: string) => {
     switch (type) {
-      case 'check-in': return '#dcfce7';
-      case 'leave': return '#fef3c7';
-      case 'task': return '#dbeafe';
-      case 'hire': return '#e0e7ff';
-      default: return '#f3f4f6';
+      case 'check-in': return Colors.successLight;
+      case 'leave': return Colors.warningLight;
+      case 'task': return Colors.primaryLight;
+      case 'hire': return Colors.purpleLight;
+      default: return Colors.borderLight;
     }
   };
 
   if (loading) {
     return (
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.gradientContainer}
-      >
-        <SafeAreaView style={styles.container} edges={['top']}>
-          <StatusBar style="light" />
+      <View style={styles.container}>
+        <StatusBar style="dark" backgroundColor={Colors.surface} />
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#fff" />
+            <ActivityIndicator size="large" color={Colors.primary} />
             <Text style={styles.loadingText}>Loading Dashboard...</Text>
           </View>
         </SafeAreaView>
-      </LinearGradient>
+      </View>
     );
   }
 
   return (
-    <LinearGradient
-      colors={['#667eea', '#764ba2']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.gradientContainer}
-    >
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar style="light" />
+    <View style={styles.container}>
+      <StatusBar style="dark" backgroundColor={Colors.surface} />
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
 
-        {/* Modern Sophisticated Header */}
-        <View style={styles.headerGradient}>
-          {/* Background Pattern */}
-          <View style={styles.headerPattern}>
-            <View style={[styles.patternCircle, { top: -20, right: -20, width: 120, height: 120 }]} />
-            <View style={[styles.patternCircle, { bottom: -30, left: -30, width: 150, height: 150 }]} />
-            <View style={[styles.patternCircle, { top: 40, right: 60, width: 80, height: 80 }]} />
-          </View>
-
-          <Animated.View
-            style={[
-              styles.headerContent,
-              {
-                opacity: headerAnim,
-                transform: [
+        {/* Clean White Header */}
+        <View style={styles.headerContainer}>
+          <View style={styles.headerContent}>
+            <View style={styles.headerTop}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => navigation.goBack()}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+              </TouchableOpacity>
+              
+              <Animated.View
+                style={[
+                  styles.headerTitleContainer,
                   {
-                    translateY: headerAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-20, 0],
-                    }),
+                    opacity: headerAnim,
+                    transform: [
+                      {
+                        translateY: headerAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [-10, 0],
+                        }),
+                      },
+                    ],
                   },
-                ],
-              },
-            ]}
-          >
-            {/* Header Top Section */}
-            <View style={styles.headerTopSection}>
-              <View style={styles.headerLeft}>
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={() => navigation.goBack()}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="chevron-back" size={24} color="#fff" />
-                </TouchableOpacity>
-                <View style={styles.headerTextSection}>
-                  <Text style={styles.headerTitle}>Dashboard</Text>
-                  <Text style={styles.headerSubtitle}>Administrator Control Panel</Text>
-                </View>
-              </View>
-              <View style={styles.headerRight}>
+                ]}
+              >
+                <Text style={styles.headerTitle}>Dashboard</Text>
+                <Text style={styles.headerSubtitle}>Administrator Control Panel</Text>
+              </Animated.View>
+
+              <View style={styles.headerActions}>
                 <View style={styles.dateTimeContainer}>
                   <Text style={styles.timeText}>{formatTimeIST(new Date())}</Text>
                   <Text style={styles.dateText}>{getDayMonthIST(new Date())}</Text>
@@ -290,283 +354,457 @@ const AdminDashboard: React.FC = () => {
               </View>
             </View>
 
-            {/* Stats Overview Bar */}
-            <View style={styles.statsOverviewBar}>
-              <View style={styles.miniStatItem}>
-                <Ionicons name="people-outline" size={14} color="rgba(255,255,255,0.9)" />
-                <Text style={styles.miniStatValue}>{stats.totalEmployees}</Text>
-                <Text style={styles.miniStatLabel}>Staff</Text>
+            {/* Quick Stats Bar */}
+            <View style={styles.quickStatsBar}>
+              <View style={styles.quickStatItem}>
+                <Ionicons name="people-outline" size={16} color={Colors.primary} />
+                <Text style={styles.quickStatValue}>{stats.totalEmployees}</Text>
+                <Text style={styles.quickStatLabel}>Staff</Text>
               </View>
               <View style={styles.statDivider} />
-              <View style={styles.miniStatItem}>
-                <Ionicons name="trending-up-outline" size={14} color="rgba(255,255,255,0.9)" />
-                <Text style={styles.miniStatValue}>{stats.attendanceRate}%</Text>
-                <Text style={styles.miniStatLabel}>Active</Text>
+              <View style={styles.quickStatItem}>
+                <Ionicons name="checkmark-circle-outline" size={16} color={Colors.success} />
+                <Text style={styles.quickStatValue}>{stats.presentToday}</Text>
+                <Text style={styles.quickStatLabel}>Present</Text>
               </View>
               <View style={styles.statDivider} />
-              <View style={styles.miniStatItem}>
-                <Ionicons name="checkmark-circle-outline" size={14} color="rgba(255,255,255,0.9)" />
-                <Text style={styles.miniStatValue}>{stats.activeTasks}</Text>
-                <Text style={styles.miniStatLabel}>Tasks</Text>
+              <View style={styles.quickStatItem}>
+                <Ionicons name="time-outline" size={16} color={Colors.warning} />
+                <Text style={styles.quickStatValue}>{stats.pendingLeaves}</Text>
+                <Text style={styles.quickStatLabel}>Pending</Text>
               </View>
               <View style={styles.statDivider} />
-              <View style={styles.miniStatItem}>
-                <Ionicons name="briefcase-outline" size={14} color="rgba(255,255,255,0.9)" />
-                <Text style={styles.miniStatValue}>{stats.departments}</Text>
-                <Text style={styles.miniStatLabel}>Depts</Text>
+              <View style={styles.quickStatItem}>
+                <Ionicons name="briefcase-outline" size={16} color={Colors.info} />
+                <Text style={styles.quickStatValue}>{stats.departments}</Text>
+                <Text style={styles.quickStatLabel}>Depts</Text>
               </View>
             </View>
-          </Animated.View>
+          </View>
         </View>
 
         {/* Main Content */}
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingBottom: tabBarVisible ? tabBarHeight + 24 : 24 },
-          ]}
-          onScroll={onScroll}
-          scrollEventThrottle={scrollEventThrottle}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#667eea']} />
-          }
-        >
-          {/* Error Message */}
-          {error && (
-            <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={20} color="#ef4444" />
-              <Text style={styles.errorText}>{error}</Text>
-              <TouchableOpacity onPress={onRefresh} style={styles.retryButton}>
-                <Text style={styles.retryText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Compact Stats Grid */}
-          <Animated.View
-            style={[
-              styles.statsGrid,
-              {
-                opacity: statsAnim,
-                transform: [
-                  {
-                    translateY: statsAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [20, 0],
-                    }),
-                  },
-                ],
-              },
+        <View style={styles.contentContainer}>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: tabBarVisible ? tabBarHeight + 24 : 24 },
             ]}
+            onScroll={onScroll}
+            scrollEventThrottle={scrollEventThrottle}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />
+            }
           >
-            {/* Stat Card - Present Today */}
-            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Attendance')} activeOpacity={0.7}>
-              <LinearGradient colors={['#10b981', '#059669']} style={styles.statGradient}>
-                <Ionicons name="people" size={18} color="#fff" />
-              </LinearGradient>
-              <View style={styles.statContent}>
-                <Text style={styles.statValue}>{stats.presentToday}</Text>
-                <Text style={styles.statLabel}>Present</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-            </TouchableOpacity>
-
-            {/* Stat Card - On Leave */}
-            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
-              <LinearGradient colors={['#f59e0b', '#d97706']} style={styles.statGradient}>
-                <Ionicons name="calendar" size={18} color="#fff" />
-              </LinearGradient>
-              <View style={styles.statContent}>
-                <Text style={styles.statValue}>{stats.onLeave}</Text>
-                <Text style={styles.statLabel}>On Leave</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-            </TouchableOpacity>
-
-            {/* Stat Card - Active Tasks */}
-            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Tasks')} activeOpacity={0.7}>
-              <LinearGradient colors={['#3b82f6', '#2563eb']} style={styles.statGradient}>
-                <Ionicons name="checkbox" size={18} color="#fff" />
-              </LinearGradient>
-              <View style={styles.statContent}>
-                <Text style={styles.statValue}>{stats.activeTasks}</Text>
-                <Text style={styles.statLabel}>Tasks</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-            </TouchableOpacity>
-
-            {/* Stat Card - Pending Leaves */}
-            <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
-              <LinearGradient colors={['#8b5cf6', '#7c3aed']} style={styles.statGradient}>
-                <Ionicons name="time" size={18} color="#fff" />
-              </LinearGradient>
-              <View style={styles.statContent}>
-                <Text style={styles.statValue}>{stats.pendingLeaves}</Text>
-                <Text style={styles.statLabel}>Pending Leave</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#9ca3af" />
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* Department Performance - Compact */}
-          {stats.departmentPerformance.length > 0 && (
-            <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Top Departments</Text>
-                <TouchableOpacity onPress={() => goTo('Departments')}>
-                  <Text style={styles.seeAllText}>See All</Text>
+            {/* Error Message */}
+            {error && (
+              <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle" size={20} color={Colors.error} />
+                <Text style={styles.errorText}>{error}</Text>
+                <TouchableOpacity onPress={onRefresh} style={styles.retryButton}>
+                  <Text style={styles.retryText}>Retry</Text>
                 </TouchableOpacity>
               </View>
+            )}
 
-              <View style={styles.departmentList}>
-                {stats.departmentPerformance.slice(0, 3).map((dept, index) => (
-                  <TouchableOpacity
-                    key={dept.name}
-                    onPress={() => navigation.navigate('Reports', { department: dept.name })}
-                    activeOpacity={0.7}
-                  >
-                    <Animated.View
-                      style={[
-                        styles.compactDeptCard,
-                        {
-                          opacity: cardsAnim[index] || new Animated.Value(1),
-                          transform: [
-                            {
-                              translateX: (cardsAnim[index] || new Animated.Value(1)).interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [-20, 0],
-                              }),
-                            },
-                          ],
-                        },
-                      ]}
-                    >
-                      <View style={styles.deptCardHeader}>
-                        <View style={styles.deptIconWrapper}>
-                          <LinearGradient
-                            colors={
-                              index === 0
-                                ? ['#3b82f6', '#2563eb']
-                                : index === 1
-                                  ? ['#10b981', '#059669']
-                                  : ['#f59e0b', '#d97706']
-                            }
-                            style={styles.deptIcon}
-                          >
-                            <Ionicons name="briefcase" size={16} color="#fff" />
-                          </LinearGradient>
-                        </View>
-                        <View style={styles.deptInfo}>
-                          <Text style={styles.deptName}>{dept.name}</Text>
-                          <Text style={styles.deptEmployees}>{dept.employees} employees</Text>
-                        </View>
-                        <View style={styles.deptBadge}>
-                          <Text style={styles.deptGrowth}>{dept.growth}</Text>
-                        </View>
-                      </View>
-                      <View style={styles.progressContainer}>
-                        <View style={styles.progressTrack}>
-                          <LinearGradient
-                            colors={
-                              index === 0
-                                ? ['#3b82f6', '#2563eb']
-                                : index === 1
-                                  ? ['#10b981', '#059669']
-                                  : ['#f59e0b', '#d97706']
-                            }
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={[styles.progressFill, { width: `${dept.performance}%` }]}
-                          />
-                        </View>
-                        <Text style={styles.progressText}>{dept.performance}%</Text>
-                      </View>
-                    </Animated.View>
+            {/* Stats Grid */}
+            <Animated.View
+              style={[
+                styles.statsGrid,
+                {
+                  opacity: statsAnim,
+                  transform: [
+                    {
+                      translateY: statsAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [20, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              {/* Present Today Card */}
+              <TouchableOpacity style={styles.statCard} onPress={() => goTo('Attendance')} activeOpacity={0.7}>
+                <View style={[styles.statIconContainer, { backgroundColor: Colors.successLight }]}>
+                  <Ionicons name="people" size={20} color={Colors.success} />
+                </View>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.presentToday}</Text>
+                  <Text style={styles.statLabel}>Present Today</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+              </TouchableOpacity>
+
+              {/* On Leave Card */}
+              <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
+                <View style={[styles.statIconContainer, { backgroundColor: Colors.warningLight }]}>
+                  <Ionicons name="calendar" size={20} color={Colors.warning} />
+                </View>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.onLeave}</Text>
+                  <Text style={styles.statLabel}>On Leave</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+              </TouchableOpacity>
+
+              {/* Active Tasks Card */}
+              <TouchableOpacity style={styles.statCard} onPress={() => goTo('Tasks')} activeOpacity={0.7}>
+                <View style={[styles.statIconContainer, { backgroundColor: Colors.primaryLight }]}>
+                  <Ionicons name="checkbox" size={20} color={Colors.primary} />
+                </View>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.activeTasks}</Text>
+                  <Text style={styles.statLabel}>Active Tasks</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+              </TouchableOpacity>
+
+              {/* Pending Leaves Card */}
+              <TouchableOpacity style={styles.statCard} onPress={() => goTo('Leaves')} activeOpacity={0.7}>
+                <View style={[styles.statIconContainer, { backgroundColor: Colors.purpleLight }]}>
+                  <Ionicons name="time" size={20} color={Colors.purple} />
+                </View>
+                <View style={styles.statContent}>
+                  <Text style={styles.statValue}>{stats.pendingLeaves}</Text>
+                  <Text style={styles.statLabel}>Pending Leaves</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* Department Performance */}
+            {stats.departmentPerformance.length > 0 && (
+              <View style={styles.sectionContainer}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Department Performance</Text>
+                  <TouchableOpacity onPress={() => goTo('Departments')}>
+                    <Text style={styles.seeAllText}>View All</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          )}
+                </View>
 
-          {/* Empty State for Departments */}
-          {stats.departmentPerformance.length === 0 && !loading && (
+                <View style={styles.departmentList}>
+                  {stats.departmentPerformance.slice(0, 3).map((dept, index) => (
+                    <TouchableOpacity
+                      key={dept.name}
+                      onPress={() => navigation.navigate('Reports', { department: dept.name })}
+                      activeOpacity={0.7}
+                    >
+                      <Animated.View
+                        style={[
+                          styles.departmentCard,
+                          {
+                            opacity: cardsAnim[index] || new Animated.Value(1),
+                            transform: [
+                              {
+                                translateX: (cardsAnim[index] || new Animated.Value(1)).interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [-20, 0],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      >
+                        <View style={styles.departmentCardHeader}>
+                          <View style={styles.departmentIconContainer}>
+                            <View
+                              style={[
+                                styles.departmentIcon,
+                                {
+                                  backgroundColor:
+                                    index === 0
+                                      ? Colors.primaryLight
+                                      : index === 1
+                                        ? Colors.successLight
+                                        : Colors.warningLight,
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name="briefcase"
+                                size={18}
+                                color={
+                                  index === 0
+                                    ? Colors.primary
+                                    : index === 1
+                                      ? Colors.success
+                                      : Colors.warning
+                                }
+                              />
+                            </View>
+                          </View>
+                          <View style={styles.departmentInfo}>
+                            <Text style={styles.departmentName}>{dept.name}</Text>
+                            <Text style={styles.departmentEmployees}>{dept.employees} employees</Text>
+                          </View>
+                          <View style={styles.departmentBadge}>
+                            <Text style={styles.departmentGrowth}>{dept.growth}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.progressContainer}>
+                          <View style={styles.progressTrack}>
+                            <View
+                              style={[
+                                styles.progressFill,
+                                {
+                                  width: `${dept.performance}%`,
+                                  backgroundColor:
+                                    index === 0
+                                      ? Colors.primary
+                                      : index === 1
+                                        ? Colors.success
+                                        : Colors.warning,
+                                },
+                              ]}
+                            />
+                          </View>
+                          <Text style={styles.progressText}>{dept.performance}%</Text>
+                        </View>
+                      </Animated.View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Empty State for Departments */}
+            {stats.departmentPerformance.length === 0 && !loading && (
+              <View style={styles.sectionContainer}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Department Performance</Text>
+                </View>
+                <View style={styles.emptyState}>
+                  <Ionicons name="briefcase-outline" size={40} color={Colors.textTertiary} />
+                  <Text style={styles.emptyStateText}>No department data available</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Recent Activities */}
+            {stats.recentActivities.length > 0 && (
+              <View style={styles.sectionContainer}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Recent Activities</Text>
+                  <TouchableOpacity onPress={() => goTo('RecentActivities')}>
+                    <Text style={styles.seeAllText}>View All</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.activitiesList}>
+                  {stats.recentActivities.slice(0, 3).map((activity) => (
+                    <View key={activity.id} style={styles.activityCard}>
+                      <View style={[styles.activityIcon, { backgroundColor: getIconBg(activity.type) }]}>
+                        <Ionicons name={activity.icon as any} size={18} color={getStatusColor(activity.status)} />
+                      </View>
+                      <View style={styles.activityInfo}>
+                        <Text style={styles.activityUserName}>{activity.user}</Text>
+                        <Text style={styles.activityDetails}>{activity.dept} • {activity.time}</Text>
+                      </View>
+                      <View style={[styles.activityStatusBadge, { backgroundColor: getStatusColor(activity.status) }]}>
+                        <Text style={styles.activityStatusText}>{activity.status}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* Empty State for Activities */}
+            {stats.recentActivities.length === 0 && !loading && (
+              <View style={styles.sectionContainer}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Recent Activities</Text>
+                </View>
+                <View style={styles.emptyState}>
+                  <Ionicons name="time-outline" size={40} color={Colors.textTertiary} />
+                  <Text style={styles.emptyStateText}>No recent activities</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Recent Decisions Section */}
             <View style={styles.sectionContainer}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Top Departments</Text>
-              </View>
-              <View style={styles.emptyState}>
-                <Ionicons name="briefcase-outline" size={40} color="#9ca3af" />
-                <Text style={styles.emptyStateText}>No department data available</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Recent Activities - Compact */}
-          {stats.recentActivities.length > 0 && (
-            <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Recent Activities</Text>
-                <TouchableOpacity onPress={() => goTo('RecentActivities')}>
+                <Text style={styles.sectionTitle}>Recent Leave Decisions</Text>
+                <TouchableOpacity onPress={() => setRecentDecisionsModalVisible(true)}>
                   <Text style={styles.seeAllText}>View All</Text>
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.activitiesList}>
-                {stats.recentActivities.slice(0, 2).map((activity) => (
-                  <View key={activity.id} style={styles.compactActivityCard}>
-                    <View style={[styles.activityIconSmall, { backgroundColor: getIconBg(activity.type) }]}>
-                      <Ionicons name={activity.icon as any} size={16} color={getStatusColor(activity.status)} />
+              {recentDecisions.length > 0 ? (
+                <View style={styles.recentDecisionsList}>
+                  {recentDecisions.slice(0, 3).map((decision) => (
+                    <View key={decision.leave_id} style={styles.recentDecisionCard}>
+                      <View style={[
+                        styles.recentDecisionLeftBar,
+                        { backgroundColor: decision.status === 'Approved' ? Colors.success : Colors.error }
+                      ]} />
+                      <View style={styles.recentDecisionContent}>
+                        <View style={styles.recentDecisionTop}>
+                          <View style={styles.recentDecisionInfo}>
+                            <Text style={styles.recentDecisionName}>{decision.user.name}</Text>
+                            <View style={[
+                              styles.recentDecisionTypeBadge,
+                              { backgroundColor: getLeaveTypeColor(decision.leave_type) + '20' }
+                            ]}>
+                              <Text style={[
+                                styles.recentDecisionTypeText,
+                                { color: getLeaveTypeColor(decision.leave_type) }
+                              ]}>
+                                {decision.leave_type}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={[
+                            styles.recentDecisionStatusBadge,
+                            { backgroundColor: decision.status === 'Approved' ? Colors.success : Colors.error }
+                          ]}>
+                            <Text style={styles.recentDecisionStatusText}>{decision.status}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.recentDecisionBottom}>
+                          <Text style={styles.recentDecisionDate}>
+                            {formatDateIST(new Date(decision.start_date))} - {formatDateIST(new Date(decision.end_date))}
+                          </Text>
+                          <Text style={styles.recentDecisionDept}>
+                            • {decision.user.department}
+                          </Text>
+                        </View>
+                        {decision.approver?.name && (
+                          <View style={styles.recentDecisionApproverRow}>
+                            <Ionicons name="person-circle-outline" size={14} color={Colors.textSecondary} />
+                            <Text style={styles.recentDecisionApproverText}>
+                              {decision.status === 'Approved' ? 'Approved' : 'Rejected'} by {decision.approver.name}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
-                    <View style={styles.activityInfo}>
-                      <Text style={styles.activityUserName}>{activity.user}</Text>
-                      <Text style={styles.activityDeptName}>{activity.dept} • {activity.time}</Text>
-                    </View>
-                    <View style={[styles.activityStatusBadge, { backgroundColor: getStatusColor(activity.status) }]}>
-                      <Text style={styles.activityStatusText}>{activity.status}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="document-text-outline" size={40} color={Colors.textTertiary} />
+                  <Text style={styles.emptyStateText}>No recent leave decisions</Text>
+                </View>
+              )}
             </View>
-          )}
+          </ScrollView>
+        </View>
 
-          {/* Empty State for Activities */}
-          {stats.recentActivities.length === 0 && !loading && (
-            <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Recent Activities</Text>
-              </View>
-              <View style={styles.emptyState}>
-                <Ionicons name="time-outline" size={40} color="#9ca3af" />
-                <Text style={styles.emptyStateText}>No recent activities</Text>
+        {/* Recent Decisions Modal */}
+        <Modal 
+          visible={recentDecisionsModalVisible} 
+          animationType="slide" 
+          presentationStyle="pageSheet"
+        >
+          <SafeAreaView style={styles.modalContainer}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <TouchableOpacity
+                style={styles.modalBackButton}
+                onPress={() => setRecentDecisionsModalVisible(false)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="arrow-back" size={20} color={Colors.headerText} />
+              </TouchableOpacity>
+              <View style={styles.modalHeaderText}>
+                <Text style={styles.modalTitle}>Recent Leave Decisions</Text>
+                <Text style={styles.modalSubtitle}>
+                  {recentDecisions.length} decisions in the last 30 days
+                </Text>
               </View>
             </View>
-          )}
-        </ScrollView>
+
+            {/* Modal Content */}
+            <View style={styles.modalContent}>
+              {recentDecisions.length > 0 ? (
+                <FlatList
+                  data={recentDecisions}
+                  keyExtractor={(item) => item.leave_id.toString()}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.modalList}
+                  renderItem={({ item: decision }) => (
+                    <View style={styles.recentDecisionCard}>
+                      <View style={[
+                        styles.recentDecisionLeftBar,
+                        { backgroundColor: decision.status === 'Approved' ? Colors.success : Colors.error }
+                      ]} />
+                      <View style={styles.recentDecisionContent}>
+                        <View style={styles.recentDecisionTop}>
+                          <View style={styles.recentDecisionInfo}>
+                            <Text style={styles.recentDecisionName}>{decision.user.name}</Text>
+                            <View style={[
+                              styles.recentDecisionTypeBadge,
+                              { backgroundColor: getLeaveTypeColor(decision.leave_type) + '20' }
+                            ]}>
+                              <Text style={[
+                                styles.recentDecisionTypeText,
+                                { color: getLeaveTypeColor(decision.leave_type) }
+                              ]}>
+                                {decision.leave_type}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={[
+                            styles.recentDecisionStatusBadge,
+                            { backgroundColor: decision.status === 'Approved' ? Colors.success : Colors.error }
+                          ]}>
+                            <Text style={styles.recentDecisionStatusText}>{decision.status}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.recentDecisionBottom}>
+                          <Text style={styles.recentDecisionDate}>
+                            {formatDateIST(new Date(decision.start_date))} - {formatDateIST(new Date(decision.end_date))}
+                          </Text>
+                          <Text style={styles.recentDecisionDept}>
+                            • {decision.user.department} • {decision.days} day{decision.days !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                        {decision.approver?.name && (
+                          <View style={styles.recentDecisionApproverRow}>
+                            <Ionicons name="person-circle-outline" size={14} color={Colors.textSecondary} />
+                            <Text style={styles.recentDecisionApproverText}>
+                              {decision.status === 'Approved' ? 'Approved' : 'Rejected'} by {decision.approver.name}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                />
+              ) : (
+                <View style={styles.modalEmptyState}>
+                  <Ionicons name="document-text-outline" size={60} color={Colors.textTertiary} />
+                  <Text style={styles.modalEmptyStateTitle}>No Recent Decisions</Text>
+                  <Text style={styles.modalEmptyStateText}>
+                    No leave decisions have been made in the last 30 days
+                  </Text>
+                </View>
+              )}
+            </View>
+          </SafeAreaView>
+        </Modal>
       </SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 };
 
 
 const styles = StyleSheet.create({
-  gradientContainer: {
-    flex: 1,
-  },
+  // Main Container
   container: {
     flex: 1,
-    backgroundColor: 'transparent',
+    backgroundColor: Colors.background,
   },
-  headerGradient: {
-    paddingTop: 16,
-    paddingBottom: 24,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    position: 'relative',
-    overflow: 'hidden',
+  safeArea: {
+    flex: 1,
   },
+
+  // Loading State
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -574,117 +812,100 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   loadingText: {
-    color: '#fff',
+    color: Colors.textSecondary,
     marginTop: 12,
     fontSize: 16,
     fontWeight: '600',
   },
-  // Decorative Pattern
-  headerPattern: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  patternCircle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+
+  // Clean White Header (matching LeaveManagement)
+  headerContainer: {
+    backgroundColor: Colors.surface,
+    paddingBottom: Spacing.xl,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.headerBorder,
   },
   headerContent: {
-    paddingHorizontal: 20,
-    position: 'relative',
-    zIndex: 1,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
   },
-  // Header Top Section
-  headerTopSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  headerLeft: {
+  headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+    marginBottom: Spacing.xl,
   },
   backButton: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: Colors.headerBorder,
   },
-  headerTextSection: {
+  headerTitleContainer: {
     flex: 1,
+    marginLeft: Spacing.md,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.3,
+    ...Typography.screenTitle,
   },
   headerSubtitle: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.85)',
+    ...Typography.secondary,
     marginTop: 2,
-    fontWeight: '500',
-    letterSpacing: 0.2,
   },
-  headerRight: {
+  headerActions: {
     alignItems: 'flex-end',
   },
   dateTimeContainer: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: Colors.primaryLight,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: '#bfdbfe',
   },
   timeText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
-    letterSpacing: 0.5,
+    color: Colors.primary,
+    letterSpacing: 0.3,
   },
   dateText: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.8)',
+    color: Colors.primaryDark,
     marginTop: 2,
     fontWeight: '600',
   },
-  // Stats Overview Bar
-  statsOverviewBar: {
+
+  // Quick Stats Bar
+  quickStatsBar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
     padding: 12,
     justifyContent: 'space-around',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
-  miniStatItem: {
+  quickStatItem: {
     alignItems: 'center',
     flex: 1,
   },
-  miniStatValue: {
+  quickStatValue: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#fff',
+    color: Colors.text,
     marginTop: 4,
     letterSpacing: 0.3,
   },
-  miniStatLabel: {
+  quickStatLabel: {
     fontSize: 9,
-    color: 'rgba(255,255,255,0.75)',
+    color: Colors.textSecondary,
     marginTop: 2,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -693,66 +914,76 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: 32,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: Colors.border,
+  },
+
+  // Content Container
+  contentContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    marginTop: -16,
   },
   scrollView: {
     flex: 1,
-    backgroundColor: '#f8fafc',
   },
   scrollContent: {
-    padding: 16,
+    padding: Spacing.lg,
   },
+
   // Error Container
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fef2f2',
+    backgroundColor: Colors.errorLighter,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     marginBottom: 16,
     gap: 8,
+    borderWidth: 1,
+    borderColor: Colors.errorLight,
   },
   errorText: {
     flex: 1,
-    color: '#ef4444',
+    color: Colors.error,
     fontSize: 13,
   },
   retryButton: {
-    backgroundColor: '#ef4444',
+    backgroundColor: Colors.error,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: BorderRadius.xs,
   },
   retryText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: '600',
   },
-  // Compact Stats Grid
+
+  // Stats Grid
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginBottom: 20,
-    gap: 10,
+    gap: 12,
   },
   statCard: {
     flex: 1,
     minWidth: (width - 52) / 2,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
-  statGradient: {
+  statIconContainer: {
     width: 48,
     height: 48,
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -763,17 +994,18 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#1f2937',
+    color: Colors.text,
     marginBottom: 2,
   },
   statLabel: {
     fontSize: 11,
-    color: '#6b7280',
+    color: Colors.textSecondary,
     fontWeight: '600',
   },
+
   // Section Container
   sectionContainer: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -782,81 +1014,81 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1f2937',
+    ...Typography.sectionTitle,
   },
   seeAllText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#667eea',
+    color: Colors.primary,
   },
+
   // Empty State
   emptyState: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
     padding: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   emptyStateText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#9ca3af',
+    color: Colors.textTertiary,
     textAlign: 'center',
   },
-  // Compact Department Cards
+
+  // Department Cards
   departmentList: {
-    gap: 10,
+    gap: 12,
   },
-  compactDeptCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
+  departmentCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
-  deptCardHeader: {
+  departmentCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
-  deptIconWrapper: {
-    marginRight: 10,
+  departmentIconContainer: {
+    marginRight: 12,
   },
-  deptIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+  departmentIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  deptInfo: {
+  departmentInfo: {
     flex: 1,
   },
-  deptName: {
-    fontSize: 14,
+  departmentName: {
+    fontSize: 15,
     fontWeight: '700',
-    color: '#1f2937',
+    color: Colors.text,
   },
-  deptEmployees: {
-    fontSize: 11,
-    color: '#6b7280',
+  departmentEmployees: {
+    fontSize: 12,
+    color: Colors.textSecondary,
     marginTop: 2,
   },
-  deptBadge: {
-    backgroundColor: '#dcfce7',
+  departmentBadge: {
+    backgroundColor: Colors.successLight,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: BorderRadius.xs,
   },
-  deptGrowth: {
+  departmentGrowth: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#10b981',
+    color: Colors.success,
   },
   progressContainer: {
     flexDirection: 'row',
@@ -866,7 +1098,7 @@ const styles = StyleSheet.create({
   progressTrack: {
     flex: 1,
     height: 6,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: Colors.borderLight,
     borderRadius: 3,
     overflow: 'hidden',
   },
@@ -876,57 +1108,202 @@ const styles = StyleSheet.create({
   },
   progressText: {
     fontSize: 11,
-    color: '#6b7280',
+    color: Colors.textSecondary,
     fontWeight: '700',
     minWidth: 32,
   },
-  // Compact Activities
+
+  // Activities
   activitiesList: {
-    gap: 8,
+    gap: 10,
   },
-  compactActivityCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
+  activityCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
-  activityIconSmall: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+  activityIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 12,
   },
   activityInfo: {
     flex: 1,
   },
   activityUserName: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#1f2937',
+    color: Colors.text,
   },
-  activityDeptName: {
-    fontSize: 11,
-    color: '#6b7280',
+  activityDetails: {
+    fontSize: 12,
+    color: Colors.textSecondary,
     marginTop: 2,
   },
   activityStatusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: BorderRadius.sm,
   },
   activityStatusText: {
     fontSize: 10,
     color: '#fff',
     fontWeight: '700',
     textTransform: 'capitalize',
+  },
+
+  // Recent Decisions
+  recentDecisionsList: {
+    gap: 10,
+  },
+  recentDecisionCard: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadows.card,
+  },
+  recentDecisionLeftBar: {
+    width: 4,
+  },
+  recentDecisionContent: {
+    flex: 1,
+    padding: 14,
+  },
+  recentDecisionTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  recentDecisionInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  recentDecisionName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  recentDecisionTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.xs,
+  },
+  recentDecisionTypeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  recentDecisionStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.xs,
+  },
+  recentDecisionStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  recentDecisionBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 8,
+  },
+  recentDecisionDate: {
+    fontSize: 13,
+    color: Colors.text,
+    fontWeight: '500',
+  },
+  recentDecisionDept: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginLeft: 4,
+  },
+  recentDecisionApproverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  recentDecisionApproverText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+  },
+
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  modalBackButton: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginRight: Spacing.md,
+  },
+  modalHeaderText: {
+    flex: 1,
+  },
+  modalTitle: {
+    ...Typography.screenTitle,
+  },
+  modalSubtitle: {
+    ...Typography.secondary,
+    marginTop: 2,
+  },
+  modalContent: {
+    flex: 1,
+    padding: Spacing.lg,
+  },
+  modalList: {
+    gap: 12,
+  },
+  modalEmptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  modalEmptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  modalEmptyStateText: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 
