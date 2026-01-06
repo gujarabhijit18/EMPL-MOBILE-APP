@@ -78,12 +78,13 @@ export const canViewWfhRequests = (role?: string): boolean => {
 
 /**
  * Check if user can approve/reject WFH requests
- * Admin can view but NOT approve/reject
- * HR and Manager can approve/reject for their department
+ * Admin can approve/reject ALL requests across organization
+ * HR can approve/reject Manager, Team Lead, Employee requests (NOT Admin)
+ * Manager can approve/reject Team Lead and Employee requests in their department
  */
 export const canApproveWfhRequests = (role?: string): boolean => {
   const r = role?.toLowerCase();
-  return r === 'hr' || r === 'manager';
+  return r === 'admin' || r === 'hr' || r === 'manager';
 };
 
 // ============ WFH DATE LOGIC ============

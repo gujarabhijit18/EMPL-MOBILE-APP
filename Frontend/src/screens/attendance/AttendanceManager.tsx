@@ -83,6 +83,16 @@ const { width } = Dimensions.get("window");
 
 // Helpers removed - using src/utils/dateTime.ts instead
 
+// Helper to format minutes to "Xh Ym" format
+const formatMinutesToDuration = (minutes: number | undefined): string => {
+  if (minutes === undefined || minutes === null || minutes <= 0) return "0m";
+  const hrs = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  if (hrs === 0) return `${mins}m`;
+  if (mins === 0) return `${hrs}h`;
+  return `${hrs}h ${mins}m`;
+};
+
 // Helper to validate image URI for cross-platform compatibility
 const isValidImageUri = (uri: string | null | undefined): boolean => {
   if (!uri || typeof uri !== 'string') return false;
@@ -103,6 +113,10 @@ type SelfAttendanceRecord = {
   selfie?: string | null;
   checkOutSelfie?: string | null;
   workLocation?: "Work From Home" | "Work From Office";
+  totalOnlineMinutes?: number;
+  totalOfflineMinutes?: number;
+  effectiveWorkHours?: number;
+  isOnline?: boolean;
 };
 
 const AttendanceManager: React.FC = () => {
@@ -132,14 +146,14 @@ const AttendanceManager: React.FC = () => {
     isAdmin ? "employee" : (isHrManager ? "employee" : "self")
   );
   const [adminTab, setAdminTab] = useState<"records" | "wfh" | "officeHours">("records");
-  
+
   // NEW: Last checked date for midnight refresh
   const [lastCheckedDate, setLastCheckedDate] = useState<string>(getTodayIST());
   // NEW: All WFH requests for the current user (for self view)
   const [allMyWfhRequests, setAllMyWfhRequests] = useState<WfhRequestType[]>([]);
   // NEW: Active WFH for today
   const [activeWfhToday, setActiveWfhToday] = useState<WfhRequestType | null>(null);
-  
+
   // Summary stats for attendance overview
   const [summary, setSummary] = useState<{
     total_employees: number;
@@ -305,22 +319,72 @@ const AttendanceManager: React.FC = () => {
       const today = formatIST(getCurrentISTTime(), "yyyy-MM-dd");
 
       const transformedData: SelfAttendanceRecord[] = data.map((record: any) => {
-        let selfieUri = record.selfie || null;
-        // Handle new API spec which returns raw base64 string
-        if (selfieUri && typeof selfieUri === "string" && !selfieUri.startsWith("http") && !selfieUri.startsWith("data:") && !selfieUri.startsWith("/")) {
-          selfieUri = `data:image/jpeg;base64,${selfieUri}`;
+        // Parse selfie data - handle JSON format with check_in and check_out
+        let selfieUri = record.checkInSelfie || record.check_in_selfie || null;
+        let checkOutSelfie = record.checkOutSelfie || record.check_out_selfie || null;
+
+        if (record.selfie) {
+          if (typeof record.selfie === "string") {
+            try {
+              if (record.selfie.trim().startsWith("{")) {
+                const selfieData = JSON.parse(record.selfie);
+                if (!selfieUri) selfieUri = selfieData.check_in || selfieData.check_in_selfie || null;
+                if (!checkOutSelfie) checkOutSelfie = selfieData.check_out || selfieData.check_out_selfie || null;
+              } else if (!selfieUri) {
+                selfieUri = record.selfie;
+              }
+            } catch {
+              if (!selfieUri) selfieUri = record.selfie;
+            }
+          } else if (typeof record.selfie === "object") {
+            if (!selfieUri) selfieUri = record.selfie.check_in || record.selfie.check_in_selfie || null;
+            if (!checkOutSelfie) checkOutSelfie = record.selfie.check_out || record.selfie.check_out_selfie || null;
+          }
+        }
+
+        const baseUrl = API_CONFIG.getApiBaseUrl();
+        // Build full URL for selfies if they're relative paths
+        if (selfieUri && typeof selfieUri === "string" && !selfieUri.startsWith("http") && !selfieUri.startsWith("data:") && !selfieUri.startsWith("/") && !selfieUri.startsWith("file:")) {
+          selfieUri = `${baseUrl}${selfieUri.startsWith("/") ? "" : "/"}${selfieUri.replace(/\\/g, "/")}`;
+        }
+        if (checkOutSelfie && typeof checkOutSelfie === "string" && !checkOutSelfie.startsWith("http") && !checkOutSelfie.startsWith("data:") && !checkOutSelfie.startsWith("/") && !checkOutSelfie.startsWith("file:")) {
+          checkOutSelfie = `${baseUrl}${checkOutSelfie.startsWith("/") ? "" : "/"}${checkOutSelfie.replace(/\\/g, "/")}`;
+        }
+
+        let onlineMins = record.total_online_minutes ?? record.totalOnlineMinutes ?? record.effective_work_hours ?? record.effectiveWorkHours ?? 0;
+        const offlineMins = record.total_offline_minutes ?? record.totalOfflineMinutes ?? 0;
+
+        // Fallback for duration calculation if online minutes is 0
+        if (onlineMins === 0 && record.check_in && record.check_out) {
+          try {
+            const start = new Date(record.check_in).getTime();
+            const end = new Date(record.check_out).getTime();
+            if (!isNaN(start) && !isNaN(end)) {
+              const diffMins = Math.floor((end - start) / (1000 * 60));
+              onlineMins = Math.max(0, diffMins - offlineMins);
+            } else if (record.total_hours) {
+              onlineMins = Math.floor(record.total_hours * 60);
+            }
+          } catch (e) { }
+        } else if (onlineMins === 0 && record.total_hours) {
+          onlineMins = Math.floor(record.total_hours * 60);
         }
 
         return {
           id: record.attendance_id.toString(),
-          date: formatIST(record.check_in, "yyyy-MM-dd"), // Store as YYYY-MM-DD (ISO) so formatting functions work
+          date: record.check_in ? formatIST(record.check_in, "yyyy-MM-dd") : today,
           checkInTime: formatTimeIST(record.check_in),
           checkOutTime: record.check_out ? formatTimeIST(record.check_out) : undefined,
-          status: record.checkInStatus || record.status || "on-time",
+          status: record.checkInStatus || record.status || "present",
           checkInLocation: record.gps_location,
           checkOutLocation: record.check_out ? record.gps_location : undefined,
           selfie: selfieUri,
+          checkOutSelfie: checkOutSelfie,
           workLocation: (record.work_location || record.workLocation) === "Work From Home" ? "Work From Home" : "Work From Office",
+          isOnline: record.is_online ?? record.isOnline ?? false,
+          totalOnlineMinutes: onlineMins,
+          totalOfflineMinutes: offlineMins,
+          effectiveWorkHours: record.effective_work_hours ?? record.effectiveWorkHours ?? 0,
         };
       });
 
@@ -345,7 +409,7 @@ const AttendanceManager: React.FC = () => {
           date: anyWfhToday.start_date || (anyWfhToday as any).date,
           status: anyWfhToday.status ? anyWfhToday.status.toLowerCase() : "pending"
         } as any);
-        
+
         // Auto-switch to WFH mode if approved
         if (activeWfh) {
           setWorkMode("wfh");
@@ -385,18 +449,8 @@ const AttendanceManager: React.FC = () => {
 
       const transformedData = data.map((record: any) => {
         // Process selfie URLs - parse JSON if needed
-        let checkInSelfie: string | null = null;
-        let checkOutSelfie: string | null = null;
-
-        // Check if checkInSelfie is provided directly from backend
-        if (record.checkInSelfie) {
-          checkInSelfie = record.checkInSelfie;
-        }
-
-        // Check if checkOutSelfie is provided directly from backend
-        if (record.checkOutSelfie) {
-          checkOutSelfie = record.checkOutSelfie;
-        }
+        let checkInSelfie = record.checkInSelfie || record.check_in_selfie || null;
+        let checkOutSelfie = record.checkOutSelfie || record.check_out_selfie || null;
 
         // Also check 'selfie' field which may contain JSON with both paths
         if (record.selfie && typeof record.selfie === "string") {
@@ -404,21 +458,15 @@ const AttendanceManager: React.FC = () => {
             if (record.selfie.trim().startsWith("{")) {
               const selfieData = JSON.parse(record.selfie);
               // Only set if not already set from direct fields
-              if (!checkInSelfie && selfieData.check_in) {
-                checkInSelfie = selfieData.check_in;
-              }
-              if (!checkOutSelfie && selfieData.check_out) {
-                checkOutSelfie = selfieData.check_out;
-              }
+              if (!checkInSelfie) checkInSelfie = selfieData.check_in || selfieData.check_in_selfie;
+              if (!checkOutSelfie) checkOutSelfie = selfieData.check_out || selfieData.check_out_selfie;
             } else if (!checkInSelfie) {
               // Legacy format - single path for check-in
               checkInSelfie = record.selfie;
             }
           } catch {
             // If parsing fails and no checkInSelfie yet, treat as legacy format
-            if (!checkInSelfie) {
-              checkInSelfie = record.selfie;
-            }
+            if (!checkInSelfie) checkInSelfie = record.selfie;
           }
         }
 
@@ -504,6 +552,21 @@ const AttendanceManager: React.FC = () => {
         // Process status
         const status = record.status || record.checkInStatus || "present";
 
+        let onlineMins = record.total_online_minutes ?? record.totalOnlineMinutes ?? 0;
+        const offlineMins = record.total_offline_minutes ?? record.totalOfflineMinutes ?? 0;
+
+        // Fallback for duration calculation if online minutes is 0
+        if (onlineMins === 0 && record.check_in && record.check_out) {
+          try {
+            const start = new Date(record.check_in).getTime();
+            const end = new Date(record.check_out).getTime();
+            if (!isNaN(start) && !isNaN(end)) {
+              const diffMins = Math.floor((end - start) / (1000 * 60));
+              onlineMins = Math.max(0, diffMins - offlineMins);
+            }
+          } catch (e) { }
+        }
+
         const transformedRecord = {
           id: record.attendance_id || record.id,
           user_id: record.user_id,
@@ -527,11 +590,11 @@ const AttendanceManager: React.FC = () => {
           workReport: record.work_report || record.workReport || null,
           workLocation: (record.work_location || record.workLocation) === "Work From Home" ? "Work From Home" : "Work From Office",
           // Online status data from backend
-          isOnline: record.isOnline ?? false,
-          totalOnlineMinutes: record.totalOnlineMinutes ?? 0,
-          totalOfflineMinutes: record.totalOfflineMinutes ?? 0,
-          effectiveWorkHours: record.effectiveWorkHours ?? 0,
-          currentSessionMinutes: record.currentSessionMinutes ?? 0,
+          isOnline: record.is_online ?? record.isOnline ?? false,
+          totalOnlineMinutes: onlineMins,
+          totalOfflineMinutes: offlineMins,
+          effectiveWorkHours: record.effective_work_hours ?? record.effectiveWorkHours ?? 0,
+          currentSessionMinutes: record.current_session_minutes ?? record.currentSessionMinutes ?? 0,
         };
 
         console.log("📋 Transformed record:", transformedRecord.name, "selfie:", checkInSelfie, "checkOutSelfie:", checkOutSelfie);
@@ -705,6 +768,7 @@ const AttendanceManager: React.FC = () => {
           checkInLocation: latestGeo || gpsLocationString,
           selfie: photoUri,
           status: statusInfo.checkInStatus,
+          isOnline: true,
         };
         setCurrentAttendance(record);
         setSelfAttendanceHistory((prev) => [record, ...prev]);
@@ -728,6 +792,14 @@ const AttendanceManager: React.FC = () => {
         // Refresh data in background (don't wait)
         loadSelfAttendanceData().catch(() => { });
       } else if (currentAttendance) {
+        // 3. Toggle status to Offline and get final tracked hours BEFORE checkout
+        // This avoids "Cannot change status after checkout" error
+        const statusResponse = await apiService.toggleOnlineStatus(parseInt(currentAttendance.id), parseInt(user.id), false, "Shift completed / Checked out").catch(err => {
+          console.warn("⚠️ Failed to set chat status to Offline:", err);
+          return null;
+        });
+
+        // 4. API Call for Checkout
         await apiService.checkOut(
           parseInt(user.id),
           gpsLocationString,
@@ -736,6 +808,7 @@ const AttendanceManager: React.FC = () => {
           workReportFile,
           locationResult?.details || locationDetails
         );
+
         const istNow = getCurrentISTTime();
 
         // Calculate check-out status
@@ -745,7 +818,12 @@ const AttendanceManager: React.FC = () => {
           ...currentAttendance,
           checkOutTime: formatTimeIST(istNow),
           checkOutLocation: latestGeo || gpsLocationString,
+          checkOutSelfie: photoUri,
           status: statusInfo.checkOutStatus,
+          totalOnlineMinutes: statusResponse?.total_online_minutes ?? 0,
+          totalOfflineMinutes: statusResponse?.total_offline_minutes ?? 0,
+          effectiveWorkHours: statusResponse?.effective_work_hours ?? 0,
+          isOnline: false,
         };
         setCurrentAttendance(updated);
         setSelfAttendanceHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
@@ -754,14 +832,6 @@ const AttendanceManager: React.FC = () => {
 
         // Show status-specific message immediately
         const statusEmoji = statusInfo.checkOutStatus === "late" ? "⏰" : statusInfo.checkOutStatus === "early" ? "⚠️" : "✅";
-
-        // Auto-set chat status to offline after check-out
-        try {
-          await apiService.toggleOnlineStatus(parseInt(currentAttendance.id), parseInt(user.id), false, "Shift completed / Checked out");
-          console.log("✅ Chat status set to Offline after check-out");
-        } catch (chatErr) {
-          console.warn("⚠️ Failed to set chat status to Offline:", chatErr);
-        }
 
         Alert.alert(
           `${statusEmoji} ${statusInfo.checkOutStatus.toUpperCase()}`,
@@ -1191,16 +1261,8 @@ const AttendanceManager: React.FC = () => {
     }
   };
 
-  // Get unique departments from WFH requests for Admin filter
-  const wfhDepartments = React.useMemo(() => {
-    const depts = new Set<string>();
-    if (Array.isArray(wfhRequests)) {
-      wfhRequests.forEach((r) => {
-        if (r.department) depts.add(r.department);
-      });
-    }
-    return Array.from(depts).sort();
-  }, [wfhRequests]);
+  // State to store all unique departments (persists when filtering)
+  const [allWfhDepartments, setAllWfhDepartments] = useState<string[]>([]);
 
   const filteredWfhRequests = () => {
     if (!user) return [];
@@ -1262,6 +1324,19 @@ const AttendanceManager: React.FC = () => {
       }
 
       setWfhRequests(requests);
+
+      // Update the persistable department list only when fetching "all" 
+      // or if we don't have any departments yet
+      if (deptToFetch === "all" || allWfhDepartments.length === 0) {
+        const depts = new Set<string>();
+        requests.forEach((r) => {
+          if (r.department) depts.add(r.department);
+        });
+        const sortedDepts = Array.from(depts).sort();
+        if (sortedDepts.length > 0) {
+          setAllWfhDepartments(sortedDepts);
+        }
+      }
     } catch (error: any) {
       const errorMessage = "Unable to fetch Work From Home requests. Please try again later.";
       console.warn("❌ Failed to load WFH requests:", error?.message);
@@ -1280,13 +1355,11 @@ const AttendanceManager: React.FC = () => {
     if (!canApproveWfh) {
       Alert.alert(
         "Permission Denied",
-        isAdmin 
-          ? "Admin users can view WFH requests but cannot approve or reject them."
-          : "You do not have permission to approve or reject WFH requests."
+        "You do not have permission to approve or reject WFH requests. Only Admin, HR, and Managers can approve requests."
       );
       return;
     }
-    
+
     if (status === "rejected") {
       // Open rejection modal to get reason
       setRejectingRequestId(id);
@@ -1602,29 +1675,23 @@ const AttendanceManager: React.FC = () => {
             {/* Actions Section */}
             <View style={{ flex: 1 }}>
               {/* Department Filter for Admin */}
-              {user?.role?.toLowerCase() === "admin" && wfhDepartments.length > 0 && (
-                <View style={styles.wfhDeptFilterContainer}>
-                  <View style={styles.wfhDeptFilterLabel}>
-                    <Ionicons name="business-outline" size={14} color="#6b7280" />
-                    <Text style={styles.wfhDeptFilterLabelText}>Dept:</Text>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.wfhDeptFilterScroll} contentContainerStyle={styles.wfhDeptFilterScrollContent}>
-                    <TouchableOpacity
-                      style={[styles.wfhDeptFilterChip, wfhDeptFilter === "all" && styles.wfhDeptFilterChipActive]}
-                      onPress={() => setWfhDeptFilter("all")}
-                    >
-                      <Text style={[styles.wfhDeptFilterChipText, wfhDeptFilter === "all" && styles.wfhDeptFilterChipTextActive]}>All</Text>
-                    </TouchableOpacity>
-                    {wfhDepartments.map((dept) => (
-                      <TouchableOpacity
-                        key={dept}
-                        style={[styles.wfhDeptFilterChip, wfhDeptFilter === dept && styles.wfhDeptFilterChipActive]}
-                        onPress={() => setWfhDeptFilter(dept)}
-                      >
-                        <Text style={[styles.wfhDeptFilterChipText, wfhDeptFilter === dept && styles.wfhDeptFilterChipTextActive]}>{dept}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
+              {user?.role?.toLowerCase() === "admin" && allWfhDepartments.length > 0 && (
+                <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
+                  <Select
+                    value={wfhDeptFilter}
+                    onValueChange={(val) => setWfhDeptFilter(val)}
+                    items={[{ label: "All Departments", value: "all" }, ...allWfhDepartments.map((d: string) => ({ label: d, value: d }))]}
+                    placeholder="Select Department"
+                    leftIcon={
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Ionicons name="business" size={18} color="#6b7280" />
+                        <Text style={{ fontSize: 14, fontWeight: "600", color: "#6b7280" }}>Dept:</Text>
+                      </View>
+                    }
+                    activeColor="#10b981"
+                    chevronColor="#10b981"
+                    style={{ height: 50, borderRadius: 12 }}
+                  />
                 </View>
               )}
 
@@ -1911,11 +1978,50 @@ const AttendanceManager: React.FC = () => {
                             </View>
                           )}
                         </View>
+
+                        {/* Photos Display (WFH Self) */}
+                        {(currentAttendance?.selfie || currentAttendance?.checkOutSelfie) && (
+                          <View style={{ marginTop: 16, backgroundColor: '#fff', borderRadius: 20, padding: 16, borderWidth: 1, borderColor: '#f1f5f9', elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>Today's Photos</Text>
+                            <View style={{ flexDirection: 'row', gap: 12 }}>
+                              <View style={{ flex: 1, height: 100, borderRadius: 12, overflow: 'hidden', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#f1f5f9' }}>
+                                {isValidImageUri(currentAttendance?.selfie) ? (
+                                  <>
+                                    <Image source={{ uri: currentAttendance!.selfie! }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                                    <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(22, 163, 74, 0.8)', paddingVertical: 2, alignItems: 'center' }}>
+                                      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>IN</Text>
+                                    </View>
+                                  </>
+                                ) : (
+                                  <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                                    <Ionicons name="camera-outline" size={20} color="#cbd5e1" />
+                                    <Text style={{ fontSize: 9, color: '#94a3b8', marginTop: 2 }}>Check-in</Text>
+                                  </View>
+                                )}
+                              </View>
+                              <View style={{ flex: 1, height: 100, borderRadius: 12, overflow: 'hidden', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#f1f5f9' }}>
+                                {isValidImageUri(currentAttendance?.checkOutSelfie) ? (
+                                  <>
+                                    <Image source={{ uri: currentAttendance!.checkOutSelfie! }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                                    <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(220, 38, 38, 0.8)', paddingVertical: 2, alignItems: 'center' }}>
+                                      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>OUT</Text>
+                                    </View>
+                                  </>
+                                ) : (
+                                  <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                                    <Ionicons name="camera-outline" size={20} color="#cbd5e1" />
+                                    <Text style={{ fontSize: 9, color: '#94a3b8', marginTop: 2 }}>Check-out</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+                          </View>
+                        )}
                       </>
                     )}
 
                     {/* WFH Request History */}
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.sectionHeader}
                       onPress={() => navigation.navigate("WfhHistory")}
                       activeOpacity={0.7}
@@ -1935,6 +2041,12 @@ const AttendanceManager: React.FC = () => {
                             <Text style={styles.historyTimeText}>{item.checkInTime || "-"}</Text>
                             <Text style={styles.historyTimeText}> - </Text>
                             <Text style={styles.historyTimeText}>{item.checkOutTime || "-"}</Text>
+                            {(item.totalOnlineMinutes !== undefined && item.totalOnlineMinutes > 0) && (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 10, backgroundColor: '#f5f3ff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                <Ionicons name="time-outline" size={10} color="#7c3aed" />
+                                <Text style={{ fontSize: 10, color: '#7c3aed', fontWeight: '700', marginLeft: 2 }}>{formatMinutesToDuration(item.totalOnlineMinutes)}</Text>
+                              </View>
+                            )}
                           </View>
                         </View>
                       </View>
@@ -1957,6 +2069,13 @@ const AttendanceManager: React.FC = () => {
                       isCheckedOut={!!currentAttendance?.checkOutTime}
                       onStatusChange={(isOnline, summary) => {
                         console.log(`Status changed to ${isOnline ? 'Online' : 'Offline'}`, summary);
+                        if (summary && currentAttendance) {
+                          setCurrentAttendance(prev => prev ? ({
+                            ...prev,
+                            totalOnlineMinutes: summary.total_online_minutes ?? (prev as any).totalOnlineMinutes,
+                            effectiveWorkHours: summary.effective_work_hours ?? (prev as any).effectiveWorkHours,
+                          }) : null);
+                        }
                       }}
                     />
                   </View>
@@ -1997,7 +2116,60 @@ const AttendanceManager: React.FC = () => {
                         {currentAttendance?.checkOutTime || "Pending"}
                       </Text>
                     </View>
+
+                    {/* Total Work Time Block */}
+                    <View style={{ flex: 1.2, backgroundColor: '#eff6ff', borderRadius: 16, padding: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#dbeafe' }}>
+                      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', marginBottom: 8, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 }}>
+                        <Ionicons name="time" size={20} color="#2563eb" />
+                      </View>
+                      <Text style={{ fontSize: 12, color: '#64748b', fontWeight: '600', marginBottom: 4 }}>Work Time</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800', color: '#1e40af' }}>
+                        {formatMinutesToDuration(currentAttendance?.totalOnlineMinutes)}
+                      </Text>
+                    </View>
                   </View>
+
+                  {/* 3. Photos Display (Self) */}
+                  {(currentAttendance?.selfie || currentAttendance?.checkOutSelfie) && (
+                    <View style={{ paddingHorizontal: 20, paddingBottom: 16, paddingTop: 4 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Today's Photos</Text>
+                      <View style={{ flexDirection: 'row', gap: 12 }}>
+                        {/* Check-in Photo */}
+                        <View style={{ flex: 1, height: 120, borderRadius: 12, overflow: 'hidden', backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0' }}>
+                          {isValidImageUri(currentAttendance?.selfie) ? (
+                            <>
+                              <Image source={{ uri: currentAttendance!.selfie! }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                              <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(22, 163, 74, 0.8)', paddingVertical: 2, alignItems: 'center' }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>IN</Text>
+                              </View>
+                            </>
+                          ) : (
+                            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                              <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
+                              <Text style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>Check-in</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Check-out Photo */}
+                        <View style={{ flex: 1, height: 120, borderRadius: 12, overflow: 'hidden', backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0' }}>
+                          {isValidImageUri(currentAttendance?.checkOutSelfie) ? (
+                            <>
+                              <Image source={{ uri: currentAttendance!.checkOutSelfie! }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                              <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(220, 38, 38, 0.8)', paddingVertical: 2, alignItems: 'center' }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>OUT</Text>
+                              </View>
+                            </>
+                          ) : (
+                            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                              <Ionicons name="camera-outline" size={24} color="#cbd5e1" />
+                              <Text style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>Check-out</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  )}
                 </View>
 
                 {/* 3. Action Button (WFO) */}
@@ -2059,9 +2231,17 @@ const AttendanceManager: React.FC = () => {
                             {item.checkOutTime || "Pending"}
                           </Text>
                         </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                          <Ionicons name="location-outline" size={12} color="#9ca3af" style={{ marginRight: 4 }} />
-                          <Text style={{ fontSize: 11, color: '#6b7280' }}>{item.workLocation || "Work From Office"}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 12 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Ionicons name="location-outline" size={12} color="#9ca3af" style={{ marginRight: 4 }} />
+                            <Text style={{ fontSize: 11, color: '#6b7280' }}>{item.workLocation || "Work From Office"}</Text>
+                          </View>
+                          {(item.totalOnlineMinutes !== undefined && item.totalOnlineMinutes > 0) && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Ionicons name="time-outline" size={12} color="#3b82f6" style={{ marginRight: 4 }} />
+                              <Text style={{ fontSize: 11, color: '#3b82f6', fontWeight: '600' }}>{formatMinutesToDuration(item.totalOnlineMinutes)}</Text>
+                            </View>
+                          )}
                         </View>
                       </View>
                       <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: item.status === "late" ? "#ef4444" : "#f59e0b" }} />
@@ -3299,17 +3479,6 @@ const styles = StyleSheet.create({
   wfhFilterTextEnhancedActive: { color: "#fff" },
   wfhFilterBadge: { backgroundColor: "rgba(255,255,255,0.3)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, minWidth: 20, alignItems: "center" },
   wfhFilterBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-
-  // Department Filter Styles
-  wfhDeptFilterContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#f8fafc", borderRadius: 12, padding: 10, borderWidth: 1, borderColor: "#e5e7eb" },
-  wfhDeptFilterLabel: { flexDirection: "row", alignItems: "center", gap: 4, marginRight: 10 },
-  wfhDeptFilterLabelText: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
-  wfhDeptFilterScroll: { flex: 1 },
-  wfhDeptFilterScrollContent: { flexDirection: "row", gap: 8 },
-  wfhDeptFilterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: "#fff", borderWidth: 1, borderColor: "#e5e7eb" },
-  wfhDeptFilterChipActive: { backgroundColor: "#10b981", borderColor: "#10b981" },
-  wfhDeptFilterChipText: { fontSize: 12, fontWeight: "600", color: "#374151" },
-  wfhDeptFilterChipTextActive: { color: "#fff" },
 
   // Enhanced WFH Requests List
   wfhRequestsListEnhanced: { gap: 12, marginBottom: 20 },

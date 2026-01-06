@@ -49,6 +49,7 @@ import {
   validateWfhAdvanceNotice,
   getMinimumWfhStartDate,
   getAdvanceNoticeMessage,
+  getDatesInRange,
   WfhRequest,
 } from "../../utils/attendanceWfhLogic";
 type WfhStatus = "not_requested" | "pending" | "approved" | "rejected";
@@ -105,9 +106,19 @@ const formatDateToIST = (dateString: string | Date | undefined): string => {
   } catch { return "-"; }
 };
 
+const formatDurationDisplay = (minutes?: number): string => {
+  if (minutes === undefined || minutes <= 0) return "0 min";
+  const hrs = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  if (hrs === 0) return `${mins} min`;
+  if (mins === 0) return `${hrs} hr`;
+  return `${hrs} hr ${mins} min`;
+};
+
 const buildSelfieUrl = (path: string | null | undefined): string | null => {
   if (!path) return null;
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (path.startsWith('file://') || path.startsWith('content://')) return path;
   const baseUrl = apiService.getBaseUrl();
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${baseUrl}${cleanPath}`;
@@ -125,6 +136,9 @@ interface AttendanceRecord {
   workSummary?: string;
   workReportFileName?: string;
   workLocation?: "Work From Home" | "Work From Office";
+  totalOnlineMinutes?: number;
+  totalOfflineMinutes?: number;
+  effectiveWorkHours?: number;
 }
 
 // Animated Pulse Component for live status
@@ -200,6 +214,14 @@ export default function AttendancePage() {
   const isAdmin = isAdminRole(user?.role);
   const canPerformActions = canPerformAttendanceActions(user?.role);
 
+  // NEW: Enforce WFH mode logic available globally within component
+  const isWfhApprovedForToday = () => activeWfhToday !== null;
+  const wfhApprovedForToday = isWfhApprovedForToday();
+  const enforcedWorkMode = getEnforcedWorkMode(activeWfhToday, workMode);
+  const officeModeDisabled = isOfficeModeDisabled(activeWfhToday);
+  const workLocationLabel = currentAttendance?.workLocation || (wfhApprovedForToday ? "Work From Home" : (enforcedWorkMode === "wfh" ? "Work From Home" : "Work From Office"));
+  const canCheckInForMode = enforcedWorkMode === "office" || wfhApprovedForToday;
+
   // NEW: Auto-refresh on app state change (background -> foreground)
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
@@ -216,7 +238,7 @@ export default function AttendancePage() {
     useCallback(() => {
       console.log("👀 Screen focused - Refreshing data");
       handleMidnightRefresh();
-      return () => {};
+      return () => { };
     }, [lastCheckedDate])
   );
 
@@ -244,11 +266,11 @@ export default function AttendancePage() {
     try {
       const requests = await apiService.getMyWfhRequests();
       setAllWfhRequests(requests);
-      
+
       // Find active approved WFH for today
       const activeWfh = findActiveWfhForToday(requests);
       setActiveWfhToday(activeWfh);
-      
+
       // Also find any WFH request (any status) for today for UI display
       const anyWfhToday = findAnyWfhForToday(requests);
       if (anyWfhToday) {
@@ -257,7 +279,7 @@ export default function AttendancePage() {
         setWfhReason(anyWfhToday.reason || "");
         setWfhStartDate(anyWfhToday.start_date || "");
         setWfhEndDate(anyWfhToday.end_date || "");
-        
+
         // Auto-switch to WFH mode if approved
         if (activeWfh) {
           setWorkMode("wfh");
@@ -266,7 +288,7 @@ export default function AttendancePage() {
         setWfhRequestStatus("not_requested");
         setWfhRequestId(null);
       }
-      
+
       console.log(`✅ Loaded ${requests.length} WFH requests, active today: ${activeWfh ? 'Yes' : 'No'}`);
     } catch (error) {
       console.warn("Failed to load WFH requests:", error);
@@ -375,21 +397,46 @@ export default function AttendancePage() {
         const checkInDateIST = checkInDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
         // Parse selfie data - handle JSON format with check_in and check_out
-        let checkInSelfie = record.checkInSelfie || null;
-        let checkOutSelfie = record.checkOutSelfie || null;
+        let checkInSelfie = record.checkInSelfie || record.check_in_selfie || null;
+        let checkOutSelfie = record.checkOutSelfie || record.check_out_selfie || null;
 
-        if (!checkInSelfie && !checkOutSelfie && record.selfie) {
-          try {
-            if (typeof record.selfie === "string" && record.selfie.trim().startsWith("{")) {
-              const selfieData = JSON.parse(record.selfie);
-              checkInSelfie = selfieData.check_in || null;
-              checkOutSelfie = selfieData.check_out || null;
-            } else {
-              checkInSelfie = record.selfie;
+        if (record.selfie) {
+          if (typeof record.selfie === "string") {
+            try {
+              if (record.selfie.trim().startsWith("{")) {
+                const selfieData = JSON.parse(record.selfie);
+                if (!checkInSelfie) checkInSelfie = selfieData.check_in || selfieData.check_in_selfie || null;
+                if (!checkOutSelfie) checkOutSelfie = selfieData.check_out || selfieData.check_out_selfie || null;
+              } else if (!checkInSelfie) {
+                checkInSelfie = record.selfie;
+              }
+            } catch {
+              if (!checkInSelfie) checkInSelfie = record.selfie;
             }
-          } catch {
-            checkInSelfie = record.selfie;
+          } else if (typeof record.selfie === "object") {
+            if (!checkInSelfie) checkInSelfie = record.selfie.check_in || record.selfie.check_in_selfie || null;
+            if (!checkOutSelfie) checkOutSelfie = record.selfie.check_out || record.selfie.check_out_selfie || null;
           }
+        }
+
+        let onlineMinutes = record.total_online_minutes ?? record.totalOnlineMinutes ?? record.effective_work_hours ?? record.effectiveWorkHours ?? 0;
+        const offlineMinutes = record.total_offline_minutes ?? record.totalOfflineMinutes ?? 0;
+
+        // Fallback for duration calculation if online minutes is 0 but checked out
+        if (onlineMinutes === 0 && record.check_in && record.check_out) {
+          try {
+            const start = new Date(record.check_in).getTime();
+            const end = new Date(record.check_out).getTime();
+            if (!isNaN(start) && !isNaN(end)) {
+              const diffMins = Math.floor((end - start) / (1000 * 60));
+              onlineMinutes = Math.max(0, diffMins - offlineMinutes);
+            } else if (record.total_hours) {
+              // Another fallback if total_hours exists
+              onlineMinutes = Math.floor(record.total_hours * 60);
+            }
+          } catch (e) { }
+        } else if (onlineMinutes === 0 && record.total_hours) {
+          onlineMinutes = Math.floor(record.total_hours * 60);
         }
 
         return {
@@ -404,6 +451,9 @@ export default function AttendancePage() {
           workSummary: record.work_summary || record.workSummary,
           workReportFileName,
           workLocation: (record.work_location || record.workLocation) === "Work From Home" ? "Work From Home" : "Work From Office",
+          totalOnlineMinutes: onlineMinutes,
+          totalOfflineMinutes: offlineMinutes,
+          effectiveWorkHours: record.effective_work_hours ?? record.effectiveWorkHours ?? 0,
         };
       });
 
@@ -424,18 +474,42 @@ export default function AttendancePage() {
     }
     setIsCheckingIn(checkIn);
     setCameraVisible(true);
+    // Start fetching location in background while user is taking selfie
+    startBackgroundLocationFetch();
   };
 
   const takePicture = async () => {
     if (!cameraRef.current) return;
     try {
-      const photo = await CameraService.takePicture(cameraRef, { quality: 0.75, base64: true });
+      const photo = await CameraService.takePicture(cameraRef, { quality: 0.6, base64: true });
       setCameraVisible(false);
       await handleSubmitAttendance(photo);
     } catch (error) {
       console.error("Camera capture failed:", error);
       Alert.alert("Camera Error", "Failed to capture selfie. Please try again.");
     }
+  };
+
+  const locationRef = useRef<Promise<{ latitude: number; longitude: number }> | null>(null);
+  const lastLocationFetchTime = useRef<number>(0);
+
+  const startBackgroundLocationFetch = () => {
+    // Only fetch if last fetch was more than 30 seconds ago
+    const now = Date.now();
+    if (now - lastLocationFetchTime.current < 30000 && locationRef.current) {
+      console.log("♻️ Reusing recent location promise");
+      return;
+    }
+
+    console.log("📍 Starting background location fetch...");
+    lastLocationFetchTime.current = now;
+    locationRef.current = LocationService.getLocationWithRetry(3, {
+      accuracy: 'high',
+      timeout: 5000 // 5 seconds per attempt
+    }).catch(err => {
+      console.warn("⚠️ Background location fetch failed:", err);
+      return { latitude: 0, longitude: 0 }; // Fallback
+    });
   };
 
   const handleSubmitAttendance = async (photo: CameraPhoto) => {
@@ -445,59 +519,55 @@ export default function AttendancePage() {
     }
     setIsLoading(true);
     try {
-      // Get base64 image first (this should always work)
+      // 1. Image preparation (high priority)
       const base64Image = photo.base64 ? photo.base64 : await CameraService.photoToBase64(photo.uri);
 
-      // Try to get location with proper error handling
+      // 2. Get location (should be already fetching or finished)
       let coords: any = null;
-      let gpsLocationString = "0,0"; // Default fallback coordinates
+      let gpsLocationString = "0,0";
       let locationObtained = false;
 
       try {
-        console.log("📍 Attempting to get location...");
-        coords = await LocationService.getLocationWithRetry(2, { accuracy: 'balanced', timeout: 10000 });
-        setLocation(coords);
-        gpsLocationString = LocationService.formatCoordinatesForAPI(coords);
-        locationObtained = true;
+        console.log("📍 Resolving location promise...");
+        // If no background fetch started, start one now
+        if (!locationRef.current) {
+          startBackgroundLocationFetch();
+        }
 
-        console.log("✅ Location obtained:", gpsLocationString);
+        // Wait for location with a shorter additional timeout if needed
+        // but it should likely be ready by now
+        coords = await locationRef.current;
 
-        // Get address in background (don't wait for it)
-        LocationService.getAddressFromCoordinates(coords)
-          .then((address) => {
-            if (address?.formattedAddress) {
-              console.log("📍 Address:", address.formattedAddress);
-              setLocationAddress(address.formattedAddress);
-            }
-          })
-          .catch((err) => {
-            console.warn("⚠️ Could not get address:", err);
-          });
+        if (coords && (coords.latitude !== 0 || coords.longitude !== 0)) {
+          setLocation(coords);
+          gpsLocationString = LocationService.formatCoordinatesForAPI(coords);
+          locationObtained = true;
+          console.log("✅ Location obtained:", gpsLocationString);
+
+          // Get address in background
+          LocationService.getAddressFromCoordinates(coords)
+            .then((address) => {
+              if (address?.formattedAddress) setLocationAddress(address.formattedAddress);
+            })
+            .catch(() => { });
+        } else {
+          throw new Error("Invalid coordinates received");
+        }
       } catch (locationError) {
-        // Location failed, but continue with check-in
-        console.warn("⚠️ Location unavailable, continuing with check-in:", locationError);
-        setLocationAddress("Location unavailable - GPS may be disabled");
-
-        // Use default fallback coordinates
+        console.warn("⚠️ Location unavailable, using fallback:", locationError);
         gpsLocationString = "0,0";
         locationObtained = false;
 
-        // Show warning for office mode
         if (workMode === "office") {
-          Alert.alert(
-            "⚠️ Location Unavailable",
-            "GPS is not available. Please enable location services for accurate attendance tracking. Continuing with check-in.",
-            [{ text: "OK", onPress: () => { } }]
-          );
+          // Non-blocking warning
+          console.log("Location services suggested for office mode");
         }
       }
 
+      // 3. API Call
       if (isCheckingIn) {
-        // Determine work location based on enforced mode (WFH takes priority if approved)
         const workLocationMode = enforcedWorkMode === "wfh" ? "wfh" : "office";
         const workLocationLabel = enforcedWorkMode === "wfh" ? "Work From Home" : "Work From Office";
-
-        console.log("📍 Check-in with work location:", workLocationLabel);
 
         const response = await apiService.checkIn(
           parseInt(user.id),
@@ -522,32 +592,23 @@ export default function AttendancePage() {
         setCurrentAttendance(record);
         setAttendanceHistory((prev) => [record, ...prev]);
 
-        // Show success with location info
-        const locationInfo = locationObtained ? "✅ Location detected" : "⚠️ Location unavailable";
+        // Background status update
+        apiService.toggleOnlineStatus(response.attendance_id, parseInt(user.id), true).catch(() => { });
 
-        // Auto-set chat status to online after check-in
-        try {
-          await apiService.toggleOnlineStatus(response.attendance_id, parseInt(user.id), true);
-          console.log("✅ Chat status set to Online after check-in");
-        } catch (chatErr) {
-          console.warn("⚠️ Failed to set chat status to Online:", chatErr);
-        }
-
-        Alert.alert(
-          "✅ Check-in Successful",
-          `${workLocationLabel}\n${locationInfo}`,
-          [{ text: "OK" }]
-        );
-
-        // Refresh data in background (don't wait)
+        Alert.alert("✅ Check-in Successful", `${workLocationLabel}`, [{ text: "OK" }]);
         loadAttendanceData().catch(() => { });
       } else if (currentAttendance) {
-        // Determine work location based on enforced mode
         const workLocationMode = enforcedWorkMode === "wfh" ? "wfh" : "office";
         const workLocationLabel = enforcedWorkMode === "wfh" ? "Work From Home" : "Work From Office";
 
-        console.log("📍 Check-out with work location:", workLocationLabel);
+        // 3. Toggle status to Offline and get the final accumulated time BEFORE checkout
+        // This avoids "Cannot change status after checkout" error
+        const statusResponse = await apiService.toggleOnlineStatus(parseInt(currentAttendance.id), parseInt(user.id), false, "Shift completed").catch(err => {
+          console.log("Toggle status error on checkout:", err);
+          return null;
+        });
 
+        // 4. API Call for Checkout
         await apiService.checkOut(
           parseInt(user.id),
           gpsLocationString,
@@ -558,45 +619,59 @@ export default function AttendancePage() {
 
         const istNow = getCurrentISTTime();
         const formattedTime = formatTimeToIST(istNow);
+
+        let totalOnlineMins = statusResponse?.total_online_minutes ?? currentAttendance.totalOnlineMinutes ?? 0;
+        const totalOfflineMins = statusResponse?.total_offline_minutes ?? currentAttendance.totalOfflineMinutes ?? 0;
+
+        // Fallback for duration calculation if online minutes is 0
+        if (totalOnlineMins === 0 && currentAttendance.checkInTime) {
+          try {
+            // Need to handle both string and potential date objects for checkInTime fallback
+            const startTime = currentAttendance.checkInTime.includes(':')
+              ? new Date(`${formatIST(istNow, 'yyyy-MM-dd')}T${currentAttendance.checkInTime}`).getTime()
+              : new Date(currentAttendance.checkInTime).getTime();
+
+            const endTime = istNow.getTime();
+            if (!isNaN(startTime) && !isNaN(endTime)) {
+              const diffMins = Math.floor((endTime - startTime) / (1000 * 60));
+              totalOnlineMins = Math.max(0, diffMins - totalOfflineMins);
+            }
+          } catch (e) {
+            console.log("Fallback calculation error:", e);
+          }
+        }
+
         const updated: AttendanceRecord = {
           ...currentAttendance,
           checkOutTime: formattedTime,
+          checkOutSelfie: photo.uri,
           workSummary: workSummaryForCheckout || "Completed daily tasks",
           workReportFileName: workReportFile?.name,
           workLocation: workLocationLabel,
+          // Update hours immediately from the toggle status response or fallback
+          totalOnlineMinutes: totalOnlineMins,
+          effectiveWorkHours: statusResponse?.effective_work_hours ?? currentAttendance.effectiveWorkHours,
+          totalOfflineMinutes: totalOfflineMins,
         };
 
         setCurrentAttendance(updated);
         setAttendanceHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+
+        // Reset checkout fields
         setWorkSummaryForCheckout("");
         setTodaysWork("");
         setWorkReportFile(null);
 
-        // Show success with location info
-        const locationInfo = locationObtained ? "✅ Location detected" : "⚠️ Location unavailable";
-
-        // Auto-set chat status to offline after check-out
-        try {
-          await apiService.toggleOnlineStatus(parseInt(currentAttendance.id), parseInt(user.id), false, "Shift completed / Checked out");
-          console.log("✅ Chat status set to Offline after check-out");
-        } catch (chatErr) {
-          console.warn("⚠️ Failed to set chat status to Offline:", chatErr);
-        }
-
-        Alert.alert(
-          "✅ Check-out Successful",
-          `${workLocationLabel}\n${locationInfo}`,
-          [{ text: "OK" }]
-        );
-
-        // Refresh data in background (don't wait)
+        Alert.alert("✅ Check-out Successful", `${workLocationLabel}`, [{ text: "OK" }]);
         loadAttendanceData().catch(() => { });
       }
     } catch (error: any) {
       console.error("Failed to submit attendance:", error);
-      Alert.alert("Attendance Error", error.message || "Unable to submit attendance. Please try again.");
+      Alert.alert("Attendance Error", error.message || "Unable to submit. Please try again.");
     } finally {
       setIsLoading(false);
+      // Clear location ref after use to force refresh next time if needed
+      locationRef.current = null;
     }
   };
 
@@ -661,7 +736,7 @@ export default function AttendancePage() {
       Alert.alert("Required", "Please select an end date.");
       return;
     }
-    
+
     // NEW: Validate 24-hour advance notice rule
     const advanceNoticeValidation = validateWfhAdvanceNotice(wfhStartDate, wfhEndDate);
     if (!advanceNoticeValidation.isValid) {
@@ -671,7 +746,21 @@ export default function AttendancePage() {
       );
       return;
     }
-    
+
+    // NEW: Check if user has already checked in from office for any of the requested dates
+    const datesInRange = getDatesInRange(wfhStartDate, wfhEndDate);
+    const hasOfficeAttendance = attendanceHistory.some(record =>
+      datesInRange.includes(record.date) && record.workLocation === "Work From Office"
+    );
+
+    if (hasOfficeAttendance) {
+      Alert.alert(
+        "Invalid Request",
+        "You have already checked in from the office for one or more dates in this range. WFH cannot be applied for days where office attendance is already recorded."
+      );
+      return;
+    }
+
     if (!user?.id) {
       Alert.alert("Error", "User not found. Please log in again.");
       return;
@@ -696,26 +785,13 @@ export default function AttendancePage() {
     }
   };
 
-  // Check if WFH is approved for today (within date range)
-  const isWfhApprovedForToday = (): boolean => {
-    // Use the centralized logic
-    return activeWfhToday !== null;
-  };
-
-  const wfhApprovedForToday = isWfhApprovedForToday();
-  // NEW: Enforce WFH mode when approved
-  const enforcedWorkMode = getEnforcedWorkMode(activeWfhToday, workMode);
-  const officeModeDisabled = isOfficeModeDisabled(activeWfhToday);
-  const workLocationLabel = currentAttendance?.workLocation || (wfhApprovedForToday ? "Work From Home" : (enforcedWorkMode === "wfh" ? "Work From Home" : "Work From Office"));
-  const canCheckInForMode = enforcedWorkMode === "office" || wfhApprovedForToday;
-
   const handleCheckInPress = () => {
     // Admin cannot check-in
     if (isAdmin) {
       Alert.alert("Read-Only Access", "Admin users can view attendance but cannot check in/out.");
       return;
     }
-    
+
     if (enforcedWorkMode === "wfh") {
       // Validate WFH check-in
       const validation = validateWfhCheckIn(activeWfhToday, currentAttendance);
@@ -733,7 +809,7 @@ export default function AttendancePage() {
       Alert.alert("Read-Only Access", "Admin users can view attendance but cannot check in/out.");
       return;
     }
-    
+
     if (enforcedWorkMode === "wfh") {
       const validation = validateWfhCheckOut(activeWfhToday, currentAttendance);
       if (!validation.canCheckOut) {
@@ -742,6 +818,8 @@ export default function AttendancePage() {
       }
     }
     setShowCheckoutModal(true);
+    // Pre-fetch location while user fills work summary
+    startBackgroundLocationFetch();
   };
 
   const formatTime = (time?: string) => (time ? time : "-");
@@ -838,26 +916,25 @@ export default function AttendancePage() {
     return (
       <View style={styles.cameraContainer}>
         <StatusBar style="light" backgroundColor="transparent" translucent />
-        <CameraView ref={cameraRef} style={{ flex: 1 }} facing="front">
-          <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
-            <LinearGradient colors={["rgba(0,0,0,0.4)", "transparent", "rgba(0,0,0,0.8)"]} locations={[0, 0.3, 1]} style={styles.cameraGradient}>
-              <View style={styles.cameraControls}>
-                <Text style={styles.cameraTitle}>{isCheckingIn ? "Check-in Selfie" : "Check-out Selfie"}</Text>
-                <Text style={styles.cameraSubtitle}>Position your face in the frame</Text>
-                <View style={styles.captureButtonContainer}>
-                  <TouchableOpacity style={styles.captureButton} onPress={takePicture} activeOpacity={0.8}>
-                    <View style={styles.captureInner}>
-                      <Ionicons name="camera" size={28} color="#1e40af" />
-                    </View>
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity style={styles.cameraCancelBtn} onPress={() => setCameraVisible(false)}>
-                  <Text style={styles.cameraCancelText}>Cancel</Text>
+        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" />
+        <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+          <LinearGradient colors={["rgba(0,0,0,0.4)", "transparent", "rgba(0,0,0,0.8)"]} locations={[0, 0.3, 1]} style={styles.cameraGradient}>
+            <View style={styles.cameraControls}>
+              <Text style={styles.cameraTitle}>{isCheckingIn ? "Check-in Selfie" : "Check-out Selfie"}</Text>
+              <Text style={styles.cameraSubtitle}>Position your face in the frame</Text>
+              <View style={styles.captureButtonContainer}>
+                <TouchableOpacity style={styles.captureButton} onPress={takePicture} activeOpacity={0.8}>
+                  <View style={styles.captureInner}>
+                    <Ionicons name="camera" size={28} color="#1e40af" />
+                  </View>
                 </TouchableOpacity>
               </View>
-            </LinearGradient>
-          </SafeAreaView>
-        </CameraView>
+              <TouchableOpacity style={styles.cameraCancelBtn} onPress={() => setCameraVisible(false)}>
+                <Text style={styles.cameraCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
+        </SafeAreaView>
       </View>
     );
   }
@@ -887,6 +964,15 @@ export default function AttendancePage() {
                 <Text style={styles.headerSubtitle}>Track your daily check-ins</Text>
               </View>
               <View style={styles.headerRight}>
+                {/* View All Records Button */}
+                <TouchableOpacity
+                  style={styles.viewRecordsBtn}
+                  onPress={() => navigation.navigate('AttendanceRecords' as never)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="list-outline" size={16} color={Colors.primary} />
+                  <Text style={styles.viewRecordsText}>Records</Text>
+                </TouchableOpacity>
                 <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
                   {statusInfo.status === "in_progress" && <PulseIndicator color={statusInfo.color} />}
                   <Text style={[styles.statusBadgeText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
@@ -1153,6 +1239,13 @@ export default function AttendancePage() {
                 isCheckedOut={!!currentAttendance?.checkOutTime}
                 onStatusChange={(isOnline, summary) => {
                   console.log(`Status changed to ${isOnline ? 'Online' : 'Offline'}`, summary);
+                  if (summary && currentAttendance) {
+                    setCurrentAttendance(prev => prev ? ({
+                      ...prev,
+                      totalOnlineMinutes: summary.total_online_minutes ?? prev.totalOnlineMinutes,
+                      effectiveWorkHours: summary.effective_work_hours ?? prev.effectiveWorkHours,
+                    }) : null);
+                  }
                 }}
               />
             )}
@@ -1308,6 +1401,20 @@ export default function AttendancePage() {
                       <Text style={styles.attachmentText}>{currentAttendance.workReportFileName}</Text>
                     </View>
                   )}
+                </View>
+              )}
+
+              {/* Total Working Hours Post-Checkout */}
+              {currentAttendance?.checkOutTime && (
+                <View style={[styles.workSummarySection, { backgroundColor: "#f0fdf4", borderColor: "#bbf7d0", marginTop: 12 }]}>
+                  <View style={styles.workSummaryHeader}>
+                    <Ionicons name="time" size={18} color="#16a34a" />
+                    <Text style={[styles.workSummaryTitle, { color: "#166534" }]}>Working Hours</Text>
+                  </View>
+                  <Text style={[styles.currentTime, { fontSize: 24, color: "#166534" }]}>
+                    {formatDurationDisplay(currentAttendance.totalOnlineMinutes ?? (currentAttendance.effectiveWorkHours ? currentAttendance.effectiveWorkHours * 60 : 0))}
+                  </Text>
+                  <Text style={[styles.dayText, { color: "#15803d" }]}>Only counting active online time</Text>
                 </View>
               )}
 
@@ -1476,7 +1583,7 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: Colors.background },
   safeArea: { flex: 1 },
   cameraContainer: { flex: 1, backgroundColor: "#000" },
-  
+
   // Modern White Header Styles
   headerContainer: {
     backgroundColor: Colors.surface,
@@ -1493,7 +1600,23 @@ const styles = StyleSheet.create({
   headerTitleContainer: { flex: 1, marginLeft: Spacing.md },
   headerTitle: { fontSize: 20, fontWeight: "700", color: Colors.headerText },
   headerSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  headerRight: { alignItems: "flex-end" },
+  headerRight: { alignItems: "flex-end", flexDirection: "row", gap: 8 },
+  viewRecordsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: Colors.primary + "30",
+  },
+  viewRecordsText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: Colors.primary,
+  },
   statusBadge: {
     flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6,
     borderRadius: BorderRadius.sm, gap: 6,
@@ -1501,7 +1624,7 @@ const styles = StyleSheet.create({
   statusBadgeText: { fontSize: 12, fontWeight: "600" },
   dateCard: {
     flexDirection: "row", alignItems: "center", backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg, padding: Spacing.lg, 
+    borderRadius: BorderRadius.lg, padding: Spacing.lg,
     borderWidth: 1, borderColor: Colors.border,
     ...Shadows.card,
   },

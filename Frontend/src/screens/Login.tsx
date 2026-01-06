@@ -163,7 +163,7 @@ const LoginScreen = () => {
 
       const message = isDevelopment
         ? `OTP sent to ${email}\n\n🔑 DEV OTP: ${response.otp}\n\nExpires in ${response.expires_in_minutes || 2} minutes`
-        : `OTP sent to ${email}\n\nExpires in ${response.expires_in_minutes || 2} minutes`;
+        : `OTP sent to ${email}\n\nExpires in ${response.expires_in_minutes || 5} minutes`;
 
       Alert.alert("✅ OTP Sent", message, [
         {

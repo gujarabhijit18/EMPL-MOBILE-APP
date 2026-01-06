@@ -20,6 +20,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { apiService, WfhRequestResponse } from "../../lib/api";
 import { formatIST } from "../../utils/dateTime";
 import { canEditWfhRequest, canDeleteWfhRequest } from "../../utils/wfhEnhancedValidation";
+import { getRoleDisplayName, normalizeRole } from "../../utils/wfhApprovalLogic";
 import { Colors, Shadows, BorderRadius, Spacing, Gradients } from "../../constants/designSystem";
 
 export default function WfhHistoryScreen() {
@@ -184,10 +185,43 @@ export default function WfhHistoryScreen() {
                     </View>
                 )}
 
+                {/* Approval Info for approved requests */}
+                {item.status.toLowerCase() === "approved" && item.approved_by && (
+                    <View style={styles.approvalInfoBox}>
+                        <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                        <View style={styles.approvalInfoContent}>
+                            <Text style={styles.approvalInfoText}>
+                                Approved by {item.approver_name || `User ${item.approved_by}`}
+                                {item.approver_role && (
+                                    <Text style={styles.approverRole}> ({getRoleDisplayName(normalizeRole(item.approver_role))})</Text>
+                                )}
+                            </Text>
+                            {item.approved_at && (
+                                <Text style={styles.approvalDate}>
+                                    {formatIST(item.approved_at, "MMM dd, yyyy 'at' hh:mm a")}
+                                </Text>
+                            )}
+                        </View>
+                    </View>
+                )}
+
                 {item.status.toLowerCase() === "rejected" && item.rejection_reason && (
                     <View style={styles.rejectionBox}>
                         <Ionicons name="alert-circle" size={16} color="#ef4444" />
-                        <Text style={styles.rejectionText}>Rejection Reason: {item.rejection_reason}</Text>
+                        <View style={styles.rejectionContent}>
+                            <Text style={styles.rejectionText}>
+                                Rejected by {item.approver_name || `User ${item.approved_by}`}
+                                {item.approver_role && (
+                                    <Text style={styles.approverRole}> ({getRoleDisplayName(normalizeRole(item.approver_role))})</Text>
+                                )}
+                            </Text>
+                            <Text style={styles.rejectionReasonText}>Reason: {item.rejection_reason}</Text>
+                            {item.approved_at && (
+                                <Text style={styles.rejectionDate}>
+                                    {formatIST(item.approved_at, "MMM dd, yyyy 'at' hh:mm a")}
+                                </Text>
+                            )}
+                        </View>
                     </View>
                 )}
 
@@ -413,8 +447,17 @@ const styles = StyleSheet.create({
     reasonLabel: { fontSize: 11, fontWeight: "600", color: Colors.textSecondary, marginBottom: 2 },
     reasonText: { fontSize: 13, color: "#334155", lineHeight: 18 },
 
-    rejectionBox: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, backgroundColor: Colors.errorLight, padding: 10, borderRadius: BorderRadius.sm, marginTop: Spacing.md },
-    rejectionText: { flex: 1, fontSize: 12, color: "#b91c1c" },
+    rejectionBox: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm, backgroundColor: Colors.errorLight, padding: 10, borderRadius: BorderRadius.sm, marginTop: Spacing.md, borderWidth: 1, borderColor: "#fecaca" },
+    rejectionContent: { flex: 1 },
+    rejectionText: { fontSize: 12, color: "#b91c1c", fontWeight: "600" },
+    rejectionReasonText: { fontSize: 12, color: "#b91c1c", marginTop: 4, lineHeight: 18 },
+    rejectionDate: { fontSize: 11, color: "#dc2626", marginTop: 4 },
+
+    approvalInfoBox: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm, backgroundColor: "#d1fae5", padding: 10, borderRadius: BorderRadius.sm, marginTop: Spacing.md, borderWidth: 1, borderColor: "#a7f3d0" },
+    approvalInfoContent: { flex: 1 },
+    approvalInfoText: { fontSize: 12, color: "#065f46", fontWeight: "600" },
+    approverRole: { fontWeight: "500", color: "#047857" },
+    approvalDate: { fontSize: 11, color: "#059669", marginTop: 4 },
 
     lockedBox: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, backgroundColor: "#f1f5f9", padding: 10, borderRadius: BorderRadius.sm, marginTop: Spacing.md, borderWidth: 1, borderColor: Colors.border },
     lockedText: { flex: 1, fontSize: 12, color: Colors.textSecondary, fontWeight: "500" },

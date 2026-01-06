@@ -146,6 +146,7 @@ export interface LeaveRequestResponse {
   rejection_reason?: string | null;
   comments?: string;
   name?: string;
+  employee_name?: string;
   department?: string;
   role?: string;
   profile_photo?: string;
@@ -183,6 +184,7 @@ export interface LeaveSummary {
     [key: string]: {
       taken: number;
       remaining: number;
+      allocated?: number;
     };
   };
 }
@@ -250,7 +252,7 @@ export interface WfhRequestResponse {
   user_id: number;
   start_date: string;
   end_date: string;
-  wfh_type: "Full Day" | "First Half" | "Second Half";
+  wfh_type: "Full Day" | "First Half" | "Second Half" | "Half Day";
   reason: string;
   status: "Pending" | "Approved" | "Rejected";
   approved_by: number | null;
@@ -265,6 +267,7 @@ export interface WfhRequestResponse {
   department?: string;
   role?: string;
   approver_name?: string | null;
+  approver_role?: string | null; // Role of the approver (admin, hr, manager)
   // Legacy support
   id?: number;
   date?: string;
@@ -283,9 +286,11 @@ export interface OnlineStatusResponse {
   total_online_minutes?: number;
   total_offline_minutes?: number;
   current_session_minutes?: number;
+  last_status_change?: string;
 }
 
 export interface ToggleStatusResponse {
+  id?: number;
   success?: boolean;
   message: string;
   is_online: boolean;
@@ -294,6 +299,7 @@ export interface ToggleStatusResponse {
   total_online_minutes?: number;
   total_offline_minutes?: number;
   effective_work_hours?: number;
+  last_status_change?: string;
 }
 
 export interface OnlineStatusSummary {
@@ -562,7 +568,7 @@ class ApiService {
   }
 
   // 🧠 Universal request handler with iOS auth retry fix
-  private async request(endpoint: string, options: RequestInit = {}, retryCount: number = 0, suppressNotFoundError: boolean = false): Promise<any> {
+  private async request(endpoint: string, options: RequestInit = {}, retryCount: number = 0, suppressErrorLog: boolean = false): Promise<any> {
     const MAX_AUTH_RETRIES = 2;
 
     let token = await this.getToken();
@@ -638,7 +644,7 @@ class ApiService {
           }
 
           // Retry request with fresh token
-          return this.request(endpoint, options, retryCount + 1, suppressNotFoundError);
+          return this.request(endpoint, options, retryCount + 1, suppressErrorLog);
         }
 
         // Handle validation errors (422)
@@ -672,8 +678,8 @@ class ApiService {
           }
         }
 
-        // Suppress error logging for 404 errors if flag is set (e.g., for optional endpoints like online-status)
-        if (!(suppressNotFoundError && response.status === 404)) {
+        // Suppress error logging if flag is set
+        if (!suppressErrorLog) {
           console.error(`❌ API Error: ${errorMessage}`, {
             url,
             status: response.status,
@@ -689,11 +695,10 @@ class ApiService {
       console.log(`✅ API Success: ${options.method || 'GET'} ${url}`);
       return data;
     } catch (error: any) {
-      // Suppress error logging for 404 errors if flag is set (e.g., for optional endpoints like online-status)
       const is404Error = error.message?.includes("404") ||
         error.message?.includes("No active attendance") ||
         error.message?.includes("not checked in today");
-      if (!(suppressNotFoundError && is404Error)) {
+      if (!suppressErrorLog && !is404Error) {
         console.error("❌ API Error:", error);
       }
 
@@ -1153,12 +1158,19 @@ class ApiService {
   // 🔹 Leave APIs
   // ======================
 
+  // 0. GET - Get Leave Balance
+  async getLeaveBalance(): Promise<any> {
+    console.log("📥 Fetching leave balance");
+    // openapi: GET /leave/balance
+    // Suppress logs because backend validation errors (500) are common when balances are inconsistent
+    return this.request("/leave/balance", {}, 0, true);
+  }
+
   // 1. GET - View My Leaves
   // 1. GET - View My Leaves
-  async getMyLeaves(status?: string, page?: number, pageSize?: number): Promise<LeaveRequestResponse[]> {
-    // openapi: /leave/ accepts 'period' (current_month, last_3_months, last_6_months, last_1_year)
-    // We request 'last_1_year' to ensure we get enough history for the UI to filter locally.
-    const endpoint = `/leave/?period=last_1_year`;
+  async getMyLeaves(period: string = 'current_month'): Promise<LeaveRequestResponse[]> {
+    // openapi: /leave/ accepts 'period' (current_month, last_3_months, last_6_months, last_1_year, all)
+    const endpoint = `/leave/?period=${period}`;
 
     console.log("📥 Fetching my leaves:", endpoint);
     try {
@@ -1212,12 +1224,12 @@ class ApiService {
       leaves.forEach((l: any) => {
         const days = l.days || 1;
         const leaveType = l.leave_type || "Annual Leave";
-        
+
         // Initialize leave type if not exists
         if (!summary.leave_by_type[leaveType]) {
           summary.leave_by_type[leaveType] = { taken: 0, remaining: 0 };
         }
-        
+
         if (l.status === 'Approved') {
           summary.total_days_approved += days;
           summary.total_days_taken += days;
@@ -1227,7 +1239,7 @@ class ApiService {
           summary.total_days_pending += days;
         }
       });
-      
+
       return summary;
 
     } catch (error: any) {
@@ -1263,7 +1275,7 @@ class ApiService {
     // openapi: PUT /leave/{leave_id}
     // Required fields: leave_type, start_date, end_date, days, reason, comments
     const endpoint = `/leave/${leaveId}`;
-    
+
     // Calculate days if not provided
     let days = leaveData.days;
     if (!days && leaveData.start_date && leaveData.end_date) {
@@ -1271,7 +1283,7 @@ class ApiService {
       const end = new Date(leaveData.end_date);
       days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     }
-    
+
     const updatePayload = {
       leave_type: leaveData.leave_type,
       start_date: leaveData.start_date,
@@ -1280,7 +1292,7 @@ class ApiService {
       reason: leaveData.reason || "",
       comments: leaveData.comments || "",
     };
-    
+
     return this.request(endpoint, {
       method: "PUT",
       body: JSON.stringify(updatePayload),
@@ -1349,6 +1361,19 @@ class ApiService {
     } catch (error: any) {
       console.error("❌ Failed to fetch team leaves:", error);
       return { leaves: [], total: 0, page: 1, page_size: 0, total_pages: 0 };
+    }
+  }
+
+  // 8.1 GET - Get Approval History
+  async getApprovalHistory(): Promise<LeaveRequestResponse[]> {
+    console.log("📥 Fetching approval history");
+    try {
+      // openapi: GET /leave/approvals/history
+      const response = await this.request("/leave/approvals/history");
+      return Array.isArray(response) ? response : (response.leaves || []);
+    } catch (error) {
+      console.warn("⚠️ Approval history fetch failed:", error);
+      return [];
     }
   }
 
@@ -1464,7 +1489,7 @@ class ApiService {
     const params = new URLSearchParams();
     if (startDate) params.append('start_date', startDate);
     if (endDate) params.append('end_date', endDate);
-    
+
     const queryString = params.toString();
     const endpoint = `/calendar/holidays${queryString ? `?${queryString}` : ''}`;
 
@@ -1486,18 +1511,18 @@ class ApiService {
    */
   async createHoliday(holidayData: HolidayCreateRequest): Promise<Holiday> {
     console.log("📤 Creating holiday:", holidayData);
-    
+
     // Validate required fields before sending
     if (!holidayData.date || !holidayData.name) {
       throw new Error("Holiday date and name are required");
     }
-    
+
     // Build request body - only include defined values, no null/undefined
     const requestBody: Record<string, any> = {
       date: holidayData.date,
       name: holidayData.name,
     };
-    
+
     // Add optional fields only if they have values
     if (holidayData.description !== undefined && holidayData.description !== null) {
       requestBody.description = holidayData.description;
@@ -1505,7 +1530,7 @@ class ApiService {
     if (holidayData.is_recurring !== undefined && holidayData.is_recurring !== null) {
       requestBody.is_recurring = Boolean(holidayData.is_recurring);
     }
-    
+
     return this.request("/calendar/holidays", {
       method: "POST",
       body: JSON.stringify(requestBody),
@@ -1522,7 +1547,7 @@ class ApiService {
     if (typeof holidayId !== 'number' || isNaN(holidayId)) {
       throw new Error("Holiday ID must be a valid number");
     }
-    
+
     console.log("🗑️ Deleting holiday:", holidayId);
     return this.request(`/calendar/holidays/${holidayId}`, {
       method: "DELETE",
@@ -2030,6 +2055,17 @@ class ApiService {
     } catch (error) {
       console.log("⚠️ Could not fetch task history:", error);
       return [];
+    }
+  }
+
+  // 7.1 GET - Deadline Warnings
+  async getDeadlineWarnings(userId: number): Promise<any> {
+    console.log("📥 Fetching deadline warnings for user:", userId);
+    try {
+      return await this.request(`/tasks/deadline-warnings/${userId}`);
+    } catch (error) {
+      console.log("⚠️ Could not fetch deadline warnings:", error);
+      return { overdue: [], upcoming: [] };
     }
   }
 
@@ -3943,7 +3979,7 @@ class ApiService {
     other_leave_allocation: number;
   }): Promise<any> {
     console.log("📤 Updating global leave allocation:", allocationData);
-    
+
     // Use PUT /calendar/allocation which doesn't require config_id
     return this.request("/calendar/allocation", {
       method: "PUT",
@@ -4023,7 +4059,7 @@ class ApiService {
     // Build query params - only attach if provided
     const params = new URLSearchParams();
     if (department) params.append('department', department);
-    
+
     const queryString = params.toString();
     const endpoint = `/calendar/weekoffs${queryString ? `?${queryString}` : ''}`;
 
@@ -4045,7 +4081,7 @@ class ApiService {
    */
   async setWeekOffRule(weekOffData: WeekOffRuleCreateRequest): Promise<WeekOffRule> {
     console.log("📤 Setting week-off rule:", weekOffData);
-    
+
     // Validate required fields
     if (!weekOffData.department || typeof weekOffData.department !== 'string') {
       throw new Error("Department name is required");
@@ -4053,22 +4089,22 @@ class ApiService {
     if (!Array.isArray(weekOffData.days) || weekOffData.days.length === 0) {
       throw new Error("Days must be a non-empty array of weekday names");
     }
-    
+
     // Validate weekday names
     const validDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const invalidDays = weekOffData.days.filter(day => !validDays.includes(day));
     if (invalidDays.length > 0) {
       throw new Error(`Invalid weekday names: ${invalidDays.join(', ')}. Valid values: ${validDays.join(', ')}`);
     }
-    
+
     // Remove duplicate days
     const uniqueDays = [...new Set(weekOffData.days)];
-    
+
     const requestBody: WeekOffRuleCreateRequest = {
       department: weekOffData.department,
       days: uniqueDays,
     };
-    
+
     return this.request("/calendar/weekoffs", {
       method: "POST",
       body: JSON.stringify(requestBody),
@@ -4085,7 +4121,7 @@ class ApiService {
     if (typeof ruleId !== 'number' || isNaN(ruleId)) {
       throw new Error("Rule ID must be a valid number");
     }
-    
+
     console.log("🗑️ Deleting week-off rule:", ruleId);
     return this.request(`/calendar/weekoffs/${ruleId}`, {
       method: "DELETE",

@@ -53,7 +53,38 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
 
   useEffect(() => {
     loadStatusData();
+
+    // Auto-refresh active work time every 2 minutes (120000ms) if session is active
+    let intervalId: NodeJS.Timeout;
+    const isSessionActive = !record.check_out && record.check_in;
+
+    if (isSessionActive) {
+      intervalId = setInterval(() => {
+        refreshActiveTime();
+      }, 2 * 60 * 1000); // 2 minutes
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [record]);
+
+  const refreshActiveTime = async () => {
+    if (!record.user_id || record.check_out) return;
+    try {
+      const onlineStat = await apiService.getOnlineStatus(record.user_id);
+      if (onlineStat) {
+        setOnlineStatusData((prev: any) => ({
+          ...prev, // Keep existing data just in case
+          ...onlineStat, // Overwrite with new status
+          is_online: onlineStat.is_online ?? true, // Default to true if active
+        }));
+      }
+    } catch (error) {
+      // Silent fail for background refresh
+      // console.log("Background refresh failed:", error);
+    }
+  };
 
   const loadStatusData = async () => {
     try {
@@ -73,6 +104,8 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
       }
 
       // Use online status data from record if available (from backend)
+      // BUT if it's an active session (no check_out), verify if we should fetch fresh data
+      // For static lists, simple record data is fine initially. Background refresh handles updates.
       if (record.totalOnlineMinutes !== undefined || record.totalOfflineMinutes !== undefined) {
         setOnlineStatusData({
           is_online: record.isOnline ?? record.is_online ?? !record.check_out,
@@ -80,6 +113,12 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
           total_offline_minutes: record.totalOfflineMinutes ?? 0,
           effective_work_hours: record.effectiveWorkHours ?? 0,
         });
+
+        // If it's active session, trigger one immediate fresh fetch to ensure up-to-date info
+        // (The list might have stale data from 10 mins ago)
+        if (!record.check_out) {
+          refreshActiveTime();
+        }
       } else if (record.user_id && !record.check_out) {
         // Fetch online status if not in record and user is still checked in
         try {
@@ -114,7 +153,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
     }
   };
 
-  const formatLogTime = (isoString: string | null): string => {
+  const formatLogTime = (isoString: string | null | undefined): string => {
     if (!isoString) return "--:--";
     try {
       const date = new Date(isoString);
@@ -125,13 +164,24 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
   };
 
   const roleConfig: Record<string, { color: string; gradient: [string, string]; icon: string }> = {
+    Admin: { color: "#7c3aed", gradient: ["#7c3aed", "#6d28d9"], icon: "shield-checkmark" },
     HR: { color: "#8b5cf6", gradient: ["#8b5cf6", "#7c3aed"], icon: "briefcase" },
     Manager: { color: "#f59e0b", gradient: ["#f59e0b", "#d97706"], icon: "people" },
     "Team Lead": { color: "#10b981", gradient: ["#10b981", "#059669"], icon: "git-network" },
     Employee: { color: "#3b82f6", gradient: ["#3b82f6", "#2563eb"], icon: "person" },
   };
 
-  const roleSettings = roleConfig[record.role] || roleConfig["Employee"];
+  const getRoleSettings = (role: string) => {
+    if (!role) return roleConfig["Employee"];
+    const normalizedRole = role.trim().toLowerCase();
+    if (normalizedRole === "admin") return roleConfig["Admin"];
+    if (normalizedRole === "hr") return roleConfig["HR"];
+    if (normalizedRole === "manager") return roleConfig["Manager"];
+    if (normalizedRole === "team lead" || normalizedRole === "team_lead") return roleConfig["Team Lead"];
+    return roleConfig["Employee"];
+  };
+
+  const roleSettings = getRoleSettings(record.role);
 
   const isValidImageUri = (uri: string | null | undefined): boolean => {
     if (!uri || typeof uri !== "string") return false;
@@ -154,14 +204,80 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
   const statusConfig = getStatusConfig();
   const workLocationLabel = record.workLocation || (record.location ? String(record.location) : "Work From Office");
 
-  // Get online/offline time from data (in minutes)
-  const onlineMinutes = onlineStatusData?.total_online_minutes ?? record.totalOnlineMinutes ?? 0;
+  // Get active online time and separate offline time
+  // Strictly map: Working Hours = Online/Active Time only
+  let onlineMinutes = onlineStatusData?.total_online_minutes ?? record.totalOnlineMinutes ?? 0;
+
+  // If we don't have minutes but have hours, convert hours to minutes
+  if (onlineMinutes === 0 || !onlineMinutes) {
+    const hours = record.effective_work_hours ?? record.effectiveWorkHours ?? record.total_hours ?? record.hours;
+    if (hours) {
+      onlineMinutes = Math.round(parseFloat(hours) * 60);
+    }
+  }
+
+  // NOTE: We do NOT adding offline minutes to total work time anymore.
+  // We do NOT use check-in/out diff as fallback for "Active Time" because that would include offline time.
+  // If check_out exists but onlineMinutes is 0, it likely means we don't have distinct tracking, 
+  // so we show 0 or backend value. We strictly respect the "Active" vs "Offline" distinction.
+
   const offlineMinutes = onlineStatusData?.total_offline_minutes ?? record.totalOfflineMinutes ?? 0;
-  
-  // Check if user has checked out (valid check_out time exists)
-  const hasCheckedOut = !!(record.check_out && record.check_out !== "" && record.check_out !== "--:--");
-  
-  // Work Time = Only Active/Online time (excludes offline/away time)
+  const hasCheckedOut = !!(record.check_out && record.check_out !== "" && record.check_out !== "--:--" && record.check_out !== "Pending");
+
+  // Helper to parse "HH:mm AM/PM" format
+  const parseTimeStr = (timeStr: string | null | undefined): number | null => {
+    if (!timeStr || timeStr === "--:--" || timeStr === "Pending") return null;
+    try {
+      const parts = timeStr.trim().split(' ');
+      if (parts.length < 2) return null;
+      const [time, modifier] = parts;
+      let [hours, minutes] = time.split(':').map(Number);
+      if (modifier === 'PM' && hours < 12) hours += 12;
+      if (modifier === 'AM' && hours === 12) hours = 0;
+
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0).getTime();
+    } catch {
+      return null;
+    }
+  };
+
+  // Calculate live active time for ongoing sessions OR fallback for completed sessions with 0 min
+  if (onlineMinutes === 0 && (record.check_in || hasCheckedOut)) {
+    try {
+      const checkInTime = parseTimeStr(record.check_in);
+      const checkOutTime = hasCheckedOut ? parseTimeStr(record.check_out) : new Date().getTime();
+
+      if (checkInTime && checkOutTime) {
+        // Raw duration in minutes
+        const rawDurationMinutes = Math.floor((checkOutTime - checkInTime) / (1000 * 60));
+        // Subtract known offline minutes to get "Active" time
+        const calculatedActive = rawDurationMinutes - offlineMinutes;
+
+        // Use maximum of calculated vs backend reported
+        if (calculatedActive > 0) {
+          onlineMinutes = calculatedActive;
+        }
+      }
+    } catch (e) {
+      console.warn("Working hours calculation error:", e);
+    }
+  } else if (!hasCheckedOut && record.check_in) {
+    // Even if we have some onlineMinutes, if it's an active session, try to keep it live
+    try {
+      const checkInTime = parseTimeStr(record.check_in);
+      const nowTime = new Date().getTime();
+      if (checkInTime) {
+        const rawDurationMinutes = Math.floor((nowTime - checkInTime) / (1000 * 60));
+        const calculatedActive = rawDurationMinutes - offlineMinutes;
+        if (calculatedActive > onlineMinutes) {
+          onlineMinutes = calculatedActive;
+        }
+      }
+    } catch (e) { }
+  }
+
+  // Work Time = Only Active/Online time
   const activeWorkMinutes = onlineMinutes > 0 ? onlineMinutes : 0;
   const workedTimeFormatted = formatDuration(activeWorkMinutes);
 
@@ -247,18 +363,14 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
             </View>
           </View>
 
-          {/* Work Time - Before checkout: "Active Work Time", After checkout: "Total Work Time" */}
-          {hasCheckedOut ? (
+          {/* Work Time - Show if we have any active online time or if checked out */}
+          {(hasCheckedOut || activeWorkMinutes > 0) && (
             <View style={[styles.totalHoursChip, { backgroundColor: "#eff6ff" }]}>
               <Ionicons name="time-outline" size={12} color="#2563eb" />
               <Text style={[styles.totalHoursText, { color: "#1e40af" }]}>{workedTimeFormatted}</Text>
             </View>
-          ) : (
-            <View style={[styles.totalHoursChip, { backgroundColor: "#dcfce7" }]}>
-              <Ionicons name="checkmark-circle" size={12} color="#16a34a" />
-              <Text style={[styles.totalHoursText, { color: "#15803d" }]}>{workedTimeFormatted}</Text>
-            </View>
           )}
+
         </View>
 
         {/* Location Pill + Online Status + Activity Button */}
@@ -267,7 +379,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
             <Ionicons name={workLocationLabel === "Work From Home" ? "home" : "business"} size={11} color="#475569" />
             <Text style={styles.locationPillText}>{workLocationLabel}</Text>
           </View>
-          
+
           <View style={styles.statusAndActivityRow}>
             {/* Online/Offline Status - Only show if not checked out */}
             {!hasCheckedOut && (
@@ -283,13 +395,13 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                   styles.onlineStatusText,
                   { color: onlineStatusData?.is_online ? "#15803d" : "#b45309" }
                 ]}>
-                  {onlineStatusData?.is_online ? "Online" : "Away"}
+                  {onlineStatusData?.is_online ? "Online" : "Offline"}
                 </Text>
               </View>
             )}
-            
+
             {/* Activity Logs Button */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.activityBtn}
               onPress={(e) => { e.stopPropagation(); loadActivityLogs(); }}
               activeOpacity={0.7}
@@ -345,49 +457,54 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
               </View>
             </View>
 
-            {/* Work Hours Summary - Before checkout: Active, After checkout: Total */}
-            <View style={styles.workHoursSummary}>
-              <LinearGradient
-                colors={hasCheckedOut ? ["#eff6ff", "#dbeafe"] : ["#dcfce7", "#bbf7d0"]}
-                style={styles.workHoursGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <View style={styles.workHoursMain}>
-                  <Ionicons 
-                    name={hasCheckedOut ? "time" : "checkmark-circle"} 
-                    size={18} 
-                    color={hasCheckedOut ? "#2563eb" : "#16a34a"} 
-                  />
-                  <View style={styles.workHoursInfo}>
-                    <Text style={styles.workHoursLabel}>
-                      {hasCheckedOut ? "Total Work Time" : "Active Work Time"}
-                    </Text>
-                    <Text style={[styles.workHoursValue, { color: hasCheckedOut ? "#1e40af" : "#15803d" }]}>
-                      {workedTimeFormatted}
-                    </Text>
-                  </View>
-                </View>
-            
-                {/* Active & Away breakdown - shown at bottom of expanded card */}
-                {(onlineMinutes > 0 || offlineMinutes > 0) && (
-                  <View style={styles.workHoursBreakdown}>
-                    <View style={styles.breakdownItem}>
-                      <View style={[styles.breakdownDot, { backgroundColor: "#16a34a" }]} />
-                      <Text style={styles.breakdownLabel}>Active</Text>
-                      <Text style={[styles.breakdownValue, { color: "#15803d" }]}>{formatDuration(onlineMinutes)}</Text>
+            {/* Work Hours Summary - Only show after checkout */}
+            {hasCheckedOut && (
+              <View style={styles.workHoursSummary}>
+                <LinearGradient
+                  colors={["#eff6ff", "#dbeafe"]}
+                  style={styles.workHoursGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                >
+                  <View style={styles.workHoursMain}>
+                    <Ionicons
+                      name="time"
+                      size={18}
+                      color="#2563eb"
+                    />
+                    <View style={styles.workHoursInfo}>
+                      <Text style={styles.workHoursLabel}>
+                        Working Hours
+                      </Text>
+                      <Text style={[styles.workHoursValue, { color: "#1e40af" }]}>
+                        {workedTimeFormatted}
+                      </Text>
                     </View>
-                    {offlineMinutes > 0 && (
-                      <View style={styles.breakdownItem}>
-                        <View style={[styles.breakdownDot, { backgroundColor: "#f59e0b" }]} />
-                        <Text style={styles.breakdownLabel}>Away</Text>
-                        <Text style={[styles.breakdownValue, { color: "#b45309" }]}>{formatDuration(offlineMinutes)}</Text>
-                      </View>
-                    )}
                   </View>
-                )}
-              </LinearGradient>
-            </View>
+
+                  {/* Active & Offline breakdown - shown at bottom of expanded card */}
+                  {(onlineMinutes > 0 || offlineMinutes > 0) && (
+                    <View style={styles.workHoursBreakdown}>
+                      <View style={styles.breakdownItem}>
+                        <View style={[styles.breakdownDot, { backgroundColor: "#16a34a" }]} />
+                        <Text style={styles.breakdownLabel}>
+                          Working Hours
+                        </Text>
+                        <Text style={[styles.breakdownValue, { color: "#15803d" }]}>{formatDuration(onlineMinutes)}</Text>
+                      </View>
+                      {offlineMinutes > 0 && (
+                        <View style={styles.breakdownItem}>
+                          <View style={[styles.breakdownDot, { backgroundColor: "#f59e0b" }]} />
+                          <Text style={styles.breakdownLabel}>Offline</Text>
+                          <Text style={[styles.breakdownValue, { color: "#b45309" }]}>{formatDuration(offlineMinutes)}</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </LinearGradient>
+              </View>
+            )}
+
 
             {/* Selfie Photos Row */}
             {(() => {
@@ -395,7 +512,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
               const checkInSelfieUri = record.selfie || record.checkInSelfie || record.check_in_selfie;
               // Get check-out selfie from multiple possible field names
               const checkOutSelfieUri = record.checkOutSelfie || record.check_out_selfie;
-              
+
               return (
                 <View style={styles.photosRow}>
                   <Text style={styles.photosLabel}>SELFIES</Text>
@@ -452,9 +569,9 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
             {(() => {
               const workReportUrl = record.workReport || record.work_report;
               const workSummary = record.workSummary || record.work_summary;
-              
+
               if (!workReportUrl && !workSummary) return null;
-              
+
               // Build full URL for work report
               const getFullReportUrl = () => {
                 if (!workReportUrl) return null;
@@ -462,7 +579,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                 const baseUrl = API_CONFIG.getApiBaseUrl();
                 return `${baseUrl}${workReportUrl.startsWith("/") ? "" : "/"}${workReportUrl.replace(/\\/g, "/")}`;
               };
-              
+
               const fullReportUrl = getFullReportUrl();
               const fileName = workReportUrl ? workReportUrl.split("/").pop() || "work_report" : null;
               const fileExt = fileName ? fileName.split(".").pop()?.toLowerCase() : "";
@@ -472,7 +589,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
               const isExcel = /^(xls|xlsx|csv)$/i.test(fileExt || "");
               const isText = /^(txt|md|json)$/i.test(fileExt || "");
               const isZip = /^(zip|rar|7z)$/i.test(fileExt || "");
-              
+
               // Get file type label for display
               const getFileTypeLabel = () => {
                 if (isImage) return "Image";
@@ -483,7 +600,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                 if (isZip) return "Archive";
                 return "Attachment";
               };
-              
+
               // Get icon name based on file type
               const getFileIcon = (): string => {
                 if (isImage) return "image";
@@ -494,7 +611,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                 if (isZip) return "archive";
                 return "attach";
               };
-              
+
               // Get MIME type based on file extension
               const getMimeType = () => {
                 if (!fileName) return "application/octet-stream";
@@ -518,42 +635,42 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                   default: return "application/octet-stream";
                 }
               };
-              
+
               const handleDownload = async () => {
                 if (!fullReportUrl || !fileName) return;
-                
+
                 try {
                   // Generate unique filename to avoid cache issues
                   const timestamp = Date.now();
                   const uniqueFileName = `${timestamp}_${fileName}`;
                   const localUri = `${FileSystem.cacheDirectory}${uniqueFileName}`;
-                  
+
                   // Delete existing file if any
                   const fileInfo = await FileSystem.getInfoAsync(localUri);
                   if (fileInfo.exists) {
                     await FileSystem.deleteAsync(localUri, { idempotent: true });
                   }
-                  
+
                   // Download the file
                   const downloadResult = await FileSystem.downloadAsync(
                     fullReportUrl,
                     localUri
                   );
-                  
+
                   if (!downloadResult || downloadResult.status !== 200) {
                     Alert.alert("Error", "Failed to download file");
                     return;
                   }
-                  
+
                   // Verify file was downloaded
                   const downloadedFileInfo = await FileSystem.getInfoAsync(downloadResult.uri);
                   if (!downloadedFileInfo.exists) {
                     Alert.alert("Error", "File download failed");
                     return;
                   }
-                  
+
                   const mimeType = getMimeType();
-                  
+
                   // Use sharing for both platforms - most reliable method
                   const isAvailable = await Sharing.isAvailableAsync();
                   if (isAvailable) {
@@ -583,11 +700,11 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                   }
                 }
               };
-              
+
               return (
                 <View style={styles.workReportSection}>
                   <Text style={styles.workReportLabel}>WORK REPORT</Text>
-                  
+
                   {/* Work Summary Text */}
                   {workSummary && (
                     <View style={styles.workSummaryContainer}>
@@ -597,19 +714,19 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                       </Text>
                     </View>
                   )}
-                  
+
                   {/* Work Report File */}
                   {fullReportUrl && (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.workReportFile}
                       onPress={handleDownload}
                       activeOpacity={0.7}
                     >
                       <View style={styles.workReportFileIcon}>
-                        <Ionicons 
-                          name={getFileIcon() as any} 
-                          size={20} 
-                          color="#3b82f6" 
+                        <Ionicons
+                          name={getFileIcon() as any}
+                          size={20}
+                          color="#3b82f6"
                         />
                       </View>
                       <View style={styles.workReportFileInfo}>
@@ -652,11 +769,11 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                 <Ionicons name="close" size={24} color="#6b7280" />
               </TouchableOpacity>
             </View>
-            
+
             <Text style={styles.activityModalSubtitle}>
               Online & Offline activity for {record.name}
             </Text>
-            
+
             {loadingLogs ? (
               <View style={styles.activityLoading}>
                 <ActivityIndicator size="small" color="#6366f1" />
@@ -681,7 +798,7 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                           styles.activityStatus,
                           { color: log.status === "online" ? "#15803d" : "#b45309" }
                         ]}>
-                          {log.status === "online" ? "Online" : "Away"}
+                          {log.status === "online" ? "Online" : "Offline"}
                         </Text>
                         {log.duration_minutes !== null && log.duration_minutes !== undefined && (
                           <Text style={styles.activityDuration}>
@@ -704,8 +821,8 @@ const AttendanceRecordCard: React.FC<AttendanceRecordCardProps> = ({
                 ))}
               </ScrollView>
             )}
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.activityCloseBtn}
               onPress={() => setShowActivityModal(false)}
             >

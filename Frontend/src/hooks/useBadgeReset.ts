@@ -21,7 +21,7 @@ export const useBadgeReset = (module: ModuleType, enabled: boolean = true) => {
         const timer = setTimeout(() => {
           resetBadge(module);
         }, 300);
-        
+
         return () => clearTimeout(timer);
       }
     }, [enabled, module, resetBadge, badges])
@@ -67,7 +67,7 @@ export const routeToModule: Record<string, ModuleType> = {
   "Shifts": "shifts",
   "Teams": "teams",
   "Reports": "reports",
-  
+
   // Stack routes
   "ChatList": "chat",
   "ChatRoom": "chat",
@@ -78,6 +78,7 @@ export const routeToModule: Record<string, ModuleType> = {
   "HiringManagement": "hiring",
   "ShiftScheduleManagement": "shifts",
   "TeamManagement": "teams",
+  "Payroll": "payroll",
 };
 
 /**

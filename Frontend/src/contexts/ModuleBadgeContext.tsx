@@ -19,6 +19,7 @@ export type ModuleType =
   | "reports"
   | "shifts"
   | "teams"
+  | "payroll"
   | "home";
 
 // Badge counts per module
@@ -33,6 +34,7 @@ export interface ModuleBadgeCounts {
   reports: number;
   shifts: number;
   teams: number;
+  payroll: number;
   home: number;
 }
 
@@ -76,6 +78,7 @@ const defaultBadges: ModuleBadgeCounts = {
   reports: 0,
   shifts: 0,
   teams: 0,
+  payroll: 0,
   home: 0,
 };
 

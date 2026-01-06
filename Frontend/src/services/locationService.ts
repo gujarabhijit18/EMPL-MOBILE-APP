@@ -97,26 +97,49 @@ export const getCurrentLocation = async (
 
         const accuracy = accuracyMap[accuracyLevel];
 
-        // Platform-specific location options
+        // 1. Try to get last known position first (nearly instant)
+        try {
+            const lastKnown = await Location.getLastKnownPositionAsync();
+            if (lastKnown) {
+                const ageMinutes = (Date.now() - lastKnown.timestamp) / 60000;
+                // If it's very fresh (last 2 mins) and accurate enough, use it immediately
+                if (ageMinutes < 2 && (lastKnown.coords.accuracy || 1000) < 50) {
+                    console.log('✅ Using fresh last known location');
+                    return {
+                        latitude: lastKnown.coords.latitude,
+                        longitude: lastKnown.coords.longitude,
+                        accuracy: lastKnown.coords.accuracy || undefined,
+                    };
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ Could not get last known position:', e);
+        }
+
+        // 2. Try to get current position with full accuracy
         const locationOptions: Location.LocationOptions = {
             accuracy,
         };
 
-        // iOS-specific: mayShowUserSettingsDialog helps prompt user if location is disabled
-        // Android-specific: timeInterval can help with faster location acquisition
-        if (Platform.OS === 'android') {
-            // Android may need a bit more time for high accuracy
-            (locationOptions as any).timeInterval = 5000;
-        }
-
-        // Get location with timeout
-        const locationPromise = Location.getCurrentPositionAsync(locationOptions);
+        // Create a wrapper for getCurrentPositionAsync that we can timeout
+        const getFreshLocation = async () => {
+            try {
+                return await Location.getCurrentPositionAsync(locationOptions);
+            } catch (err) {
+                // If high accuracy fails, try balanced as a fallback immediately
+                if (accuracy === Location.Accuracy.High || accuracy === Location.Accuracy.Highest) {
+                    console.log('🔄 High accuracy failed, falling back to balanced...');
+                    return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                }
+                throw err;
+            }
+        };
 
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error('Location request timeout')), timeout);
         });
 
-        const location = await Promise.race([locationPromise, timeoutPromise]) as Location.LocationObject;
+        const location = await Promise.race([getFreshLocation(), timeoutPromise]) as Location.LocationObject;
 
         console.log('✅ Location obtained:', {
             lat: location.coords.latitude,
@@ -136,12 +159,24 @@ export const getCurrentLocation = async (
     } catch (error) {
         console.error('❌ Failed to get location:', error);
 
+        // Final fallback: try to get ANY last known position if current fetch failed or timed out
+        try {
+            const finalFallback = await Location.getLastKnownPositionAsync();
+            if (finalFallback) {
+                console.log('✅ Using fallback last known location after failure');
+                return {
+                    latitude: finalFallback.coords.latitude,
+                    longitude: finalFallback.coords.longitude,
+                    accuracy: finalFallback.coords.accuracy || undefined,
+                };
+            }
+        } catch (e) { }
+
         if (error instanceof Error && error.message.includes('timeout')) {
             throw new Error('Location request timed out. Please ensure GPS is enabled and try again.');
         }
 
-        // Platform-specific error messages
-        const platformHint = Platform.OS === 'ios' 
+        const platformHint = Platform.OS === 'ios'
             ? 'Go to Settings > Privacy > Location Services to enable.'
             : 'Go to Settings > Location to enable GPS.';
 

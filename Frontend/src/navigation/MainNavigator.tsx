@@ -8,9 +8,9 @@ import RoleDashboard from "../screens/dashboard/RoleDashboard";
 
 // Screens
 import AttendanceWrapper from "../screens/attendance/AttendanceWrapper";
+import AttendanceRecordsScreen from "../screens/attendance/AttendanceRecordsScreen";
 import DepartmentManagement from "../screens/departments/DepartmentManagement";
 import EmployeeManagement from "../screens/employees/EmployeeManagement";
-import HiringManagement from "../screens/hiring/HiringManagement";
 import LeaveManagement from "../screens/leaves/LeaveManagement";
 import Profile from "../screens/profile/Profile";
 import RecentActivities from "../screens/activities/RecentActivities";
@@ -20,6 +20,25 @@ import ShiftScheduleManagement from "../screens/shifts/ShiftScheduleManagement";
 import TeamShifts from "../screens/shifts/TeamShifts";
 import TaskManagement from "../screens/tasks/TaskManagement";
 import TeamManagement from "../screens/teams/TeamManagement";
+
+// Hiring Module
+import HiringHub from "../screens/hiring/HiringHub";
+import JobManagement from "../screens/hiring/JobManagement";
+import CandidateManagement from "../screens/hiring/CandidateManagement";
+import InterviewSchedule from "../screens/hiring/InterviewSchedule";
+import InterviewFeedback from "../screens/hiring/InterviewFeedback";
+import OfferManagement from "../screens/hiring/OfferManagement";
+import HiringAnalytics from "../screens/hiring/HiringAnalytics";
+
+// Payroll Module
+import PayrollHub from "../screens/payroll/PayrollHub";
+import PayrollDashboard from "../screens/payroll/PayrollDashboard";
+import SalaryStructure from "../screens/payroll/SalaryStructure";
+import PayrollCalculation from "../screens/payroll/PayrollCalculation";
+import PayrollApproval from "../screens/payroll/PayrollApproval";
+import PayslipManagement from "../screens/payroll/PayslipManagement";
+import SalaryDisbursement from "../screens/payroll/SalaryDisbursement";
+import MyPayslips from "../screens/payroll/MyPayslips";
 
 // Role-specific home dashboards (for detailed view)
 import AdminDashboard from "../screens/admin/AdminDashboard";
@@ -38,6 +57,7 @@ export type MainStackParamList = {
   Dashboard: undefined;
   HomeDashboard: undefined;
   Attendance: undefined;
+  AttendanceRecords: undefined;
   Leaves: undefined;
   Tasks: undefined;
   Employees: undefined;
@@ -58,6 +78,22 @@ export type MainStackParamList = {
   WfhApply: undefined;
   WfhHistory: undefined;
   WfhRequests: undefined;
+  // Hiring Module Routes
+  JobManagement: undefined;
+  CandidateManagement: undefined;
+  InterviewSchedule: undefined;
+  InterviewFeedback: undefined;
+  OfferManagement: undefined;
+  HiringAnalytics: undefined;
+  // Payroll Module Routes
+  Payroll: undefined;
+  PayrollDashboard: undefined;
+  SalaryStructure: undefined;
+  PayrollCalculation: undefined;
+  PayrollApproval: undefined;
+  PayslipManagement: undefined;
+  SalaryDisbursement: undefined;
+  MyPayslips: undefined;
 };
 
 import HelpSupportScreen from "../screens/help/HelpSupportScreen";
@@ -112,6 +148,13 @@ export default function MainNavigator() {
         options={{ headerShown: false }}
       />
 
+      {/* Attendance Records */}
+      <Stack.Screen
+        name="AttendanceRecords"
+        component={AttendanceRecordsScreen}
+        options={{ headerShown: false }}
+      />
+
       {/* Leaves */}
       <Stack.Screen
         name="Leaves"
@@ -143,7 +186,7 @@ export default function MainNavigator() {
       {/* Hiring - Admin/HR only */}
       <Stack.Screen
         name="Hiring"
-        component={HiringManagement}
+        component={HiringHub}
         options={{ headerShown: false }}
       />
 
@@ -224,6 +267,24 @@ export default function MainNavigator() {
         component={ChatDetailsScreen}
         options={{ headerShown: false }}
       />
+
+      {/* Hiring Module Screens */}
+      <Stack.Screen name="JobManagement" component={JobManagement} options={{ headerShown: false }} />
+      <Stack.Screen name="CandidateManagement" component={CandidateManagement} options={{ headerShown: false }} />
+      <Stack.Screen name="InterviewSchedule" component={InterviewSchedule} options={{ headerShown: false }} />
+      <Stack.Screen name="InterviewFeedback" component={InterviewFeedback} options={{ headerShown: false }} />
+      <Stack.Screen name="OfferManagement" component={OfferManagement} options={{ headerShown: false }} />
+      <Stack.Screen name="HiringAnalytics" component={HiringAnalytics} options={{ headerShown: false }} />
+
+      {/* Payroll Module Screens */}
+      <Stack.Screen name="Payroll" component={PayrollHub} options={{ headerShown: false }} />
+      <Stack.Screen name="PayrollDashboard" component={PayrollDashboard} options={{ headerShown: false }} />
+      <Stack.Screen name="SalaryStructure" component={SalaryStructure} options={{ headerShown: false }} />
+      <Stack.Screen name="PayrollCalculation" component={PayrollCalculation} options={{ headerShown: false }} />
+      <Stack.Screen name="PayrollApproval" component={PayrollApproval} options={{ headerShown: false }} />
+      <Stack.Screen name="PayslipManagement" component={PayslipManagement} options={{ headerShown: false }} />
+      <Stack.Screen name="SalaryDisbursement" component={SalaryDisbursement} options={{ headerShown: false }} />
+      <Stack.Screen name="MyPayslips" component={MyPayslips} options={{ headerShown: false }} />
 
       {/* WFH Module */}
       <Stack.Screen name="WfhApply" component={WfhApplyScreen} options={{ headerShown: false }} />

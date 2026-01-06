@@ -45,7 +45,7 @@ export default function OnlineStatusToggle({
   const [offlineReason, setOfflineReason] = useState("");
   const [statusData, setStatusData] = useState<OnlineStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Last toggle time display - shows the time when status was last changed
   const [lastOnlineTime, setLastOnlineTime] = useState<string | null>(null);
   const [lastOfflineTime, setLastOfflineTime] = useState<string | null>(null);
@@ -58,11 +58,11 @@ export default function OnlineStatusToggle({
   const [dataTimestamp, setDataTimestamp] = useState<Date>(new Date());
   const [now, setNow] = useState<Date>(new Date());
 
-  // Update 'now' every minute to enable live timer effect
+  // Update 'now' every second to enable live timer effect
   useEffect(() => {
     const timer = setInterval(() => {
       setNow(new Date());
-    }, 60000); // Update every minute
+    }, 1000); // Update every second for better precision
     return () => clearInterval(timer);
   }, []);
 
@@ -74,25 +74,42 @@ export default function OnlineStatusToggle({
     }
   }, [statusData]);
 
-  // Helper to calculate live minutes including time elapsed since last fetch
-  const getDisplayMinutes = (type: 'online' | 'offline') => {
+  // Helper to calculate live seconds including time elapsed since last fetch
+  const getDisplaySecondsTotal = (type: 'online' | 'offline') => {
     if (!statusData) return 0;
 
-    let base = type === 'online' ? (statusData.total_online_minutes || 0) : (statusData.total_offline_minutes || 0);
+    // Backend provides minutes. Convert to seconds.
+    let baseMinutes = type === 'online' ? (statusData.total_online_minutes || 0) : (statusData.total_offline_minutes || 0);
+    let baseSeconds = baseMinutes * 60;
 
-    // If currently in the requested state, add elapsed time
-    // Note: statusData represents the state at 'dataTimestamp'
+    // We use last_status_change if available for absolute accuracy, fallback to dataTimestamp
+    const reference = statusData.last_status_change ? new Date(statusData.last_status_change) : dataTimestamp;
+    const referenceMs = reference.getTime();
+
+    // If currently in the requested state, add elapsed time since the reference point
     if (statusData.is_online && type === 'online') {
-      const diffMs = now.getTime() - dataTimestamp.getTime();
-      const diffMins = Math.floor(diffMs / 60000); // Convert ms to minutes
-      if (diffMins > 0) base += diffMins;
+      const diffMs = now.getTime() - referenceMs;
+      return baseSeconds + Math.max(0, Math.floor(diffMs / 1000));
     } else if (!statusData.is_online && type === 'offline') {
-      const diffMs = now.getTime() - dataTimestamp.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      if (diffMins > 0) base += diffMins;
+      const diffMs = now.getTime() - referenceMs;
+      return baseSeconds + Math.max(0, Math.floor(diffMs / 1000));
     }
 
-    return base;
+    return baseSeconds;
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    if (hrs > 0) {
+      return `${hrs}h ${mins}m ${secs}s`;
+    }
+    if (mins > 0) {
+      return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
   };
 
   // Fetch current status on mount and when check-in status changes
@@ -161,10 +178,10 @@ export default function OnlineStatusToggle({
       console.log("✅ Toggle response:", response);
 
       // Capture the current time for display
-      const currentTime = new Date().toLocaleTimeString("en-IN", { 
-        hour: "2-digit", 
-        minute: "2-digit", 
-        hour12: true 
+      const currentTime = new Date().toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
       });
 
       // Update last toggle times based on the NEW status
@@ -183,13 +200,48 @@ export default function OnlineStatusToggle({
       setShowOfflineModal(false);
       setOfflineReason("");
 
-      // Update status data with new values
-      setStatusData(prev => prev ? {
-        ...prev,
-        is_online: response.is_online,
-        total_online_minutes: response.total_online_minutes,
-        total_offline_minutes: response.total_offline_minutes,
-      } : null);
+      // Update status data with new values.
+      // CRITICAL: We sync dataTimestamp AND now to ensure the next frame's calculation is stable
+      const syncTime = new Date();
+      setDataTimestamp(syncTime);
+      setNow(syncTime);
+
+      setStatusData(prev => {
+        // Calculate session that just ended if backend didn't provide updated totals
+        let finalOnline = response.total_online_minutes;
+        let finalOffline = response.total_offline_minutes;
+
+        if (prev && response.total_online_minutes === undefined) {
+          // If we just went from ONLINE -> OFFLINE, add the duration of the finished online session
+          if (prev.is_online && !response.is_online) {
+            const elapsedSeconds = Math.floor((syncTime.getTime() - dataTimestamp.getTime()) / 1000);
+            finalOnline = (prev.total_online_minutes || 0) + (elapsedSeconds / 60);
+          } else {
+            finalOnline = prev.total_online_minutes;
+          }
+        }
+
+        if (prev && response.total_offline_minutes === undefined) {
+          // If we just went from OFFLINE -> ONLINE, add the duration of the finished offline session
+          if (!prev.is_online && response.is_online) {
+            const elapsedSeconds = Math.floor((syncTime.getTime() - dataTimestamp.getTime()) / 1000);
+            finalOffline = (prev.total_offline_minutes || 0) + (elapsedSeconds / 60);
+          } else {
+            finalOffline = prev.total_offline_minutes;
+          }
+        }
+
+        return {
+          id: response.id || prev?.id || 0,
+          user_id: userId,
+          attendance_id: attendanceId,
+          is_online: response.is_online,
+          total_online_minutes: finalOnline || 0,
+          total_offline_minutes: finalOffline || 0,
+          current_session_minutes: 0,
+          last_status_change: response.last_status_change || syncTime.toISOString()
+        };
+      });
 
       // Animate the toggle
       Animated.sequence([
@@ -292,14 +344,14 @@ export default function OnlineStatusToggle({
               </TouchableOpacity>
             </Animated.View>
           </View>
-
           {/* Time Summary */}
           {statusData && (
             <View style={styles.timeSummary}>
               <View style={styles.timeBlock}>
                 <Ionicons name="time-outline" size={14} color="#22c55e" />
-                <Text style={styles.timeLabel}>Online</Text>
-                <Text style={styles.timeValue}>{formatMinutes(getDisplayMinutes('online'))}</Text>
+                <Text style={styles.timeLabel}>ONLINE</Text>
+                <Text style={styles.timeValue}>{formatDuration(getDisplaySecondsTotal('online'))}</Text>
+                <Text style={styles.statusLabelSmall}>{isOnline ? 'Counting...' : 'Paused'}</Text>
                 {/* Show last online time when currently offline */}
                 {!isOnline && lastOnlineTime && (
                   <Text style={styles.lastTimeText}>Last: {lastOnlineTime}</Text>
@@ -308,8 +360,9 @@ export default function OnlineStatusToggle({
               <View style={styles.timeDivider} />
               <View style={styles.timeBlock}>
                 <Ionicons name="pause-circle-outline" size={14} color="#f59e0b" />
-                <Text style={styles.timeLabel}>Offline</Text>
-                <Text style={styles.timeValue}>{formatMinutes(getDisplayMinutes('offline'))}</Text>
+                <Text style={styles.timeLabel}>OFFLINE</Text>
+                <Text style={styles.timeValue}>{formatDuration(getDisplaySecondsTotal('offline'))}</Text>
+                <Text style={styles.statusLabelSmall}>{!isOnline ? 'Counting...' : 'Paused'}</Text>
                 {/* Show last offline time when currently online */}
                 {isOnline && lastOfflineTime && (
                   <Text style={styles.lastTimeText}>Last: {lastOfflineTime}</Text>
@@ -317,6 +370,7 @@ export default function OnlineStatusToggle({
               </View>
             </View>
           )}
+
         </LinearGradient>
       </View>
 
@@ -492,6 +546,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontStyle: "italic",
   },
+  statusLabelSmall: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#64748b",
+  },
+
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

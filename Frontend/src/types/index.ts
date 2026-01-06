@@ -200,3 +200,47 @@ export interface DashboardStats {
   upcomingHolidays: number;
   totalDepartments: number;
 }
+
+
+// -----------------------------
+// ✅ WFH (Work From Home) Management
+// -----------------------------
+export type WfhStatus = "Pending" | "Approved" | "Rejected";
+export type WfhType = "Full Day" | "Half Day";
+
+export interface WfhApprovalAction {
+  approverRole: UserRole;
+  approverId: string;
+  approverName?: string;
+  action: "approved" | "rejected";
+  actionDateTime: string;
+  remarks?: string;
+}
+
+export interface WfhRequest {
+  id: string;
+  wfhId: number;
+  userId: string;
+  userName?: string;
+  userRole?: UserRole;
+  department?: string;
+  startDate: string;
+  endDate: string;
+  wfhType: WfhType;
+  reason: string;
+  status: WfhStatus;
+  approvalAction?: WfhApprovalAction;
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// WFH Approval Permission Check Result
+export interface WfhApprovalPermission {
+  canApprove: boolean;
+  canReject: boolean;
+  canOverride: boolean;
+  reason?: string;
+}

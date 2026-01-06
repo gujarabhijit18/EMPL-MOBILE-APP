@@ -29,7 +29,8 @@ import {
   TextInput,
   ToastAndroid,
   TouchableOpacity,
-  View
+  View,
+  FlatList
 } from "react-native";
 import {
   FAB,
@@ -40,7 +41,22 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useModuleBadges } from "../../contexts/ModuleBadgeContext";
 import { apiService } from "../../lib/api";
 import { useAutoHideTabBarOnScroll } from "../../navigation/tabBarVisibility";
-import { formatDateIST, formatTimeIST, formatDateTimeIST, getDayMonthIST, formatDateShortIST, formatChatTimestamp } from "../../utils/dateTime";
+import { formatDateIST, formatTimeIST, formatDateTimeIST, getDayMonthIST, formatDateShortIST, formatChatTimestamp, getRelativeTime } from "../../utils/dateTime";
+import {
+  Colors,
+  Spacing,
+  BorderRadius,
+  Typography,
+  Shadows,
+  Gradients,
+  HeaderStyles,
+  CardStyles,
+  ButtonStyles,
+  InputStyles,
+  CommonStyles,
+  ModalStyles,
+  getStatusBadgeStyle
+} from "../../constants/designSystem";
 
 const { width } = Dimensions.get('window');
 
@@ -66,39 +82,18 @@ interface Task {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#8B5CF6', // Match header gradient for seamless status bar
+    backgroundColor: Colors.background,
   },
-  // Header Gradient Styles
-  headerGradient: {
-    paddingTop: 16,
-    paddingBottom: 28,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  headerPattern: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  patternCircle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  // Header Styles
+  headerContainer: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.borderLight,
   },
   headerContent: {
-    paddingHorizontal: 20,
-    position: 'relative',
-    zIndex: 1,
-  },
-  headerTopSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
+    ...HeaderStyles.row,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -106,132 +101,101 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    ...HeaderStyles.backButton,
+    marginRight: Spacing.md,
   },
   headerTextSection: {
     flex: 1,
   },
   headerTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.3,
+    ...Typography.screenTitle,
   },
   headerSubtitle: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 3,
-    fontWeight: '500',
-    letterSpacing: 0.2,
+    ...Typography.secondary,
+    marginTop: 2,
   },
   headerRight: {
     alignItems: 'flex-end',
   },
   dateTimeContainer: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'flex-end',
   },
   timeText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
-    color: '#fff',
-    letterSpacing: 0.5,
+    color: Colors.primary,
   },
   dateText: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.8)',
+    color: Colors.primary,
     marginTop: 2,
     fontWeight: '600',
   },
   // Stats Overview Bar
   statsOverviewBar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 16,
-    padding: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
     justifyContent: 'space-around',
     alignItems: 'center',
+    ...Shadows.card,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: Colors.borderLight,
   },
   miniStatItem: {
     alignItems: 'center',
     flex: 1,
   },
   miniStatValue: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
-    color: '#fff',
-    marginTop: 4,
-    letterSpacing: 0.3,
+    color: Colors.text,
   },
   miniStatLabel: {
     fontSize: 9,
-    color: 'rgba(255,255,255,0.75)',
+    color: Colors.textSecondary,
     marginTop: 2,
     fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   statDivider: {
     width: 1,
-    height: 36,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: 30,
+    backgroundColor: Colors.borderLight,
   },
   // Loading State
   loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
+    ...CommonStyles.loadingState.container,
   },
   loadingText: {
-    color: '#fff',
-    marginTop: 12,
-    fontSize: 16,
-    fontWeight: '600',
+    ...CommonStyles.loadingState.text,
   },
 
   // Main Content Area
   scrollView: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: Colors.background,
   },
   scrollContent: {
-    padding: 16,
-    paddingTop: 20,
+    padding: Spacing.lg,
+    paddingTop: Spacing.xl,
   },
   // Section Header Card
   sectionHeaderCard: {
-    marginBottom: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  sectionHeaderGradient: {
-    padding: 16,
+    marginBottom: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    ...Shadows.card,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
   },
   sectionHeaderContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    padding: Spacing.lg,
   },
   sectionHeaderLeft: {
     flexDirection: 'row',
@@ -241,58 +205,48 @@ const styles = StyleSheet.create({
   sectionHeaderIconBg: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: Spacing.md,
+    backgroundColor: Colors.primaryLighter,
   },
   sectionHeaderTextContainer: {
     flex: 1,
   },
   sectionHeaderTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#1f2937',
-    letterSpacing: 0.2,
+    ...Typography.sectionTitle,
+    color: Colors.text,
   },
   sectionHeaderSubtitle: {
-    fontSize: 12,
-    color: '#6b7280',
+    ...Typography.caption,
     marginTop: 2,
-    fontWeight: '500',
   },
   // Search and Filter Row
   searchFilterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    gap: 12,
+    marginBottom: Spacing.lg,
+    gap: Spacing.md,
   },
   searchContainer: {
     flex: 1,
+    height: 48,
+    backgroundColor: Colors.surface,
+    borderWidth: 1.5,
+    borderColor: Colors.borderDark,
+    borderRadius: BorderRadius.lg,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#e5e7eb',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    height: 50,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    paddingHorizontal: Spacing.md,
+    ...Shadows.card,
   },
   searchIcon: {
-    marginRight: 10,
+    marginRight: 6,
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
-    color: '#111827',
-    height: '100%',
-    fontWeight: '500',
+    ...InputStyles.text,
   },
   // Status Dropdown
   statusDropdownWrapper: {
@@ -303,23 +257,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#e5e7eb',
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.lg,
     minWidth: 140,
     height: 50,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    ...Shadows.card,
   },
   statusDropdownText: {
     fontSize: 14,
-    color: '#374151',
+    color: Colors.text,
     fontWeight: '600',
   },
   statusDropdownList: {
@@ -327,18 +276,13 @@ const styles = StyleSheet.create({
     top: 54,
     right: 0,
     minWidth: 200,
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 12,
+    borderColor: Colors.border,
+    ...Shadows.modal,
     overflow: 'hidden',
     zIndex: 1000,
-    maxHeight: 280,
   },
   statusDropdownOption: {
     flexDirection: 'row',
@@ -389,7 +333,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   viewToggleButtonActive: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
   },
   // Action Buttons Row
   actionButtonsRow: {
@@ -436,7 +380,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   kanbanStatusButtonActive: {
-    borderColor: '#8B5CF6',
+    borderColor: Colors.primary,
     shadowOpacity: 0.1,
     elevation: 4,
   },
@@ -471,8 +415,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   kanbanExpandedHeader: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -480,17 +424,16 @@ const styles = StyleSheet.create({
   kanbanExpandedHeaderIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderRadius: BorderRadius.md,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: Spacing.md,
   },
   kanbanExpandedHeaderTitle: {
     fontSize: 16,
     fontWeight: '800',
     color: '#fff',
-    letterSpacing: 0.3,
   },
   kanbanExpandedHeaderSubtitle: {
     fontSize: 12,
@@ -499,8 +442,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   kanbanTaskListItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -508,72 +451,61 @@ const styles = StyleSheet.create({
   kanbanTaskListItemTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: Colors.text,
     marginBottom: 4,
     lineHeight: 20,
   },
   kanbanTaskListItemMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: Spacing.sm,
     flexWrap: 'wrap',
   },
   kanbanTaskListItemMetaBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: Colors.backgroundAlt,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: BorderRadius.sm,
   },
   kanbanTaskListItemMetaText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#6B7280',
+    color: Colors.textSecondary,
     textTransform: 'capitalize',
   },
   kanbanEmptyState: {
-    alignItems: 'center',
-    paddingVertical: 40,
+    ...CommonStyles.emptyState.container,
   },
   kanbanEmptyStateIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#F3F4F6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
+    ...CommonStyles.emptyState.iconContainer,
   },
   kanbanEmptyStateText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
+    ...CommonStyles.emptyState.title,
   },
   kanbanEmptyStateSubtext: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 4,
+    ...CommonStyles.emptyState.subtitle,
   },
   kanbanColumn: {
     width: 320,
-    marginRight: 16,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
+    marginRight: Spacing.lg,
+    backgroundColor: Colors.backgroundAlt,
+    borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: Colors.border,
   },
   kanbanColumnHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: '#fff',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: Colors.border,
   },
   kanbanColumnTitleContainer: {
     flexDirection: 'row',
@@ -588,44 +520,39 @@ const styles = StyleSheet.create({
   kanbanColumnTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
-    letterSpacing: 0.2,
+    color: Colors.text,
   },
   kanbanColumnCount: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#6B7280',
-    backgroundColor: '#F3F4F6',
+    color: Colors.textSecondary,
+    backgroundColor: Colors.backgroundAlt,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: BorderRadius.sm,
   },
   kanbanColumnContent: {
-    padding: 12,
-    gap: 12,
+    padding: Spacing.md,
+    gap: Spacing.md,
   },
   kanbanTaskCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: Colors.border,
+    ...Shadows.card,
   },
   kanbanTaskTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: Colors.text,
     marginBottom: 6,
     lineHeight: 20,
   },
   kanbanTaskDescription: {
     fontSize: 12,
-    color: '#6B7280',
+    color: Colors.textSecondary,
     marginBottom: 10,
     lineHeight: 16,
   },
@@ -637,7 +564,7 @@ const styles = StyleSheet.create({
   },
   kanbanTaskDeadline: {
     fontSize: 11,
-    color: '#6B7280',
+    color: Colors.textSecondary,
     fontWeight: '500',
   },
   kanbanTaskPriority: {
@@ -653,11 +580,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: Spacing.sm,
   },
   kanbanTaskAssignee: {
     fontSize: 11,
-    color: '#6B7280',
+    color: Colors.textSecondary,
     fontWeight: '500',
     flex: 1,
   },
@@ -669,7 +596,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: Colors.backgroundAlt,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -677,50 +604,37 @@ const styles = StyleSheet.create({
   // Card View Styles
   cardViewContainer: {
     flex: 1,
-    paddingBottom: 16,
+    paddingBottom: Spacing.lg,
     zIndex: 1,
   },
   taskCardWrapper: {
-    marginBottom: 14,
-    borderRadius: 18,
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
+    ...CardStyles.container,
+    marginBottom: Spacing.lg,
   },
   taskCardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    padding: 18,
-    paddingBottom: 14,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    borderBottomColor: Colors.borderLight,
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
     zIndex: 10,
   },
   taskCardHeaderLeft: {
     flex: 1,
-    marginRight: 14,
+    marginRight: Spacing.lg,
   },
   taskCardTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
+    ...Typography.cardTitle,
     marginBottom: 6,
-    lineHeight: 24,
-    letterSpacing: 0.2,
   },
   taskCardDescription: {
-    fontSize: 13,
-    color: '#6B7280',
-    lineHeight: 19,
+    ...Typography.body,
+    color: Colors.textSecondary,
     marginBottom: 10,
   },
   taskCardMetaRow: {
@@ -733,20 +647,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: '#f9fafb',
+    backgroundColor: Colors.backgroundAlt,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 8,
+    borderRadius: BorderRadius.sm,
   },
   taskCardMetaText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: Colors.textSecondary,
     fontWeight: '500',
   },
   taskCardBody: {
-    padding: 18,
-    paddingTop: 14,
-    backgroundColor: '#fafbfc',
+    padding: Spacing.lg,
+    paddingTop: Spacing.md,
+    backgroundColor: Colors.surfaceHover,
   },
   taskCardInfoGrid: {
     flexDirection: 'row',
@@ -755,13 +669,13 @@ const styles = StyleSheet.create({
   },
   taskCardInfoItem: {
     width: '50%',
-    marginBottom: 14,
+    marginBottom: Spacing.lg,
     paddingRight: 10,
   },
   taskCardInfoLabel: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#9CA3AF',
+    color: Colors.textTertiary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 6,
@@ -769,19 +683,19 @@ const styles = StyleSheet.create({
   taskCardInfoValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
+    color: Colors.text,
   },
   taskCardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    backgroundColor: '#fff',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.surface,
     borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 18,
+    borderTopColor: Colors.borderLight,
+    borderBottomLeftRadius: BorderRadius.lg,
+    borderBottomRightRadius: BorderRadius.lg,
   },
   taskCardActions: {
     flexDirection: 'row',
@@ -794,37 +708,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#f9fafb',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.backgroundAlt,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: Colors.border,
     gap: 6,
   },
   taskCardActionButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#6B7280',
+    color: Colors.textSecondary,
   },
   taskCardPassButton: {
-    backgroundColor: '#F3E8FF',
-    borderColor: '#E9D5FF',
+    backgroundColor: Colors.purpleLighter,
+    borderColor: Colors.purpleLight,
   },
   taskCardPassButtonText: {
-    color: '#8B5CF6',
+    color: Colors.purple,
   },
   taskCardReassignButton: {
-    backgroundColor: '#FEF3C7',
-    borderColor: '#FCD34D',
+    backgroundColor: Colors.warningLighter,
+    borderColor: Colors.warningLight,
   },
   taskCardReassignButtonText: {
-    color: '#D97706',
+    color: Colors.warning,
   },
   taskCardDeleteButton: {
-    backgroundColor: '#FEE2E2',
-    borderColor: '#FECACA',
+    backgroundColor: Colors.errorLighter,
+    borderColor: Colors.errorLight,
   },
   taskCardDeleteButtonText: {
-    color: '#EF4444',
+    color: Colors.error,
   },
 
   // Status Badge & Dropdown
@@ -837,7 +751,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 10,
+    borderRadius: BorderRadius.md,
     minWidth: 110,
   },
   statusIndicator: {
@@ -855,18 +769,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   statusDropdownMenu: {
+    ...Shadows.modal,
     position: 'absolute',
     top: 44,
     right: 0,
-    backgroundColor: '#fff',
-    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 20,
+    borderColor: Colors.border,
+    zIndex: 1000,
     minWidth: 180,
   },
   statusDropdownMenuItem: {
@@ -875,30 +786,30 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: Colors.borderLight,
     gap: 12,
   },
   statusDropdownMenuItemLast: {
     borderBottomWidth: 0,
   },
   statusDropdownMenuItemActive: {
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Colors.surfaceHover,
   },
   statusDropdownMenuItemText: {
     fontSize: 14,
-    color: '#374151',
+    color: Colors.text,
     fontWeight: '500',
     flex: 1,
   },
   statusDropdownMenuItemTextActive: {
-    color: '#111827',
+    color: Colors.primary,
     fontWeight: '600',
   },
   // Priority Badge
   priorityBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: BorderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -911,42 +822,28 @@ const styles = StyleSheet.create({
   },
   // Empty State
   emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    ...CommonStyles.emptyState.container,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
     marginTop: 8,
   },
   emptyStateIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#f3f4f6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
+    ...CommonStyles.emptyState.iconContainer,
   },
   emptyStateText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#6B7280',
-    marginBottom: 6,
+    ...CommonStyles.emptyState.title,
   },
   emptyStateSubtext: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
+    ...CommonStyles.emptyState.subtitle,
   },
   // FAB
   fab: {
     position: 'absolute',
     bottom: 30,
     right: 20,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
     elevation: 6,
-    shadowColor: '#8B5CF6',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
     shadowRadius: 8,
@@ -964,16 +861,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 16,
-    backgroundColor: '#f9fafb',
+    backgroundColor: Colors.backgroundAlt,
     borderBottomWidth: 2,
-    borderBottomColor: '#e5e7eb',
-    borderRadius: 12,
+    borderBottomColor: Colors.border,
+    borderRadius: BorderRadius.md,
     marginBottom: 8,
   },
   tableHeaderText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#6B7280',
+    color: Colors.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
@@ -986,12 +883,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    backgroundColor: '#fff',
+    borderBottomColor: Colors.borderLight,
+    backgroundColor: Colors.surface,
     minHeight: 70,
   },
   tableRowEven: {
-    backgroundColor: '#FAFBFC',
+    backgroundColor: Colors.surfaceHover,
   },
   tableCell: {
     justifyContent: 'center',
@@ -1009,12 +906,12 @@ const styles = StyleSheet.create({
   taskTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: Colors.text,
     marginBottom: 4,
   },
   taskDescription: {
     fontSize: 12,
-    color: '#6B7280',
+    color: Colors.textSecondary,
   },
   assignedToContainer: {
     flexDirection: 'row',
@@ -1022,7 +919,7 @@ const styles = StyleSheet.create({
   },
   assignedToText: {
     fontSize: 13,
-    color: '#374151',
+    color: Colors.text,
     marginLeft: 8,
     flex: 1,
     fontWeight: '500',
@@ -1033,7 +930,7 @@ const styles = StyleSheet.create({
   },
   deadlineText: {
     fontSize: 13,
-    color: '#374151',
+    color: Colors.text,
     marginLeft: 8,
     flex: 1,
     fontWeight: '500',
@@ -1044,14 +941,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#F9FAFB',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.backgroundAlt,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: Colors.border,
   },
   viewButtonText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: Colors.textSecondary,
     fontWeight: '600',
     marginRight: 4,
   },
@@ -1060,14 +957,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#F9FAFB',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.backgroundAlt,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: Colors.border,
   },
   editButtonText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: Colors.textSecondary,
     fontWeight: '600',
     marginLeft: 4,
   },
@@ -1076,14 +973,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#F3E8FF',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.purpleLighter,
     borderWidth: 1,
-    borderColor: '#E9D5FF',
+    borderColor: Colors.purpleLight,
   },
   passButtonText: {
     fontSize: 12,
-    color: '#8B5CF6',
+    color: Colors.purple,
     fontWeight: '600',
     marginLeft: 4,
   },
@@ -1092,8 +989,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#EF4444',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.error,
   },
   deleteButtonText: {
     fontSize: 12,
@@ -1104,19 +1001,15 @@ const styles = StyleSheet.create({
 
   // Modal Styles
   modalContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    ...ModalStyles.overlay,
   },
   fullScreenFormContainer: {
     flex: 1,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
   },
   fullScreenCard: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.surface,
     overflow: 'hidden',
   },
   modalHeader: {
@@ -1127,22 +1020,15 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.15)',
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
+    ...ModalStyles.closeButton,
   },
   closeButtonInner: {
     width: '100%',
     height: '100%',
-    borderRadius: 12,
+    borderRadius: BorderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1155,20 +1041,19 @@ const styles = StyleSheet.create({
   modalIconContainer: {
     width: 52,
     height: 52,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderRadius: BorderRadius.lg,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.2)',
     flexShrink: 0,
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '800',
     color: '#fff',
     letterSpacing: 0.3,
-    lineHeight: 32,
   },
   modalSubtitle: {
     fontSize: 13,
@@ -1180,16 +1065,16 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingTop: 14,
     paddingBottom: 10,
-    backgroundColor: '#f9fafb',
+    backgroundColor: Colors.surfaceHover,
   },
   progressBar: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: Colors.border,
   },
   progressText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: Colors.textSecondary,
     textAlign: 'right',
     marginTop: 6,
     fontWeight: '600',
@@ -1197,7 +1082,7 @@ const styles = StyleSheet.create({
   formContainer: {
     flex: 1,
     padding: 22,
-    backgroundColor: '#f9fafb',
+    backgroundColor: Colors.background,
   },
   fieldContainer: {
     marginBottom: 22,
@@ -1334,10 +1219,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 16,
     borderRadius: 14,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
     alignItems: 'center',
     elevation: 3,
-    shadowColor: '#8B5CF6',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
@@ -1416,7 +1301,7 @@ const styles = StyleSheet.create({
   },
   taskDetailTabActive: {
     borderBottomWidth: 3,
-    borderBottomColor: '#8B5CF6',
+    borderBottomColor: Colors.primary,
   },
   taskDetailTabText: {
     fontSize: 14,
@@ -1424,7 +1309,7 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   taskDetailTabTextActive: {
-    color: '#8B5CF6',
+    color: Colors.primary,
     fontWeight: '700',
   },
   taskDetailContent: {
@@ -1639,7 +1524,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 10,
     borderLeftWidth: 3,
-    borderLeftColor: '#8B5CF6',
+    borderLeftColor: Colors.primary,
   },
   taskDetailActivityStatusBadge: {
     flexDirection: 'row',
@@ -1658,7 +1543,7 @@ const styles = StyleSheet.create({
   taskDetailActivityStatusArrow: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#8B5CF6',
+    color: Colors.primary,
     marginHorizontal: 2,
   },
   taskDetailActivityPassedInfo: {
@@ -1698,7 +1583,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
-    shadowColor: '#8B5CF6',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.12,
     shadowRadius: 6,
@@ -1759,7 +1644,7 @@ const styles = StyleSheet.create({
     marginRight: 0,
   },
   commentAvatarOther: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
     marginRight: 10,
     marginLeft: 0,
   },
@@ -1775,7 +1660,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   commentBubbleOwn: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
     borderBottomRightRadius: 4,
   },
   commentBubbleOther: {
@@ -1891,10 +1776,10 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#8B5CF6',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
@@ -1926,7 +1811,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#8B5CF6',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
@@ -2392,11 +2277,11 @@ const styles = StyleSheet.create({
     flex: 2, // Submit button slightly larger
     height: 54,
     borderRadius: 16,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
-    shadowColor: '#8B5CF6',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 10,
@@ -2433,7 +2318,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fef2f2',
   },
   customDropdownTriggerActive: {
-    borderColor: '#8B5CF6',
+    borderColor: Colors.primary,
     backgroundColor: '#f9f5ff',
   },
   customDropdownTriggerContent: {
@@ -2468,7 +2353,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 14,
     maxHeight: 320,
-    shadowColor: '#8B5CF6',
+    shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.25,
     shadowRadius: 16,
@@ -2492,7 +2377,7 @@ const styles = StyleSheet.create({
   customDropdownOptionSelected: {
     backgroundColor: '#f3e8ff',
     borderLeftWidth: 3,
-    borderLeftColor: '#8B5CF6',
+    borderLeftColor: Colors.primary,
     paddingLeft: 11,
   },
   customDropdownOptionSelf: {
@@ -2516,7 +2401,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   customDropdownOptionTextActive: {
-    color: '#8B5CF6',
+    color: Colors.primary,
     fontWeight: '700',
   },
   customDropdownOptionTextSelf: {
@@ -2684,14 +2569,14 @@ function CustomEmployeeDropdown({ selectedValue, onSelect, employees, loading, e
           activeOpacity={0.7}
         >
           {loading ? (
-            <ActivityIndicator size="small" color="#8B5CF6" />
+            <ActivityIndicator size="small" color={Colors.primary} />
           ) : (
             <>
               <View style={styles.customDropdownTriggerContent}>
                 <Ionicons
                   name={isAssignedToSelf ? "person-circle" : "person-outline"}
                   size={16}
-                  color={isAssignedToSelf ? "#10B981" : "#8B5CF6"}
+                  color={isAssignedToSelf ? "#10B981" : Colors.primary}
                 />
                 <Text
                   style={[
@@ -2709,7 +2594,7 @@ function CustomEmployeeDropdown({ selectedValue, onSelect, employees, loading, e
                 </Text>
               </View>
               <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
-                <Ionicons name="chevron-down" size={18} color="#8B5CF6" />
+                <Ionicons name="chevron-down" size={18} color={Colors.primary} />
               </Animated.View>
             </>
           )}
@@ -2811,7 +2696,7 @@ function CustomEmployeeDropdown({ selectedValue, onSelect, employees, loading, e
                               <Ionicons
                                 name="checkmark"
                                 size={18}
-                                color={isSelf ? "#10B981" : "#8B5CF6"}
+                                color={isSelf ? "#10B981" : Colors.primary}
                               />
                             </Animated.View>
                           )}
@@ -2921,6 +2806,15 @@ export default function TaskManagement() {
   const [customDateEnd, setCustomDateEnd] = useState<Date>(new Date());
   const [dateRangeDropdownOpen, setDateRangeDropdownOpen] = useState(false);
   const [userFilterDropdownOpen, setUserFilterDropdownOpen] = useState(false);
+
+  // Deadline Warnings State
+  const [deadlineWarnings, setDeadlineWarnings] = useState<{ overdue: any[], upcoming: any[] }>({ overdue: [], upcoming: [] });
+  const [showWarnings, setShowWarnings] = useState(true);
+
+  // Notifications State
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [notificationsModalVisible, setNotificationsModalVisible] = useState(false);
 
   // Form animation values
   const formScaleY = useRef(new Animated.Value(0.9)).current;
@@ -3097,12 +2991,12 @@ export default function TaskManagement() {
       }
 
       console.log("📊 Raw backend tasks:", backendTasks);
-      
+
       const transformedTasks: Task[] = backendTasks
         .map((task: any) => {
           // Handle both task_id and id fields
           const taskId = task.task_id || task.id;
-          
+
           if (!taskId) {
             console.warn("⚠️ Task missing ID:", task);
             return null;
@@ -3110,7 +3004,7 @@ export default function TaskManagement() {
 
           const assignedToEmployee = allEmployeesList.find(emp => emp.user_id === task.assigned_to);
           const assignedByEmployee = allEmployeesList.find(emp => emp.user_id === task.assigned_by);
-          
+
           return {
             id: taskId.toString(),
             title: task.title || "Untitled",
@@ -3129,7 +3023,7 @@ export default function TaskManagement() {
           } as Task;
         })
         .filter((task): task is Task => task !== null);
-      
+
       console.log("✅ Transformed tasks:", transformedTasks);
       setTasks(transformedTasks);
     } catch (error: any) {
@@ -3236,6 +3130,36 @@ export default function TaskManagement() {
     }
   };
 
+  const fetchDeadlineWarnings = async () => {
+    if (!user?.user_id) return;
+    try {
+      const warnings = await apiService.getDeadlineWarnings(user.user_id);
+      setDeadlineWarnings(warnings || { overdue: [], upcoming: [] });
+    } catch (error) {
+      console.warn("Failed to fetch deadline warnings", error);
+    }
+  };
+
+  const fetchNotifications = async () => {
+    try {
+      const notifs = await apiService.getTaskNotifications();
+      setNotifications(notifs);
+      setUnreadNotificationsCount(notifs.filter((n: any) => !n.is_read).length);
+    } catch (error) {
+      console.warn("Failed to fetch notifications", error);
+    }
+  };
+
+  const markNotificationRead = async (id: number) => {
+    try {
+      await apiService.markTaskNotificationAsRead(id);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      setUnreadNotificationsCount(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error("Failed to mark notification read", error);
+    }
+  };
+
   const handleEmployeeSelect = (email: string) => {
     updateField('assignedTo', email);
     const selectedEmployee = employees.find(emp => emp.email === email);
@@ -3256,6 +3180,8 @@ export default function TaskManagement() {
       await loadEmployees();
       setTimeout(async () => {
         await loadTasks();
+        await fetchDeadlineWarnings();
+        await fetchNotifications();
         setLoading(false);
         startAnimations();
       }, 100);
@@ -3653,7 +3579,7 @@ export default function TaskManagement() {
   // Enhanced validation with business rules
   const validateTaskForm = () => {
     const errors: { [key: string]: string } = {};
-    
+
     // Title validation - minimum 5 characters
     if (!newTask.title.trim()) {
       errors.title = "Task title is required.";
@@ -3680,11 +3606,11 @@ export default function TaskManagement() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       deadlineDate.setHours(0, 0, 0, 0);
-      
+
       if (deadlineDate < today) {
         errors.deadline = "Deadline cannot be in the past.";
       }
-      
+
       // Maximum 1 year in future
       const maxDate = new Date();
       maxDate.setFullYear(maxDate.getFullYear() + 1);
@@ -4110,7 +4036,7 @@ export default function TaskManagement() {
     switch (action?.toLowerCase()) {
       case "created": return { name: "add-circle", color: "#fff", bgColor: "#10B981" };
       case "status_changed": return { name: "swap-horizontal", color: "#fff", bgColor: "#F97316" };
-      case "passed": return { name: "git-branch", color: "#fff", bgColor: "#8B5CF6" };
+      case "passed": return { name: "git-branch", color: "#fff", bgColor: Colors.primary };
       case "updated": return { name: "create", color: "#fff", bgColor: "#3B82F6" };
       case "completed": return { name: "checkmark-circle", color: "#fff", bgColor: "#10B981" };
       default: return { name: "ellipse", color: "#fff", bgColor: "#6B7280" };
@@ -4221,7 +4147,7 @@ export default function TaskManagement() {
 
   const createTask = async () => {
     Keyboard.dismiss();
-    
+
     // Enhanced validation with detailed error messages
     if (!validateTaskForm()) {
       // Show validation errors with animation
@@ -4231,7 +4157,7 @@ export default function TaskManagement() {
         Animated.timing(buttonScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
         Animated.timing(buttonScale, { toValue: 1, duration: 100, useNativeDriver: true }),
       ]).start();
-      
+
       // Show first validation error
       const firstError = Object.values(formErrors)[0];
       if (firstError) {
@@ -4302,20 +4228,20 @@ export default function TaskManagement() {
       setFormErrors({});
       setIsEditMode(false);
       setEditingTaskId(null);
-      
+
       // Reload tasks and close modal
       await loadTasks();
-      setTimeout(() => { 
-        setModalVisible(false); 
-        setIsSubmitting(false); 
+      setTimeout(() => {
+        setModalVisible(false);
+        setIsSubmitting(false);
       }, 500);
     } catch (error: any) {
       console.error("Error creating/updating task:", error);
       setIsSubmitting(false);
-      
+
       // Enhanced error handling
       let errorMessage = error.message || `Failed to ${isEditMode ? 'update' : 'create'} task`;
-      
+
       // Handle specific error cases
       if (error.message?.includes('duplicate') || error.message?.includes('already exists')) {
         errorMessage = "A task with this title already exists. Please use a different title.";
@@ -4324,7 +4250,7 @@ export default function TaskManagement() {
       } else if (error.message?.includes('network') || error.message?.includes('connection')) {
         errorMessage = "Network error. Please check your connection and try again.";
       }
-      
+
       showToast(errorMessage);
     }
   };
@@ -4520,7 +4446,7 @@ export default function TaskManagement() {
                   <Text style={{ fontSize: 10, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Assigned By</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: '#F3E8FF', justifyContent: 'center', alignItems: 'center' }}>
-                      <Ionicons name="person-circle" size={16} color="#8B5CF6" />
+                      <Ionicons name="person-circle" size={16} color={Colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }} numberOfLines={1}>{task.assignedBy || "Unknown"}</Text>
@@ -4607,7 +4533,7 @@ export default function TaskManagement() {
                   justifyContent: 'center',
                   alignItems: 'center',
                 }} onPress={() => openPassTaskModal(task)}>
-                  <Ionicons name="git-branch-outline" size={18} color="#8B5CF6" />
+                  <Ionicons name="git-branch-outline" size={18} color={Colors.primary} />
                 </TouchableOpacity>
               )}
 
@@ -4858,7 +4784,7 @@ export default function TaskManagement() {
                 <TouchableOpacity
                   style={[
                     styles.kanbanTaskActionButton,
-                    isDropdownOpen && { backgroundColor: '#8B5CF6' }
+                    isDropdownOpen && { backgroundColor: Colors.primary }
                   ]}
                   onPress={onStatusChange}
                 >
@@ -5164,78 +5090,98 @@ export default function TaskManagement() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar style="light" backgroundColor="#8B5CF6" translucent={false} />
-        <LinearGradient colors={['#8B5CF6', '#7C3AED', '#6D28D9']} style={styles.headerGradient}>
+        <StatusBar style="dark" />
+        <View style={styles.headerContainer}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#fff" />
+            <ActivityIndicator size="large" color={Colors.primary} />
             <Text style={styles.loadingText}>Loading Tasks...</Text>
           </View>
-        </LinearGradient>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar style="light" backgroundColor="#8B5CF6" translucent={false} />
+      <StatusBar style="dark" />
 
-      {/* Modern Header with Gradient */}
-      <LinearGradient colors={['#8B5CF6', '#7C3AED', '#6D28D9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.headerGradient}>
-        {/* Background Pattern */}
-        <View style={styles.headerPattern}>
-          <View style={[styles.patternCircle, { top: -25, right: -25, width: 130, height: 130 }]} />
-          <View style={[styles.patternCircle, { bottom: -35, left: -35, width: 160, height: 160 }]} />
-          <View style={[styles.patternCircle, { top: 45, right: 70, width: 90, height: 90 }]} />
-        </View>
-
-        <Animated.View style={[styles.headerContent, { opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }] }]}>
-          {/* Header Top Section */}
-          <View style={styles.headerTopSection}>
-            <View style={styles.headerLeft}>
-              <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                <Ionicons name="arrow-back" size={22} color="#fff" />
-              </TouchableOpacity>
-              <View style={styles.headerTextSection}>
-                <Text style={styles.headerTitle}>Task Management</Text>
-                <Text style={styles.headerSubtitle}>Organize and track your team's tasks</Text>
-              </View>
-            </View>
-            <View style={styles.headerRight}>
-              <View style={styles.dateTimeContainer}>
-                <Text style={styles.timeText}>{formatTimeIST(currentTime)}</Text>
-                <Text style={styles.dateText}>{getDayMonthIST(currentTime)}</Text>
-              </View>
+      {/* Simplified Header */}
+      <View style={styles.headerContainer}>
+        <Animated.View style={[styles.headerContent, { opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }] }]}>
+          {/* Header Section */}
+          <View style={styles.headerLeft}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <View style={styles.headerTextSection}>
+              <Text style={styles.headerTitle}>Task Management</Text>
+              <Text style={styles.headerSubtitle}>Overview</Text>
             </View>
           </View>
-
-          {/* Stats Overview Bar */}
-          <View style={styles.statsOverviewBar}>
-            <View style={styles.miniStatItem}>
-              <Ionicons name="list-outline" size={16} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{totalTasks}</Text>
-              <Text style={styles.miniStatLabel}>Total</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.miniStatItem}>
-              <Ionicons name="time-outline" size={16} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{inProgressCount}</Text>
-              <Text style={styles.miniStatLabel}>Active</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.miniStatItem}>
-              <Ionicons name="checkmark-circle-outline" size={16} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{completedCount}</Text>
-              <Text style={styles.miniStatLabel}>Done</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.miniStatItem}>
-              <Ionicons name="alert-circle-outline" size={16} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.miniStatValue}>{overdueCount}</Text>
-              <Text style={styles.miniStatLabel}>Overdue</Text>
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              style={{ marginRight: 16, position: 'relative', padding: 4 }}
+              onPress={() => {
+                setNotificationsModalVisible(true);
+                fetchNotifications();
+              }}
+            >
+              <Ionicons name="notifications-outline" size={24} color={Colors.text} />
+              {unreadNotificationsCount > 0 && (
+                <View style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 2,
+                  minWidth: 16,
+                  height: 16,
+                  borderRadius: 8,
+                  backgroundColor: Colors.error,
+                  borderWidth: 1.5,
+                  borderColor: '#fff',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  paddingHorizontal: 2
+                }}>
+                  <Text style={{ color: '#fff', fontSize: 9, fontWeight: 'bold' }}>
+                    {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <View style={styles.dateTimeContainer}>
+              <Text style={styles.timeText}>{formatTimeIST(currentTime)}</Text>
+              <Text style={styles.dateText}>{getDayMonthIST(currentTime)}</Text>
             </View>
           </View>
         </Animated.View>
-      </LinearGradient>
+      </View>
+
+      {/* Stats Overview Bar */}
+      <View style={styles.statsOverviewBar}>
+        <View style={styles.miniStatItem}>
+          <Ionicons name="list-outline" size={16} color={Colors.primary} />
+          <Text style={styles.miniStatValue}>{totalTasks}</Text>
+          <Text style={styles.miniStatLabel}>Total</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.miniStatItem}>
+          <Ionicons name="time-outline" size={16} color={Colors.warning} />
+          <Text style={styles.miniStatValue}>{inProgressCount}</Text>
+          <Text style={styles.miniStatLabel}>Active</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.miniStatItem}>
+          <Ionicons name="checkmark-circle-outline" size={16} color={Colors.success} />
+          <Text style={styles.miniStatValue}>{completedCount}</Text>
+          <Text style={styles.miniStatLabel}>Done</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.miniStatItem}>
+          <Ionicons name="alert-circle-outline" size={16} color={Colors.error} />
+          <Text style={styles.miniStatValue}>{overdueCount}</Text>
+          <Text style={styles.miniStatLabel}>Overdue</Text>
+        </View>
+      </View>
 
       {/* Main Content */}
       <ScrollView
@@ -5244,37 +5190,97 @@ export default function TaskManagement() {
         onScroll={onScroll}
         scrollEventThrottle={scrollEventThrottle}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#8B5CF6']} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} />}
       >
         <Animated.View style={{ opacity: contentAnim, transform: [{ translateY: contentAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
+
+          {/* Deadline Warnings Banner */}
+          {showWarnings && (deadlineWarnings.overdue.length > 0 || deadlineWarnings.upcoming.length > 0) && (
+            <View style={{ marginHorizontal: 16, marginBottom: 16, gap: 12 }}>
+              {/* Overdue Warnings */}
+              {deadlineWarnings.overdue.length > 0 && (
+                <View style={{
+                  backgroundColor: '#FEF2F2',
+                  borderRadius: 14,
+                  padding: 14,
+                  borderWidth: 1,
+                  borderColor: '#FEE2E2',
+                  flexDirection: 'row',
+                  alignItems: 'flex-start'
+                }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#FECACA', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                    <Ionicons name="warning" size={20} color="#DC2626" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#991B1B', marginBottom: 4 }}>
+                      {deadlineWarnings.overdue.length} Tasks Overdue
+                    </Text>
+                    <Text style={{ fontSize: 13, color: '#B91C1C', lineHeight: 18 }}>
+                      You have {deadlineWarnings.overdue.length} overdue tasks including "{deadlineWarnings.overdue[0].title}". Please take action immediately.
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setShowWarnings(false)} style={{ padding: 4 }}>
+                    <Ionicons name="close" size={18} color="#991B1B" />
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Upcoming Warnings */}
+              {deadlineWarnings.upcoming.length > 0 && (
+                <View style={{
+                  backgroundColor: '#FFFBEB',
+                  borderRadius: 14,
+                  padding: 14,
+                  borderWidth: 1,
+                  borderColor: '#FEF3C7',
+                  flexDirection: 'row',
+                  alignItems: 'flex-start'
+                }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#FDE68A', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                    <Ionicons name="time" size={20} color="#D97706" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#92400E', marginBottom: 4 }}>
+                      {deadlineWarnings.upcoming.length} Tasks Due Soon
+                    </Text>
+                    <Text style={{ fontSize: 13, color: '#B45309', lineHeight: 18 }}>
+                      {deadlineWarnings.upcoming.length} tasks are due mostly within 3 days. Prioritize these to stay on track.
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setShowWarnings(false)} style={{ padding: 4 }}>
+                    <Ionicons name="close" size={18} color="#92400E" />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Section Header Card */}
           <View style={styles.sectionHeaderCard}>
-            <LinearGradient colors={['#F3E8FF', '#E9D5FF']} style={styles.sectionHeaderGradient}>
-              <View style={styles.sectionHeaderContent}>
-                <View style={styles.sectionHeaderLeft}>
-                  <View style={[styles.sectionHeaderIconBg, { backgroundColor: '#8B5CF6' }]}>
-                    <Ionicons name={viewMode === 'kanban' ? 'layers' : 'list'} size={22} color="#fff" />
-                  </View>
-                  <View style={styles.sectionHeaderTextContainer}>
-                    <Text style={styles.sectionHeaderTitle}>Task Management</Text>
-                    <Text style={styles.sectionHeaderSubtitle}>{viewMode === 'kanban' ? `${totalTasks} tasks • Status Board` : `${filteredTasks.length} tasks • ${filter === 'all' ? 'All Status' : formatStatusLabel(filter)}`}</Text>
-                  </View>
+            <View style={styles.sectionHeaderContent}>
+              <View style={styles.sectionHeaderLeft}>
+                <View style={[styles.sectionHeaderIconBg]}>
+                  <Ionicons name={viewMode === 'kanban' ? 'layers' : 'list'} size={22} color={Colors.primary} />
                 </View>
-                <View style={styles.actionButtonsRow}>
-                  <TouchableOpacity style={styles.exportButton} onPress={openExportModal} disabled={filteredTasks.length === 0}>
-                    <Ionicons name="download-outline" size={20} color={filteredTasks.length === 0 ? "#D1D5DB" : "#8B5CF6"} />
-                  </TouchableOpacity>
-                  <View style={styles.viewToggleContainer}>
-                    <TouchableOpacity style={[styles.viewToggleButton, viewMode === 'kanban' && styles.viewToggleButtonActive]} onPress={() => setViewMode('kanban')} activeOpacity={0.7}>
-                      <Ionicons name="layers" size={18} color={viewMode === 'kanban' ? "#fff" : "#6B7280"} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.viewToggleButton, viewMode === 'table' && styles.viewToggleButtonActive]} onPress={() => setViewMode('table')} activeOpacity={0.7}>
-                      <Ionicons name="list" size={18} color={viewMode === 'table' ? "#fff" : "#6B7280"} />
-                    </TouchableOpacity>
-                  </View>
+                <View style={styles.sectionHeaderTextContainer}>
+                  <Text style={styles.sectionHeaderTitle}>Overview</Text>
+                  <Text style={styles.sectionHeaderSubtitle}>{viewMode === 'kanban' ? `${totalTasks} tasks • Board View` : `${filteredTasks.length} tasks • ${filter === 'all' ? 'All' : formatStatusLabel(filter)}`}</Text>
                 </View>
               </View>
-            </LinearGradient>
+              <View style={styles.actionButtonsRow}>
+                <TouchableOpacity style={styles.exportButton} onPress={openExportModal} disabled={filteredTasks.length === 0}>
+                  <Ionicons name="download-outline" size={20} color={filteredTasks.length === 0 ? Colors.border : Colors.primary} />
+                </TouchableOpacity>
+                <View style={styles.viewToggleContainer}>
+                  <TouchableOpacity style={[styles.viewToggleButton, viewMode === 'kanban' && styles.viewToggleButtonActive]} onPress={() => setViewMode('kanban')} activeOpacity={0.7}>
+                    <Ionicons name="layers" size={18} color={viewMode === 'kanban' ? "#fff" : Colors.textSecondary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.viewToggleButton, viewMode === 'table' && styles.viewToggleButtonActive]} onPress={() => setViewMode('table')} activeOpacity={0.7}>
+                    <Ionicons name="list" size={18} color={viewMode === 'table' ? "#fff" : Colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
           </View>
 
           {/* Search and Filter Row */}
@@ -5284,8 +5290,8 @@ export default function TaskManagement() {
               <Ionicons name="search" size={20} color="#9CA3AF" style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search tasks..."
-                placeholderTextColor="#9CA3AF"
+                placeholder="Search by task name..."
+                placeholderTextColor={Colors.textTertiary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 returnKeyType="search"
@@ -5662,28 +5668,28 @@ export default function TaskManagement() {
       <Modal visible={modalVisible} animationType="slide" presentationStyle="fullScreen">
 
         <SafeAreaView style={styles.fullScreenFormContainer} edges={['top']}>
-          <StatusBar style="light" backgroundColor="#8B5CF6" translucent={false} />
+          <StatusBar style="dark" />
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
             <Animated.View style={[styles.fullScreenCard, { opacity: formOpacity, transform: [{ translateY: formScaleY.interpolate({ inputRange: [0.9, 1], outputRange: [50, 0] }) }] }]}>
-              {/* Header */}
-              <LinearGradient colors={isEditMode ? ['#10B981', '#059669'] : ['#8B5CF6', '#7C3AED']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.modalHeader}>
+              {/* Simplified Modal Header */}
+              <View style={[styles.modalHeader, { backgroundColor: Colors.surface, borderBottomColor: Colors.borderLight }]}>
                 <View style={styles.modalTitleContainer}>
-                  <View style={styles.modalIconContainer}>
-                    <Ionicons name={isEditMode ? "create-outline" : "add-outline"} size={28} color="#fff" />
+                  <View style={[styles.modalIconContainer, { backgroundColor: Colors.primaryLighter, borderColor: Colors.primaryLight }]}>
+                    <Ionicons name={isEditMode ? "create-outline" : "add-outline"} size={28} color={Colors.primary} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.modalTitle}>{isEditMode ? "Edit Task" : "Create New Task"}</Text>
-                    <Text style={styles.modalSubtitle}>{isEditMode ? "Update task details" : "Assign a new task to team members"}</Text>
+                    <Text style={[styles.modalTitle, { color: Colors.text }]}>{isEditMode ? "Edit Task" : "Create New Task"}</Text>
+                    <Text style={[styles.modalSubtitle, { color: Colors.textSecondary }]}>{isEditMode ? "Update task details" : "Assign a new task"}</Text>
                   </View>
                 </View>
-                <TouchableOpacity style={styles.closeButton} onPress={closeTaskForm} activeOpacity={0.7}>
-                  <Ionicons name="close" size={24} color="#fff" />
+                <TouchableOpacity style={[styles.closeButton, { backgroundColor: Colors.backgroundAlt, borderColor: Colors.border }]} onPress={closeTaskForm} activeOpacity={0.7}>
+                  <Ionicons name="close" size={24} color={Colors.text} />
                 </TouchableOpacity>
-              </LinearGradient>
+              </View>
 
               {/* Progress */}
               <View style={styles.progressContainer}>
-                <ProgressBar progress={formProgress} color="#8B5CF6" style={styles.progressBar} />
+                <ProgressBar progress={formProgress} color={Colors.primary} style={styles.progressBar} />
                 <Text style={styles.progressText}>{Math.round(formProgress * 100)}% completed</Text>
               </View>
 
@@ -5691,17 +5697,17 @@ export default function TaskManagement() {
                 {/* Title */}
                 <Animated.View style={[styles.fieldContainer, { opacity: titleInputAnim, transform: [{ translateY: titleInputAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
                   <View style={styles.fieldLabelRow}>
-                    <Ionicons name="document-text" size={18} color="#8B5CF6" style={styles.fieldIcon} />
+                    <Ionicons name="document-text" size={18} color={Colors.primary} style={styles.fieldIcon} />
                     <Text style={styles.fieldLabel}>Task Title <Text style={styles.required}>*</Text></Text>
                     <Text style={[styles.characterCounter, newTask.title.length > 100 && { color: '#ef4444' }]}>
                       {newTask.title.length}/100
                     </Text>
                   </View>
-                  <TextInput 
-                    placeholder="Enter task title (5-100 characters)" 
-                    style={[styles.input, formErrors.title && styles.inputError]} 
-                    value={newTask.title} 
-                    onChangeText={(t) => updateField('title', t)} 
+                  <TextInput
+                    placeholder="Enter task title (5-100 characters)"
+                    style={[styles.input, formErrors.title && styles.inputError]}
+                    value={newTask.title}
+                    onChangeText={(t) => updateField('title', t)}
                     placeholderTextColor="#9ca3af"
                     maxLength={100}
                   />
@@ -5714,19 +5720,19 @@ export default function TaskManagement() {
                 {/* Description */}
                 <Animated.View style={[styles.fieldContainer, { opacity: descInputAnim, transform: [{ translateY: descInputAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
                   <View style={styles.fieldLabelRow}>
-                    <Ionicons name="document-text" size={18} color="#8B5CF6" style={styles.fieldIcon} />
+                    <Ionicons name="document-text" size={18} color={Colors.primary} style={styles.fieldIcon} />
                     <Text style={styles.fieldLabel}>Description <Text style={styles.required}>*</Text></Text>
                     <Text style={[styles.characterCounter, newTask.description.length > 500 && { color: '#ef4444' }]}>
                       {newTask.description.length}/500
                     </Text>
                   </View>
-                  <TextInput 
-                    placeholder="Enter detailed task description (10-500 characters)" 
-                    style={[styles.input, styles.textArea, formErrors.description && styles.inputError]} 
-                    value={newTask.description} 
-                    multiline 
-                    numberOfLines={4} 
-                    onChangeText={(t) => updateField('description', t)} 
+                  <TextInput
+                    placeholder="Enter detailed task description (10-500 characters)"
+                    style={[styles.input, styles.textArea, formErrors.description && styles.inputError]}
+                    value={newTask.description}
+                    multiline
+                    numberOfLines={4}
+                    onChangeText={(t) => updateField('description', t)}
                     placeholderTextColor="#9ca3af"
                     maxLength={500}
                   />
@@ -5740,11 +5746,11 @@ export default function TaskManagement() {
                 <View style={styles.rowContainer}>
                   <Animated.View style={[styles.fieldContainer, { flex: 1, marginRight: 8 }, { opacity: priorityInputAnim, transform: [{ translateY: priorityInputAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
                     <View style={styles.fieldLabelRow}>
-                      <Ionicons name="flag-outline" size={18} color="#8B5CF6" style={styles.fieldIcon} />
+                      <Ionicons name="flag-outline" size={18} color={Colors.primary} style={styles.fieldIcon} />
                       <Text style={styles.fieldLabel}>Priority</Text>
                     </View>
                     <View style={styles.pickerContainer}>
-                      <Picker selectedValue={newTask.priority} onValueChange={(value) => updateField('priority', value)} style={styles.picker} dropdownIconColor="#8B5CF6">
+                      <Picker selectedValue={newTask.priority} onValueChange={(value) => updateField('priority', value)} style={styles.picker} dropdownIconColor={Colors.primary}>
                         <Picker.Item label="Low" value="low" />
                         <Picker.Item label="Medium" value="medium" />
                         <Picker.Item label="High" value="high" />
@@ -5756,23 +5762,23 @@ export default function TaskManagement() {
 
                   <Animated.View style={[styles.fieldContainer, { flex: 1, marginLeft: 8 }, { opacity: deadlineInputAnim, transform: [{ translateY: deadlineInputAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
                     <View style={styles.fieldLabelRow}>
-                      <Ionicons name="calendar-outline" size={18} color="#8B5CF6" style={styles.fieldIcon} />
+                      <Ionicons name="calendar-outline" size={18} color={Colors.primary} style={styles.fieldIcon} />
                       <Text style={styles.fieldLabel}>Deadline <Text style={styles.required}>*</Text></Text>
                     </View>
                     <TouchableOpacity style={[styles.dateInput, formErrors.deadline && styles.inputError]} activeOpacity={0.7} onPress={handleDatePickerPress}>
                       <Text style={[styles.dateInputText, !newTask.deadline && { color: '#9ca3af' }]}>{newTask.deadline ? formatDateIST(newTask.deadline) : 'dd-mm-yyyy'}</Text>
-                      <Ionicons name="calendar-outline" size={20} color="#8B5CF6" />
+                      <Ionicons name="calendar-outline" size={20} color={Colors.primary} />
                     </TouchableOpacity>
                     {formErrors.deadline && <Text style={styles.errorText}>{formErrors.deadline}</Text>}
                   </Animated.View>
                 </View>
 
-                {showDatePicker && <DateTimePicker value={selectedDate} mode="date" display={Platform.OS === 'ios' ? 'spinner' : 'default'} onChange={onDateChange} minimumDate={new Date()} textColor="#8B5CF6" />}
+                {showDatePicker && <DateTimePicker value={selectedDate} mode="date" display={Platform.OS === 'ios' ? 'spinner' : 'default'} onChange={onDateChange} minimumDate={new Date()} textColor={Colors.primary} />}
 
                 {/* Assign To */}
                 <Animated.View style={[styles.fieldContainer, { opacity: assignInputAnim, transform: [{ translateY: assignInputAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
                   <View style={styles.fieldLabelRow}>
-                    <Ionicons name="person-outline" size={18} color="#8B5CF6" style={styles.fieldIcon} />
+                    <Ionicons name="person-outline" size={18} color={Colors.primary} style={styles.fieldIcon} />
                     <Text style={styles.fieldLabel}>Assign To <Text style={styles.required}>*</Text></Text>
                   </View>
                   <CustomEmployeeDropdown
@@ -5790,7 +5796,7 @@ export default function TaskManagement() {
                 <View style={styles.rowContainer}>
                   <Animated.View style={[styles.fieldContainer, { flex: 1, marginRight: 8 }, { opacity: deptInputAnim, transform: [{ translateY: deptInputAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
                     <View style={styles.fieldLabelRow}>
-                      <Ionicons name="business-outline" size={18} color="#8B5CF6" style={styles.fieldIcon} />
+                      <Ionicons name="business-outline" size={18} color={Colors.primary} style={styles.fieldIcon} />
                       <Text style={styles.fieldLabel}>Department</Text>
                     </View>
                     <TextInput placeholder="Auto-filled" style={[styles.input, { backgroundColor: '#f9fafb', color: '#6b7280' }]} value={newTask.department} editable={false} placeholderTextColor="#9ca3af" />
@@ -5798,7 +5804,7 @@ export default function TaskManagement() {
 
                   <Animated.View style={[styles.fieldContainer, { flex: 1, marginLeft: 8 }, { opacity: deptInputAnim, transform: [{ translateY: deptInputAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
                     <View style={styles.fieldLabelRow}>
-                      <Ionicons name="id-card-outline" size={18} color="#8B5CF6" style={styles.fieldIcon} />
+                      <Ionicons name="id-card-outline" size={18} color={Colors.primary} style={styles.fieldIcon} />
                       <Text style={styles.fieldLabel}>Employee ID</Text>
                     </View>
                     <TextInput placeholder="Auto-filled" style={[styles.input, { backgroundColor: '#f9fafb', color: '#6b7280' }]} value={newTask.employeeId} editable={false} placeholderTextColor="#9ca3af" />
@@ -5833,7 +5839,7 @@ export default function TaskManagement() {
               <View style={styles.taskDetailHeader}>
                 <View style={styles.taskDetailHeaderLeft}>
                   <View style={styles.taskDetailIcon}>
-                    <Ionicons name="document-text" size={28} color="#8B5CF6" />
+                    <Ionicons name="document-text" size={28} color={Colors.primary} />
                   </View>
                   <View>
                     <Text style={styles.taskDetailTitle}>{selectedTask.title}</Text>
@@ -5865,7 +5871,7 @@ export default function TaskManagement() {
                       {/* Description Section */}
                       <View style={styles.taskDetailSection}>
                         <View style={styles.taskDetailSectionHeader}>
-                          <Ionicons name="document-text" size={22} color="#8B5CF6" />
+                          <Ionicons name="document-text" size={22} color={Colors.primary} />
                           <Text style={styles.taskDetailSectionTitle}>Description</Text>
                         </View>
                         <View style={{
@@ -5875,7 +5881,7 @@ export default function TaskManagement() {
                           borderRadius: 14,
                           padding: 16,
                           borderLeftWidth: 4,
-                          borderLeftColor: '#8B5CF6',
+                          borderLeftColor: Colors.primary,
                         }}>
                           <Text style={styles.taskDetailDescription}>{selectedTask.description}</Text>
                         </View>
@@ -5884,7 +5890,7 @@ export default function TaskManagement() {
                       {/* Task Details Table */}
                       <View style={styles.taskDetailSection}>
                         <View style={styles.taskDetailSectionHeader}>
-                          <Ionicons name="information-circle" size={22} color="#8B5CF6" />
+                          <Ionicons name="information-circle" size={22} color={Colors.primary} />
                           <Text style={styles.taskDetailSectionTitle}>Task Details</Text>
                         </View>
 
@@ -5906,7 +5912,7 @@ export default function TaskManagement() {
 
                         {/* Table Rows */}
                         {[
-                          { icon: 'person-circle', label: 'Assigned By', value: selectedTask.assignedBy || 'Unknown', color: '#8B5CF6' },
+                          { icon: 'person-circle', label: 'Assigned By', value: selectedTask.assignedBy || 'Unknown', color: Colors.primary },
                           { icon: 'person', label: 'Assigned To', value: selectedTask.assignedToName || selectedTask.assignedTo[0] || 'Unknown', color: '#3B82F6' },
                           { icon: 'flag', label: 'Priority', value: selectedTask.priority, color: getPriorityColor(selectedTask.priority), isBadge: true },
                           { icon: 'calendar', label: 'Deadline', value: selectedTask.deadline ? formatDateIST(selectedTask.deadline) : 'Not set', color: '#D97706' },
@@ -6006,7 +6012,7 @@ export default function TaskManagement() {
                       {taskActivity && taskActivity.filter((a: any) => a.action?.toLowerCase() === 'passed').length > 0 && (
                         <View style={styles.taskDetailSection}>
                           <View style={styles.taskDetailSectionHeader}>
-                            <Ionicons name="git-branch" size={22} color="#8B5CF6" />
+                            <Ionicons name="git-branch" size={22} color={Colors.primary} />
                             <Text style={styles.taskDetailSectionTitle}>Passing History</Text>
                           </View>
                           <View style={{ gap: 10 }}>
@@ -6020,12 +6026,12 @@ export default function TaskManagement() {
                                     padding: 12,
                                     borderRadius: 10,
                                     borderLeftWidth: 3,
-                                    borderLeftColor: '#8B5CF6',
+                                    borderLeftColor: Colors.primary,
                                     flexDirection: 'row',
                                     alignItems: 'center',
                                     gap: 10,
                                   }}>
-                                    <Ionicons name="git-branch" size={16} color="#8B5CF6" />
+                                    <Ionicons name="git-branch" size={16} color={Colors.primary} />
                                     <View style={{ flex: 1 }}>
                                       <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }}>
                                         {details.from_name || getUserNameById(details.from)} → {details.to_name || getUserNameById(details.to)}
@@ -6048,7 +6054,7 @@ export default function TaskManagement() {
 
                       <View style={styles.taskDetailSection}>
                         <View style={styles.taskDetailSectionHeader}>
-                          <Ionicons name="pricetag" size={22} color="#8B5CF6" />
+                          <Ionicons name="pricetag" size={22} color={Colors.primary} />
                           <Text style={styles.taskDetailSectionTitle}>Tags</Text>
                         </View>
                         <View style={styles.taskDetailTags}>
@@ -6063,7 +6069,7 @@ export default function TaskManagement() {
                     <View style={styles.taskDetailActivityTab}>
                       {loadingActivity ? (
                         <View style={styles.taskDetailActivityCenter}>
-                          <ActivityIndicator size="large" color="#8B5CF6" />
+                          <ActivityIndicator size="large" color={Colors.primary} />
                           <Text style={styles.taskDetailActivityCenterText}>Loading activity...</Text>
                           <Text style={styles.taskDetailActivityCenterSubtext}>Fetching task history</Text>
                         </View>
@@ -6105,7 +6111,7 @@ export default function TaskManagement() {
 
                                     {/* User info - compact */}
                                     <Text style={styles.taskDetailActivityUser}>
-                                      <Ionicons name="person-circle" size={11} color="#8B5CF6" /> {userName}
+                                      <Ionicons name="person-circle" size={11} color={Colors.primary} /> {userName}
                                     </Text>
 
                                     {/* Status change with compact styling */}
@@ -6213,7 +6219,7 @@ export default function TaskManagement() {
                       ) : (
                         <View style={styles.taskDetailActivityCenter}>
                           <View style={styles.taskDetailActivityCenterIcon}>
-                            <Ionicons name="time" size={32} color="#8B5CF6" />
+                            <Ionicons name="time" size={32} color={Colors.primary} />
                           </View>
                           <Text style={styles.taskDetailActivityCenterText}>No activity yet</Text>
                           <Text style={styles.taskDetailActivityCenterSubtext}>Task created on {formatDateTime(selectedTask?.createdAt)}</Text>
@@ -6236,7 +6242,7 @@ export default function TaskManagement() {
                     {/* Loading state */}
                     {loadingComments ? (
                       <View style={styles.taskDetailActivityCenter}>
-                        <ActivityIndicator size="large" color="#8B5CF6" />
+                        <ActivityIndicator size="large" color={Colors.primary} />
                         <Text style={[styles.taskDetailActivityCenterText, { marginTop: 12 }]}>Loading comments...</Text>
                       </View>
                     ) : (
@@ -6446,11 +6452,11 @@ export default function TaskManagement() {
                                                     paddingVertical: 10,
                                                     paddingHorizontal: 12,
                                                     borderRadius: 8,
-                                                    backgroundColor: isCurrentUser ? 'rgba(255,255,255,0.25)' : '#8B5CF6',
+                                                    backgroundColor: isCurrentUser ? 'rgba(255,255,255,0.25)' : Colors.primary,
                                                     justifyContent: 'center',
                                                     alignItems: 'center',
                                                     borderWidth: 1,
-                                                    borderColor: isCurrentUser ? 'rgba(255,255,255,0.3)' : '#7C3AED',
+                                                    borderColor: isCurrentUser ? 'rgba(255,255,255,0.3)' : Colors.primaryDark,
                                                     flexDirection: 'row',
                                                     gap: 6,
                                                   }}>
@@ -6480,11 +6486,11 @@ export default function TaskManagement() {
                                                     flexDirection: 'row',
                                                     gap: 6,
                                                   }}>
-                                                  <Ionicons name="download" size={16} color={isCurrentUser ? '#fff' : '#8B5CF6'} />
+                                                  <Ionicons name="download" size={16} color={isCurrentUser ? '#fff' : Colors.primary} />
                                                   <Text style={{
                                                     fontSize: 12,
                                                     fontWeight: '600',
-                                                    color: isCurrentUser ? '#fff' : '#8B5CF6',
+                                                    color: isCurrentUser ? '#fff' : Colors.primary,
                                                   }}>
                                                     Download
                                                   </Text>
@@ -6534,7 +6540,7 @@ export default function TaskManagement() {
                         ) : (
                           <View style={styles.taskDetailNoComments}>
                             <View style={styles.taskDetailNoCommentsIcon}>
-                              <Ionicons name="chatbubbles-outline" size={40} color="#8B5CF6" />
+                              <Ionicons name="chatbubbles-outline" size={40} color={Colors.primary} />
                             </View>
                             <Text style={styles.taskDetailNoCommentsTitle}>No comments yet</Text>
                             <Text style={styles.taskDetailNoCommentsSubtitle}>Start a conversation about this task</Text>
@@ -6819,7 +6825,7 @@ export default function TaskManagement() {
                           activeOpacity={0.7}
                         >
                           {attachmentLoading ? (
-                            <ActivityIndicator size="small" color="#8B5CF6" />
+                            <ActivityIndicator size="small" color={Colors.primary} />
                           ) : (
                             <Ionicons
                               name="attach"
@@ -6835,10 +6841,10 @@ export default function TaskManagement() {
                             width: 40,
                             height: 40,
                             borderRadius: 20,
-                            backgroundColor: (newComment.trim() || selectedAttachment) && !postingComment ? '#8B5CF6' : '#D1D5DB',
+                            backgroundColor: (newComment.trim() || selectedAttachment) && !postingComment ? Colors.primary : '#D1D5DB',
                             justifyContent: 'center',
                             alignItems: 'center',
-                            shadowColor: '#8B5CF6',
+                            shadowColor: Colors.primary,
                             shadowOffset: { width: 0, height: 2 },
                             shadowOpacity: (newComment.trim() || selectedAttachment) && !postingComment ? 0.3 : 0,
                             shadowRadius: 4,
@@ -7189,7 +7195,7 @@ export default function TaskManagement() {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
             {/* Premium Header with Gradient */}
-            <LinearGradient colors={['#8B5CF6', '#7C3AED']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.passModalHeader}>
+            <LinearGradient colors={[Colors.primary, Colors.primaryDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.passModalHeader}>
               <TouchableOpacity style={{ position: 'absolute', top: 16, right: 16, zIndex: 1, padding: 4 }} onPress={closePassTaskModal} activeOpacity={0.7}>
                 <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center' }}>
                   <Ionicons name="close" size={24} color="#fff" />
@@ -7217,7 +7223,7 @@ export default function TaskManagement() {
                 <View style={{ marginBottom: 24, backgroundColor: '#fff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 }}>
                     <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F3FF', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
-                      <Ionicons name="document-text" size={24} color="#8B5CF6" />
+                      <Ionicons name="document-text" size={24} color={Colors.primary} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 4 }}>{taskToPass.title}</Text>
@@ -7231,19 +7237,19 @@ export default function TaskManagement() {
               {/* Assignee Selection */}
               <View style={{ marginBottom: 24 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                  <Ionicons name="person" size={18} color="#8B5CF6" style={{ marginRight: 8 }} />
+                  <Ionicons name="person" size={18} color={Colors.primary} style={{ marginRight: 8 }} />
                   <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', letterSpacing: 0.2 }}>New Assignee</Text>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: '#EF4444', marginLeft: 4 }}>*</Text>
                 </View>
                 <View style={{ borderWidth: 1.5, borderColor: formErrors.assignee ? '#EF4444' : '#E5E7EB', borderRadius: 14, backgroundColor: '#fff', overflow: 'hidden' }}>
                   {loadingEmployees ? (
-                    <View style={{ padding: 16, alignItems: 'center' }}><ActivityIndicator size="small" color="#8B5CF6" /></View>
+                    <View style={{ padding: 16, alignItems: 'center' }}><ActivityIndicator size="small" color={Colors.primary} /></View>
                   ) : (
                     <Picker
                       selectedValue={passTaskData.assignee}
                       onValueChange={(value) => setPassTaskData(prev => ({ ...prev, assignee: value }))}
                       style={{ height: 56, width: '100%', color: '#111827' }}
-                      dropdownIconColor="#8B5CF6"
+                      dropdownIconColor={Colors.primary}
                     >
                       <Picker.Item label="Select a team member..." value="" color="#9CA3AF" />
                       {employees.length === 0 ? (
@@ -7264,7 +7270,7 @@ export default function TaskManagement() {
               {/* Transfer Note */}
               <View style={{ marginBottom: 24 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                  <Ionicons name="chatbubble-ellipses" size={18} color="#8B5CF6" style={{ marginRight: 8 }} />
+                  <Ionicons name="chatbubble-ellipses" size={18} color={Colors.primary} style={{ marginRight: 8 }} />
                   <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', letterSpacing: 0.2 }}>Transfer Note</Text>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: '#EF4444', marginLeft: 4 }}>*</Text>
                 </View>
@@ -7292,12 +7298,12 @@ export default function TaskManagement() {
               </View>
 
               {/* Info Box */}
-              <View style={{ backgroundColor: '#F5F3FF', padding: 14, borderRadius: 14, borderLeftWidth: 4, borderLeftColor: '#8B5CF6' }}>
+              <View style={{ backgroundColor: '#F5F3FF', padding: 14, borderRadius: 14, borderLeftWidth: 4, borderLeftColor: Colors.primary }}>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-                  <Ionicons name="information-circle" size={20} color="#8B5CF6" style={{ marginTop: 2 }} />
+                  <Ionicons name="information-circle" size={20} color={Colors.primary} style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 13, fontWeight: '700', color: '#5B21B6', marginBottom: 4 }}>Wait for confirmation</Text>
-                    <Text style={{ fontSize: 12, color: '#6D28D9', lineHeight: 18 }}>Once you pass this task, it will be moved to the selected member's task list. You will still be able to track its progress.</Text>
+                    <Text style={{ fontSize: 12, color: Colors.primaryDark, lineHeight: 18 }}>Once you pass this task, it will be moved to the selected member's task list. You will still be able to track its progress.</Text>
                   </View>
                 </View>
               </View>
@@ -7316,9 +7322,9 @@ export default function TaskManagement() {
                   justifyContent: 'center',
                   paddingVertical: 16,
                   borderRadius: 14,
-                  backgroundColor: (!passTaskData.assignee || !passTaskData.reason.trim()) ? '#D1D5DB' : '#8B5CF6',
+                  backgroundColor: (!passTaskData.assignee || !passTaskData.reason.trim()) ? '#D1D5DB' : Colors.primary,
                   elevation: (!passTaskData.assignee || !passTaskData.reason.trim()) ? 0 : 4,
-                  shadowColor: '#8B5CF6',
+                  shadowColor: Colors.primary,
                   shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: (!passTaskData.assignee || !passTaskData.reason.trim()) ? 0 : 0.35,
                   shadowRadius: 8,
@@ -7340,6 +7346,111 @@ export default function TaskManagement() {
             </View>
           </KeyboardAvoidingView>
         </SafeAreaView>
+      </Modal>
+
+      {/* Notifications Modal */}
+      <Modal
+        visible={notificationsModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setNotificationsModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}
+          activeOpacity={1}
+          onPress={() => setNotificationsModalVisible(false)}
+        >
+          <View style={{
+            flex: 1,
+            marginTop: 100,
+            backgroundColor: '#fff',
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <View style={{
+              padding: 20,
+              borderBottomWidth: 1,
+              borderBottomColor: '#F3F4F6',
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: '#111827' }}>Notifications</Text>
+              <TouchableOpacity
+                style={{ padding: 8, backgroundColor: '#F3F4F6', borderRadius: 20 }}
+                onPress={() => setNotificationsModalVisible(false)}
+              >
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Notifications List */}
+            <FlatList
+              data={notifications}
+              keyExtractor={(item: any, index: number) => item.id?.toString() || index.toString()}
+              contentContainerStyle={{ padding: 16 }}
+              ListEmptyComponent={
+                <View style={{ alignItems: 'center', justifyContent: 'center', padding: 40, opacity: 0.6 }}>
+                  <Ionicons name="notifications-off-outline" size={48} color="#9CA3AF" />
+                  <Text style={{ marginTop: 16, fontSize: 16, color: '#6B7280', fontWeight: '500' }}>No notifications</Text>
+                </View>
+              }
+              renderItem={({ item }: { item: any }) => (
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: item.is_read ? '#fff' : '#F0F9FF',
+                    padding: 16,
+                    borderRadius: 16,
+                    marginBottom: 12,
+                    borderWidth: 1,
+                    borderColor: item.is_read ? '#E5E7EB' : '#BAE6FD'
+                  }}
+                  onPress={() => markNotificationRead(item.id)}
+                >
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <View style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 12,
+                      backgroundColor: item.type === 'warning' ? '#FEF2F2' : '#E0F2FE',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      borderWidth: 1,
+                      borderColor: item.type === 'warning' ? '#FECACA' : '#BAE6FD'
+                    }}>
+                      <Ionicons
+                        name={item.type === 'warning' ? "warning" : "information"}
+                        size={20}
+                        color={item.type === 'warning' ? "#EF4444" : "#0284C7"}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', flex: 1, marginRight: 8 }}>
+                          {item.title || "Notification"}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#6B7280' }}>
+                          {getRelativeTime(item.created_at)}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 13, color: '#4B5563', lineHeight: 18 }}>
+                        {item.message}
+                      </Text>
+                      {!item.is_read && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#0284C7', marginRight: 6 }} />
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: '#0284C7' }}>Unread</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );

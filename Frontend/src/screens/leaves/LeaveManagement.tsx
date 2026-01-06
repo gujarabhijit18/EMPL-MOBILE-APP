@@ -27,7 +27,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { API_CONFIG } from "../../config/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { useModuleBadges } from "../../contexts/ModuleBadgeContext";
-import { apiService, LeaveRequestResponse, LeaveSummary, HolidayResponse } from "../../lib/api";
+import { apiService, LeaveRequestResponse, LeaveSummary, HolidayResponse, LeaveNotification } from "../../lib/api";
 import { formatDateIST, formatDateShortIST, getDayMonthIST, getMonthYearIST, formatDateWithDayIST, formatIST } from "../../utils/dateTime";
 import { validateLeaveApplication, getLeaveBalanceImpactMessage, validateLeaveOverlap } from "../../utils/leaveValidation";
 import { mapLeaveTypeToAPI, normalizeLeaveType } from "../../utils/leaveTypeMapper";
@@ -137,6 +137,40 @@ export default function LeaveManagement() {
   // Edit Leave State
   const [editingLeave, setEditingLeave] = useState<LeaveRequestResponse | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
+
+  // Notification State
+  const [notifications, setNotifications] = useState<LeaveNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationModalVisible, setNotificationModalVisible] = useState(false);
+
+  // Approval History State
+  const [approvalHistory, setApprovalHistory] = useState<LeaveRequestResponse[]>([]); // Keeping for legacy if needed, or remove?
+  const [approvalHistoryLoading, setApprovalHistoryLoading] = useState(false);
+
+  // New Leave History State (Replacing Recent Decisions)
+  const [leaveHistoryList, setLeaveHistoryList] = useState<LeaveRequestResponse[]>([]);
+  const [leaveHistoryPeriod, setLeaveHistoryPeriod] = useState("current_month");
+  const [leaveHistoryLoading, setLeaveHistoryLoading] = useState(false);
+  const [leaveHistoryMode, setLeaveHistoryMode] = useState<"my" | "team">("my"); // Added for context
+
+  // Leave History Filter State (Moved from bottom for scope access)
+  // History Range State (Used for the main tab history list)
+  const historyRanges = ["Current Month", "Last 3 Months", "Last 6 Months"] as const;
+  type HistoryRange = typeof historyRanges[number];
+  const [historyRange, setHistoryRange] = useState<HistoryRange>("Current Month");
+  const [historySheetVisible, setHistorySheetVisible] = useState(false);
+  const [leaveHistoryModalVisible, setLeaveHistoryModalVisible] = useState(false);
+
+  // Unified Leave History Filtering State (Replacing duplicate states from both modals)
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<string>("All");
+  const [historyStartDate, setHistoryStartDate] = useState<Date | null>(null);
+  const [historyEndDate, setHistoryEndDate] = useState<Date | null>(null);
+  const [showHistoryDatePicker, setShowHistoryDatePicker] = useState<"start" | "end" | null>(null);
+
+  // Keep these for internal modal logic if needed, but we'll try to unify
+  const [decisionsStatusFilter, setDecisionsStatusFilter] = useState<string>("All"); // Keeping for now to avoid breaking refs until merged
+  const [decisionsFilterStartDate, setDecisionsFilterStartDate] = useState<Date | null>(null);
+  const [decisionsFilterEndDate, setDecisionsFilterEndDate] = useState<Date | null>(null);
 
   // Leave Allocation Configuration State
   const [leaveAllocation, setLeaveAllocation] = useState({
@@ -315,14 +349,28 @@ export default function LeaveManagement() {
     }
   }, [showDeptDropdown, deptDropdownAnim]);
 
-  const fetchMyLeaves = useCallback(async () => {
+  const fetchMyLeaves = useCallback(async (period?: string) => {
     try {
-      const leaves = await apiService.getMyLeaves();
+      let apiPeriod = period;
+      if (!apiPeriod) {
+        switch (historyRange) {
+          case "Current Month": apiPeriod = "current_month"; break;
+          case "Last 3 Months": apiPeriod = "last_3_months"; break;
+          case "Last 6 Months": apiPeriod = "last_6_months"; break;
+          default: apiPeriod = "current_month";
+        }
+      }
+      const leaves = await apiService.getMyLeaves(apiPeriod);
       setMyLeaves(leaves);
     } catch (err: any) {
       setError(err.message);
     }
-  }, []);
+  }, [historyRange]);
+
+  // Refetch leaves when history range changes
+  useEffect(() => {
+    fetchMyLeaves();
+  }, [historyRange, fetchMyLeaves]);
 
   const fetchTeamLeaves = useCallback(async () => {
     if (!canSeeTeamLeaves) return;
@@ -343,6 +391,18 @@ export default function LeaveManagement() {
   }, [canSeeTeamLeaves, userRole]);
 
   const fetchLeaveSummary = useCallback(async () => {
+    try {
+      // Try fetching official balance from backend
+      const balance = await apiService.getLeaveBalance();
+      if (balance) {
+        setLeaveSummary(balance);
+        return;
+      }
+    } catch (err) {
+      console.log("Backend balance fetch failed, falling back to local calculation");
+    }
+
+    // Fallback: Calculate locally
     try {
       const summary = await apiService.getMyLeaveSummary();
       setLeaveSummary(summary);
@@ -369,35 +429,72 @@ export default function LeaveManagement() {
           holidayDate.setHours(0, 0, 0, 0);
           return holidayDate >= today;
         });
-
-      // Auto-delete expired holidays from backend
-      const expiredHolidays = holidaysData.filter((h: HolidayResponse) => {
-        const holidayDate = new Date(h.date);
-        holidayDate.setHours(0, 0, 0, 0);
-        return holidayDate < today && h.id !== undefined && h.id !== null;
-      });
-
-      if (expiredHolidays.length > 0 && isAdmin) {
-        console.log("🗑️ Auto-removing expired holidays:", expiredHolidays.length);
-        for (const expiredHoliday of expiredHolidays) {
-          try {
-            console.log("🗑️ Deleting holiday:", expiredHoliday.id, expiredHoliday.name);
-            await apiService.deleteHoliday(expiredHoliday.id);
-            console.log("✅ Expired holiday deleted:", expiredHoliday.name);
-          } catch (err: any) {
-            console.log("⚠️ Could not delete expired holiday:", err.message);
-          }
-        }
-      }
-
       setHolidays(formattedHolidays);
     } catch (err: any) {
       console.log("Failed to fetch holidays:", err.message);
-      // Keep existing holidays if fetch fails
     } finally {
       setHolidaysLoading(false);
     }
   }, [isAdmin]);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const response = await apiService.getMyNotifications();
+      if (response && response.notifications) {
+        setNotifications(response.notifications);
+        setUnreadCount(response.unread_count);
+      }
+    } catch (err: any) {
+      console.log("Failed to fetch notifications");
+    }
+  }, []);
+
+  const handleMarkNotificationRead = async (id: number) => {
+    try {
+      await apiService.markNotificationAsRead(id);
+      setNotifications(prev => prev.map(n => n.notification_id === id ? { ...n, is_read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (err: any) {
+      console.log("Failed to mark notification read");
+    }
+  };
+
+  const fetchApprovalHistory = useCallback(async () => {
+    setApprovalHistoryLoading(true);
+    try {
+      const history = await apiService.getApprovalHistory();
+      if (history) {
+        setApprovalHistory(history);
+      }
+    } catch (err: any) {
+      console.log("Failed to fetch approval history");
+    } finally {
+      setApprovalHistoryLoading(false);
+    }
+  }, []);
+
+  const fetchLeaveHistoryList = async (period: string, mode: "my" | "team" = "my") => {
+    setLeaveHistoryLoading(true);
+    setLeaveHistoryPeriod(period);
+    setLeaveHistoryMode(mode);
+    try {
+      let data: LeaveRequestResponse[] = [];
+      if (mode === "team") {
+        // Fetch approval history for team context
+        // If the backend doesn't support period filtering specifically for history, we filter locally if needed
+        data = await apiService.getApprovalHistory();
+      } else {
+        // Fetch personal leave history with period
+        data = await apiService.getMyLeaves(period);
+      }
+      setLeaveHistoryList(data || []);
+    } catch (err: any) {
+      console.log(`Failed to fetch ${mode} leave history: `, err);
+      setLeaveHistoryList([]);
+    } finally {
+      setLeaveHistoryLoading(false);
+    }
+  };
 
   const fetchLeaveAllocation = useCallback(async () => {
     try {
@@ -452,7 +549,7 @@ export default function LeaveManagement() {
       return;
     }
     try {
-      console.log(`📥 Fetching week-off settings for department: ${selectedDeptForWeekOff}`);
+      console.log(`📥 Fetching week - off settings for department: ${selectedDeptForWeekOff} `);
 
       // Use the new calendar/weekoffs endpoint with department filter
       const weekOffRules = await apiService.getWeekOffRules(selectedDeptForWeekOff);
@@ -475,9 +572,9 @@ export default function LeaveManagement() {
           if (JSON.stringify(prev) === JSON.stringify(days)) return prev;
           return days;
         });
-        console.log(`✅ Week-off settings loaded for ${selectedDeptForWeekOff}:`, weekOff.days);
+        console.log(`✅ Week - off settings loaded for ${selectedDeptForWeekOff}: `, weekOff.days);
       } else {
-        console.log(`⚠️ No active week-off settings found for ${selectedDeptForWeekOff}, using defaults`);
+        console.log(`⚠️ No active week - off settings found for ${selectedDeptForWeekOff}, using defaults`);
         setSelectedWeekOffs(["Saturday", "Sunday"]);
       }
     } catch (err: any) {
@@ -505,6 +602,7 @@ export default function LeaveManagement() {
         fetchLeaveAllocation(),
         fetchDepartments(),
         fetchDepartmentWeekOff(),
+        fetchNotifications(),
       ]);
     } catch (err: any) {
       setError(err.message);
@@ -564,7 +662,7 @@ export default function LeaveManagement() {
   const submitLeave = async () => {
     // Enhanced validation with business rules
     const errors: { [key: string]: string } = {};
-    
+
     // Reason validation - minimum 10 characters
     if (!form.reason.trim()) {
       errors.reason = "Please enter a reason for leave.";
@@ -582,14 +680,14 @@ export default function LeaveManagement() {
     today.setHours(0, 0, 0, 0);
     const startDate = new Date(form.startDate);
     startDate.setHours(0, 0, 0, 0);
-    
+
     if (startDate < today) {
       errors.startDate = "Start date cannot be in the past.";
     }
 
     // Calculate requested days
     const requestedDays = Math.ceil((form.endDate.getTime() - form.startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    
+
     // Sick leave minimum days validation
     if (form.type.toLowerCase().includes("sick") && requestedDays < 3) {
       errors.sickLeave = "Sick leave must be for minimum 3 days.";
@@ -604,7 +702,7 @@ export default function LeaveManagement() {
     const currentTime = new Date();
     const timeDiff = form.startDate.getTime() - currentTime.getTime();
     const hoursDiff = timeDiff / (1000 * 60 * 60);
-    
+
     if (form.type.toLowerCase().includes("sick")) {
       if (hoursDiff < 2) {
         errors.advanceNotice = "Sick leave requires at least 2 hours advance notice.";
@@ -616,10 +714,10 @@ export default function LeaveManagement() {
     }
 
     // Leave balance check
-    if (leaveSummary) {
-      const availableBalance = parseInt(leaveAllocation.Total) - leaveCounts["Annual Leave"];
+    if (leaveSummary || leaveStats) {
+      const availableBalance = leaveStats.annual.remaining;
       if (requestedDays > availableBalance) {
-        errors.balance = `Insufficient leave balance. Available: ${availableBalance} days, Requested: ${requestedDays} days.`;
+        errors.balance = `Insufficient leave balance.Available: ${availableBalance} days, Requested: ${requestedDays} days.`;
       }
     }
 
@@ -664,10 +762,10 @@ export default function LeaveManagement() {
         reason: form.reason,
         status: "Pending",
       });
-      
+
       Alert.alert("✅ Success", `Leave request submitted successfully for ${requestedDays} day${requestedDays > 1 ? 's' : ''}.`);
       setForm({ type: "Sick Leave", startDate: new Date(), endDate: new Date(), reason: "" });
-      
+
       // Refresh leave list and summary after successful submission
       await Promise.all([fetchMyLeaves(), fetchLeaveSummary()]);
     } catch (err: any) {
@@ -715,7 +813,7 @@ export default function LeaveManagement() {
 
   const submitRejection = async () => {
     if (rejectingLeaveId === null) return;
-    
+
     // Find the leave to check its status
     const leaveToReject = teamLeaves.find(l => l.leave_id === rejectingLeaveId);
     if (leaveToReject && leaveToReject.status !== "Pending") {
@@ -883,7 +981,7 @@ export default function LeaveManagement() {
   };
 
   const removeHoliday = (holiday: Holiday) => {
-    Alert.alert("Remove Holiday", `Are you sure you want to remove "${holiday.name}"?`, [
+    Alert.alert("Remove Holiday", `Are you sure you want to remove "${holiday.name}" ? `, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove",
@@ -951,19 +1049,19 @@ export default function LeaveManagement() {
     setLoading(true);
     try {
       const dateStr = formatIST(editingHoliday.date, "yyyy-MM-dd");
-      
+
       // Backend doesn't support PUT for holidays, so we delete and recreate
       // First delete the old holiday
       console.log("🗑️ Deleting old holiday for update:", editingHoliday.holiday_id);
       await apiService.deleteHoliday(editingHoliday.holiday_id);
-      
+
       // Then create the new holiday with updated data
       const createData = {
         name: editingHoliday.name.trim(),
         date: dateStr,
         description: editingHoliday.description,
       };
-      
+
       console.log("📤 Creating updated holiday:", createData);
       const response = await apiService.createHoliday(createData);
       console.log("✅ Holiday updated (delete+create) from backend:", response);
@@ -972,12 +1070,12 @@ export default function LeaveManagement() {
       setHolidays(prevHolidays =>
         prevHolidays.map((h) =>
           h.holiday_id === editingHoliday.holiday_id
-            ? { 
-                holiday_id: response.id, 
-                date: new Date(dateStr),
-                name: response.name,
-                description: response.description ?? undefined,
-              }
+            ? {
+              holiday_id: response.id,
+              date: new Date(dateStr),
+              name: response.name,
+              description: response.description ?? undefined,
+            }
             : h
         )
       );
@@ -1117,26 +1215,7 @@ export default function LeaveManagement() {
     }
   };
 
-  const historyRanges = ["Current Month", "Last 3 Months", "Last 6 Months", "Last 1 Year"] as const;
-  type HistoryRange = typeof historyRanges[number];
-  const [historyRange, setHistoryRange] = useState<HistoryRange>("Current Month");
-  const [historySheetVisible, setHistorySheetVisible] = useState(false);
-  const [viewAllHistoryVisible, setViewAllHistoryVisible] = useState(false);
-  const [recentDecisionsModalVisible, setRecentDecisionsModalVisible] = useState(false);
-  
-  // Date filter state for View All History modal
-  const [historyFilterStartDate, setHistoryFilterStartDate] = useState<Date | null>(null);
-  const [historyFilterEndDate, setHistoryFilterEndDate] = useState<Date | null>(null);
-  const [showHistoryStartDatePicker, setShowHistoryStartDatePicker] = useState(false);
-  const [showHistoryEndDatePicker, setShowHistoryEndDatePicker] = useState(false);
-  const [historyStatusFilter, setHistoryStatusFilter] = useState<string>("All");
-  
-  // Recent Decisions filter state
-  const [decisionsFilterStartDate, setDecisionsFilterStartDate] = useState<Date | null>(null);
-  const [decisionsFilterEndDate, setDecisionsFilterEndDate] = useState<Date | null>(null);
-  const [showDecisionsStartDatePicker, setShowDecisionsStartDatePicker] = useState(false);
-  const [showDecisionsEndDatePicker, setShowDecisionsEndDatePicker] = useState(false);
-  const [decisionsStatusFilter, setDecisionsStatusFilter] = useState<string>("All");
+  // History ranges logic (state moved to top)
 
   const today = new Date();
   const rangeStart = (() => {
@@ -1144,7 +1223,7 @@ export default function LeaveManagement() {
       case "Current Month": return startOfMonth(today);
       case "Last 3 Months": return subMonths(today, 3);
       case "Last 6 Months": return subMonths(today, 6);
-      case "Last 1 Year": return subMonths(today, 12);
+
       default: return startOfMonth(today);
     }
   })();
@@ -1177,6 +1256,29 @@ export default function LeaveManagement() {
     return counts;
   }, [myLeaves]);
 
+  const leaveStats = React.useMemo(() => {
+    const getStats = (type: string, allocationKey: string) => {
+      const allocation = parseInt((leaveAllocation as any)[allocationKey]) || 0;
+      if (leaveSummary?.leave_by_type?.[type]) {
+        const stats = leaveSummary.leave_by_type[type];
+        return {
+          taken: stats.taken || 0,
+          remaining: stats.remaining ?? (allocation - (stats.taken || 0)),
+          allocation: stats.allocated || allocation
+        };
+      }
+      const taken = (leaveCounts as any)[type] || 0;
+      return { taken, remaining: allocation - taken, allocation };
+    };
+
+    return {
+      annual: getStats("Annual Leave", "Total"),
+      sick: getStats("Sick Leave", "sick"),
+      casual: getStats("Casual Leave", "casual"),
+      other: getStats("Unpaid Leave", "other"),
+    };
+  }, [leaveAllocation, leaveCounts, leaveSummary]);
+
   const pendingCount = teamLeaves.filter(l => l.status === "Pending").length;
 
   return (
@@ -1196,6 +1298,14 @@ export default function LeaveManagement() {
                 <Text style={styles.headerSubtitle}>Track and manage your leaves</Text>
               </Animated.View>
               <View style={styles.headerActions}>
+                <TouchableOpacity style={styles.headerIconBtn} onPress={() => setNotificationModalVisible(true)} activeOpacity={0.7}>
+                  <Ionicons name="notifications-outline" size={20} color={Colors.primary} />
+                  {unreadCount > 0 && (
+                    <View style={styles.notificationBadge}>
+                      <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.headerIconBtn} onPress={handleExportExcel} activeOpacity={0.7}>
                   <Ionicons name="download-outline" size={20} color={Colors.primary} />
                 </TouchableOpacity>
@@ -1271,7 +1381,7 @@ export default function LeaveManagement() {
                         <View style={styles.balanceStatInfo}>
                           <Text style={styles.balanceStatLabel}>Total</Text>
                           <Text style={styles.balanceStatValue}>
-                            {parseInt(leaveAllocation.Total) - leaveCounts["Annual Leave"]}
+                            {leaveStats.annual.remaining}
                           </Text>
                         </View>
                       </View>
@@ -1281,14 +1391,14 @@ export default function LeaveManagement() {
                             style={[
                               styles.balanceStatProgressBar,
                               {
-                                width: `${((leaveCounts["Annual Leave"] / parseInt(leaveAllocation.Total)) * 100) || 0}%`,
+                                width: `${((leaveStats.annual.taken / leaveStats.annual.allocation) * 100) || 0}%`,
                                 backgroundColor: '#3b82f6',
                               },
                             ]}
                           />
                         </View>
                         <Text style={styles.balanceStatProgressText}>
-                          {leaveCounts["Annual Leave"]}/{leaveAllocation.Total}
+                          {leaveStats.annual.taken}/{leaveStats.annual.allocation}
                         </Text>
                       </View>
                     </View>
@@ -1302,7 +1412,7 @@ export default function LeaveManagement() {
                         <View style={styles.balanceStatInfo}>
                           <Text style={styles.balanceStatLabel}>Sick</Text>
                           <Text style={styles.balanceStatValue}>
-                            {parseInt(leaveAllocation.sick) - leaveCounts["Sick Leave"]}
+                            {leaveStats.sick.remaining}
                           </Text>
                         </View>
                       </View>
@@ -1312,14 +1422,14 @@ export default function LeaveManagement() {
                             style={[
                               styles.balanceStatProgressBar,
                               {
-                                width: `${((leaveCounts["Sick Leave"] / parseInt(leaveAllocation.sick)) * 100) || 0}%`,
-                                backgroundColor: '#ef4444',
+                                width: `${((leaveStats.sick.taken / leaveStats.sick.allocation) * 100) || 0}%`,
+                                backgroundColor: '#10b981',
                               },
                             ]}
                           />
                         </View>
                         <Text style={styles.balanceStatProgressText}>
-                          {leaveCounts["Sick Leave"]}/{leaveAllocation.sick}
+                          {leaveStats.sick.taken}/{leaveStats.sick.allocation}
                         </Text>
                       </View>
                     </View>
@@ -1333,7 +1443,7 @@ export default function LeaveManagement() {
                         <View style={styles.balanceStatInfo}>
                           <Text style={styles.balanceStatLabel}>Casual</Text>
                           <Text style={styles.balanceStatValue}>
-                            {parseInt(leaveAllocation.casual) - leaveCounts["Casual Leave"]}
+                            {leaveStats.casual.remaining}
                           </Text>
                         </View>
                       </View>
@@ -1343,14 +1453,14 @@ export default function LeaveManagement() {
                             style={[
                               styles.balanceStatProgressBar,
                               {
-                                width: `${((leaveCounts["Casual Leave"] / parseInt(leaveAllocation.casual)) * 100) || 0}%`,
-                                backgroundColor: '#10b981',
+                                width: `${((leaveStats.casual.taken / leaveStats.casual.allocation) * 100) || 0}%`,
+                                backgroundColor: '#f59e0b',
                               },
                             ]}
                           />
                         </View>
                         <Text style={styles.balanceStatProgressText}>
-                          {leaveCounts["Casual Leave"]}/{leaveAllocation.casual}
+                          {leaveStats.casual.taken}/{leaveStats.casual.allocation}
                         </Text>
                       </View>
                     </View>
@@ -1364,13 +1474,13 @@ export default function LeaveManagement() {
                         <View style={styles.balanceStatInfo}>
                           <Text style={styles.balanceStatLabel}>Unpaid</Text>
                           <Text style={styles.balanceStatValue}>
-                            {leaveCounts["Unpaid Leave"]}
+                            {leaveStats.other.taken}
                           </Text>
                         </View>
                       </View>
                       <View style={styles.balanceStatProgressContainer}>
                         <Text style={styles.balanceStatProgressTextSmall}>
-                          {leaveCounts["Unpaid Leave"]} days taken
+                          {leaveStats.other.taken} days taken
                         </Text>
                       </View>
                     </View>
@@ -1521,13 +1631,13 @@ export default function LeaveManagement() {
                     </View>
 
                     {/* Submit Button */}
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={[
-                        styles.submitBtnNew, 
+                        styles.submitBtnNew,
                         (form.reason.length < 10 || loading) && { opacity: 0.6 }
-                      ]} 
-                      onPress={submitLeave} 
-                      disabled={loading || form.reason.length < 10} 
+                      ]}
+                      onPress={submitLeave}
+                      disabled={loading || form.reason.length < 10}
                       activeOpacity={0.85}
                     >
                       <LinearGradient
@@ -1558,29 +1668,30 @@ export default function LeaveManagement() {
                       </LinearGradient>
                       <View>
                         <Text style={styles.historyTitle}>Leave History</Text>
-                        <Text style={styles.historySubtitle}>{myLeaves.length} {myLeaves.length === 1 ? 'request' : 'requests'}</Text>
+                        <Text style={styles.historySubtitle}>{historyRange}</Text>
                       </View>
                     </View>
-                    {myLeaves.length > 2 && (
-                      <TouchableOpacity style={styles.viewAllHeaderBtn} onPress={() => setViewAllHistoryVisible(true)} activeOpacity={0.8}>
-                        <Text style={styles.viewAllHeaderBtnText}>View All</Text>
-                        <Ionicons name="arrow-forward" size={14} color="#7c3aed" />
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={styles.filterBtn}
+                      onPress={() => setHistorySheetVisible(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="filter" size={12} color="#4b5563" />
+                      <Text style={styles.filterBtnText}>Filter</Text>
+                    </TouchableOpacity>
                   </View>
 
-                  {myLeaves.length === 0 ? (
+                  {filteredLeavesByPeriod.length === 0 ? (
                     <View style={styles.emptyState}>
                       <View style={styles.emptyStateIcon}>
                         <Ionicons name="document-text-outline" size={40} color="#d1d5db" />
                       </View>
                       <Text style={styles.emptyStateTitle}>No Leave History</Text>
-                      <Text style={styles.emptyStateSubtitle}>You haven't applied for any leaves yet</Text>
+                      <Text style={styles.emptyStateSubtitle}>No leaves found for this period</Text>
                     </View>
                   ) : (
                     <View style={styles.historyList}>
-                      {/* Show only first 2 items */}
-                      {myLeaves.slice(0, 2).map((req) => (
+                      {filteredLeavesByPeriod.map((req) => (
                         <LeaveHistoryCard
                           key={req.leave_id}
                           leave={req}
@@ -1590,6 +1701,26 @@ export default function LeaveManagement() {
                           getStatusColor={getStatusColor}
                         />
                       ))}
+
+                      {/* View All History Button */}
+                      <TouchableOpacity
+                        style={[styles.recentDecisionsButton, { marginTop: 12, borderStyle: 'dashed', backgroundColor: '#f8fafc' }]}
+                        onPress={() => {
+                          fetchLeaveHistoryList("all", "my");
+                          setLeaveHistoryModalVisible(true);
+                        }}
+                      >
+                        <View style={styles.recentDecisionsButtonContent}>
+                          <View style={[styles.recentDecisionsButtonIcon, { backgroundColor: '#e0e7ff' }]}>
+                            <Ionicons name="list" size={20} color="#4f46e5" />
+                          </View>
+                          <View style={styles.recentDecisionsButtonText}>
+                            <Text style={styles.recentDecisionsButtonTitle}>Full Leave History</Text>
+                            <Text style={styles.recentDecisionsButtonSubtitle}>View and filter all previous requests</Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
+                        </View>
+                      </TouchableOpacity>
                     </View>
                   )}
                 </View>
@@ -1676,9 +1807,13 @@ export default function LeaveManagement() {
                 )}
 
                 {/* Recent Decisions Button */}
-                <TouchableOpacity 
+                {/* Leave History Button (Replaces Recent Decisions) */}
+                <TouchableOpacity
                   style={styles.recentDecisionsButton}
-                  onPress={() => setRecentDecisionsModalVisible(true)}
+                  onPress={() => {
+                    fetchLeaveHistoryList("all", "team");
+                    setLeaveHistoryModalVisible(true);
+                  }}
                   activeOpacity={0.8}
                 >
                   <View style={styles.recentDecisionsButtonContent}>
@@ -1686,9 +1821,9 @@ export default function LeaveManagement() {
                       <Ionicons name="time" size={22} color="#7c3aed" />
                     </View>
                     <View style={styles.recentDecisionsButtonText}>
-                      <Text style={styles.recentDecisionsButtonTitle}>Recent Decisions</Text>
+                      <Text style={styles.recentDecisionsButtonTitle}>Leave History</Text>
                       <Text style={styles.recentDecisionsButtonSubtitle}>
-                        View history of approved & rejected leaves
+                        View past leave records
                       </Text>
                     </View>
                   </View>
@@ -1861,7 +1996,7 @@ export default function LeaveManagement() {
                                       onPress={() => toggleWeekOffDay(day.name)}
                                       activeOpacity={0.65}
                                     >
-                                      <View style={[styles.weekDayButtonContent, isSelected && { backgroundColor: `${day.color}10` }]}>
+                                      <View style={[styles.weekDayButtonContent, isSelected && { backgroundColor: `${day.color} 10` }]}>
                                         <Ionicons
                                           name={day.icon as any}
                                           size={16}
@@ -1890,7 +2025,7 @@ export default function LeaveManagement() {
                                       onPress={() => toggleWeekOffDay(day.name)}
                                       activeOpacity={0.65}
                                     >
-                                      <View style={[styles.weekDayButtonContent, isSelected && { backgroundColor: `${day.color}10` }]}>
+                                      <View style={[styles.weekDayButtonContent, isSelected && { backgroundColor: `${day.color} 10` }]}>
                                         <Ionicons
                                           name={day.icon as any}
                                           size={16}
@@ -2179,269 +2314,51 @@ export default function LeaveManagement() {
           </View>
         </Modal>
 
-        {/* Recent Decisions Modal */}
-        <Modal visible={recentDecisionsModalVisible} animationType="slide" presentationStyle="pageSheet">
-          <SafeAreaView style={styles.viewAllHistoryModalContainer}>
-            {/* Header */}
-            <LinearGradient colors={["#059669", "#10b981"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.viewAllHistoryModalHeader}>
-              <View style={styles.viewAllHistoryModalHeaderContent}>
-                <TouchableOpacity
-                  style={styles.viewAllHistoryModalBackBtn}
-                  onPress={() => {
-                    setRecentDecisionsModalVisible(false);
-                    setDecisionsFilterStartDate(null);
-                    setDecisionsFilterEndDate(null);
-                    setDecisionsStatusFilter("All");
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="chevron-back" size={24} color="#fff" />
-                </TouchableOpacity>
-                <View style={styles.viewAllHistoryModalHeaderText}>
-                  <Text style={styles.viewAllHistoryModalTitle}>Recent Decisions</Text>
-                  <Text style={styles.viewAllHistoryModalSubtitle}>
-                    {teamLeaves.filter(l => l.status === "Approved" || l.status === "Rejected").length} decisions total
-                  </Text>
-                </View>
-                <TouchableOpacity 
-                  style={styles.viewAllHistoryModalFilterBtn}
-                  onPress={() => {
-                    setDecisionsFilterStartDate(null);
-                    setDecisionsFilterEndDate(null);
-                    setDecisionsStatusFilter("All");
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="refresh" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-
-            {/* Date Filter Section */}
-            <View style={styles.historyFilterSection}>
-              <View style={styles.historyDateFilterRow}>
-                <TouchableOpacity 
-                  style={styles.historyDateFilterBtn}
-                  onPress={() => setShowDecisionsStartDatePicker(true)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="calendar-outline" size={16} color="#059669" />
-                  <Text style={styles.historyDateFilterText}>
-                    {decisionsFilterStartDate ? format(decisionsFilterStartDate, 'dd MMM yyyy') : 'Start Date'}
-                  </Text>
-                </TouchableOpacity>
-                <Ionicons name="arrow-forward" size={16} color="#9ca3af" />
-                <TouchableOpacity 
-                  style={styles.historyDateFilterBtn}
-                  onPress={() => setShowDecisionsEndDatePicker(true)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="calendar-outline" size={16} color="#059669" />
-                  <Text style={styles.historyDateFilterText}>
-                    {decisionsFilterEndDate ? format(decisionsFilterEndDate, 'dd MMM yyyy') : 'End Date'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              
-              {/* Status Filter Pills */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.historyStatusFilterRow}>
-                {["All", "Approved", "Rejected"].map((status) => (
-                  <TouchableOpacity
-                    key={status}
-                    style={[
-                      styles.historyStatusPill,
-                      decisionsStatusFilter === status && styles.historyStatusPillActive,
-                      status === "Approved" && decisionsStatusFilter === status && { backgroundColor: '#d1fae5', borderColor: '#10b981' },
-                      status === "Rejected" && decisionsStatusFilter === status && { backgroundColor: '#fee2e2', borderColor: '#ef4444' },
-                    ]}
-                    onPress={() => setDecisionsStatusFilter(status)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[
-                      styles.historyStatusPillText,
-                      decisionsStatusFilter === status && styles.historyStatusPillTextActive,
-                      status === "Approved" && decisionsStatusFilter === status && { color: '#059669' },
-                      status === "Rejected" && decisionsStatusFilter === status && { color: '#dc2626' },
-                    ]}>
-                      {status}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* Date Pickers */}
-            {showDecisionsStartDatePicker && (
-              <DateTimePicker
-                value={decisionsFilterStartDate || new Date()}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, date) => {
-                  setShowDecisionsStartDatePicker(Platform.OS === 'ios');
-                  if (date) setDecisionsFilterStartDate(date);
-                }}
-                maximumDate={decisionsFilterEndDate || new Date()}
-              />
-            )}
-            {showDecisionsEndDatePicker && (
-              <DateTimePicker
-                value={decisionsFilterEndDate || new Date()}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, date) => {
-                  setShowDecisionsEndDatePicker(Platform.OS === 'ios');
-                  if (date) setDecisionsFilterEndDate(date);
-                }}
-                minimumDate={decisionsFilterStartDate || undefined}
-                maximumDate={new Date()}
-              />
-            )}
-
-            {/* Stats Summary */}
-            <View style={styles.viewAllHistoryStatsRow}>
-              <View style={[styles.viewAllHistoryStat, { backgroundColor: '#d1fae5' }]}>
-                <Ionicons name="checkmark-circle" size={16} color="#059669" />
-                <Text style={[styles.viewAllHistoryStatValue, { color: '#059669' }]}>
-                  {teamLeaves.filter(l => l.status === 'Approved').length}
-                </Text>
-                <Text style={styles.viewAllHistoryStatLabel}>Approved</Text>
-              </View>
-              <View style={[styles.viewAllHistoryStat, { backgroundColor: '#fee2e2' }]}>
-                <Ionicons name="close-circle" size={16} color="#dc2626" />
-                <Text style={[styles.viewAllHistoryStatValue, { color: '#dc2626' }]}>
-                  {teamLeaves.filter(l => l.status === 'Rejected').length}
-                </Text>
-                <Text style={styles.viewAllHistoryStatLabel}>Rejected</Text>
-              </View>
-            </View>
-
-            {/* Decisions List */}
-            <FlatList
-              data={teamLeaves.filter(leave => {
-                // Only show approved/rejected
-                if (leave.status !== "Approved" && leave.status !== "Rejected") return false;
-                // Apply status filter
-                if (decisionsStatusFilter !== "All" && leave.status !== decisionsStatusFilter) return false;
-                // Apply date filter
-                if (decisionsFilterStartDate || decisionsFilterEndDate) {
-                  const leaveDate = new Date(leave.start_date);
-                  leaveDate.setHours(0, 0, 0, 0);
-                  if (decisionsFilterStartDate) {
-                    const startDate = new Date(decisionsFilterStartDate);
-                    startDate.setHours(0, 0, 0, 0);
-                    if (leaveDate < startDate) return false;
-                  }
-                  if (decisionsFilterEndDate) {
-                    const endDate = new Date(decisionsFilterEndDate);
-                    endDate.setHours(23, 59, 59, 999);
-                    if (leaveDate > endDate) return false;
-                  }
-                }
-                return true;
-              })}
-              keyExtractor={(item) => item.leave_id.toString()}
-              contentContainerStyle={styles.viewAllHistoryList}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item: leave }) => (
-                <View style={styles.recentDecisionCard}>
-                  <View style={[
-                    styles.recentDecisionLeftBar,
-                    { backgroundColor: leave.status === "Approved" ? "#10b981" : "#ef4444" }
-                  ]} />
-                  <View style={styles.recentDecisionContent}>
-                    <View style={styles.recentDecisionTop}>
-                      <View style={styles.recentDecisionInfo}>
-                        <Text style={styles.recentDecisionName}>
-                          {leave.user?.name || leave.name || "Employee"}
-                        </Text>
-                        <View style={[
-                          styles.recentDecisionTypeBadge,
-                          { backgroundColor: getTypeColor(leave.leave_type || "Annual") + "20" }
-                        ]}>
-                          <Text style={[
-                            styles.recentDecisionTypeText,
-                            { color: getTypeColor(leave.leave_type || "Annual") }
-                          ]}>
-                            {leave.leave_type?.toLowerCase() || "annual"}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={[
-                        styles.recentDecisionStatusBadge,
-                        { backgroundColor: leave.status === "Approved" ? "#10b981" : "#ef4444" }
-                      ]}>
-                        <Text style={styles.recentDecisionStatusText}>{leave.status}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.recentDecisionBottom}>
-                      <Text style={styles.recentDecisionDate}>
-                        {getDayMonthIST(leave.start_date)} - {getDayMonthIST(leave.end_date)}
-                      </Text>
-                      <Text style={styles.recentDecisionDept}>
-                        • {leave.user?.department || leave.department || "Department"}
-                      </Text>
-                    </View>
-                    {/* Show approver info if available */}
-                    {leave.approver?.name && (
-                      <View style={styles.recentDecisionApproverRow}>
-                        <Ionicons name="person-circle-outline" size={14} color="#6b7280" />
-                        <Text style={styles.recentDecisionApproverText}>
-                          {leave.status === "Approved" ? "Approved" : "Rejected"} by {leave.approver.name}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              )}
-              ListEmptyComponent={
-                <View style={styles.viewAllHistoryEmpty}>
-                  <View style={styles.viewAllHistoryEmptyIcon}>
-                    <Ionicons name="document-text-outline" size={48} color="#d1d5db" />
-                  </View>
-                  <Text style={styles.viewAllHistoryEmptyTitle}>No Decisions Found</Text>
-                  <Text style={styles.viewAllHistoryEmptySubtitle}>
-                    {decisionsStatusFilter !== "All" || decisionsFilterStartDate || decisionsFilterEndDate 
-                      ? "No decisions match your filter criteria" 
-                      : "No approved or rejected leaves yet"}
-                  </Text>
-                </View>
-              }
-            />
-          </SafeAreaView>
-        </Modal>
-
-        {/* View All Leave History Modal */}
-        <Modal visible={viewAllHistoryVisible} animationType="slide" presentationStyle="pageSheet">
+        {/* Unified Leave History Modal */}
+        <Modal
+          visible={leaveHistoryModalVisible}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setLeaveHistoryModalVisible(false)}
+        >
           <SafeAreaView style={styles.viewAllHistoryModalContainer}>
             {/* Premium Header */}
-            <LinearGradient colors={["#7c3aed", "#8b5cf6"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.viewAllHistoryModalHeader}>
+            <LinearGradient
+              colors={leaveHistoryMode === "team" ? ["#0ea5e9", "#2563eb"] : ["#7c3aed", "#8b5cf6"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.viewAllHistoryModalHeader}
+            >
               <View style={styles.viewAllHistoryModalHeaderContent}>
                 <TouchableOpacity
                   style={styles.viewAllHistoryModalBackBtn}
                   onPress={() => {
-                    setViewAllHistoryVisible(false);
-                    // Reset filters when closing
-                    setHistoryFilterStartDate(null);
-                    setHistoryFilterEndDate(null);
+                    setLeaveHistoryModalVisible(false);
+                    // Reset local filters on close
                     setHistoryStatusFilter("All");
+                    setHistoryStartDate(null);
+                    setHistoryEndDate(null);
                   }}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="chevron-back" size={24} color="#fff" />
                 </TouchableOpacity>
                 <View style={styles.viewAllHistoryModalHeaderText}>
-                  <Text style={styles.viewAllHistoryModalTitle}>Leave History</Text>
+                  <Text style={styles.viewAllHistoryModalTitle}>
+                    {leaveHistoryMode === "team" ? "Team Approval History" : "My Leave History"}
+                  </Text>
                   <Text style={styles.viewAllHistoryModalSubtitle}>
-                    {myLeaves.length} {myLeaves.length === 1 ? 'request' : 'requests'} total
+                    {leaveHistoryList.length} records total
                   </Text>
                 </View>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.viewAllHistoryModalFilterBtn}
                   onPress={() => {
-                    // Clear all filters
-                    setHistoryFilterStartDate(null);
-                    setHistoryFilterEndDate(null);
+                    // Reset filters
                     setHistoryStatusFilter("All");
+                    setHistoryStartDate(null);
+                    setHistoryEndDate(null);
+                    if (leaveHistoryMode === "my") fetchLeaveHistoryList("all", "my");
                   }}
                   activeOpacity={0.7}
                 >
@@ -2450,35 +2367,68 @@ export default function LeaveManagement() {
               </View>
             </LinearGradient>
 
-            {/* Date Filter Section */}
+            {/* Period Tabs (Only for 'My' mode as it translates to API calls) */}
+            {leaveHistoryMode === "my" && (
+              <View style={{ backgroundColor: '#fff', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16 }}>
+                  {[
+                    { label: "Current Month", value: "current_month" },
+                    { label: "Last 3 Months", value: "last_3_months" },
+                    { label: "Last 6 Months", value: "last_6_months" },
+                    { label: "All", value: "all" },
+                  ].map((filter) => (
+                    <TouchableOpacity
+                      key={filter.value}
+                      style={[
+                        styles.historyStatusPill,
+                        leaveHistoryPeriod === filter.value && styles.historyStatusPillActive,
+                        { marginRight: 8 }
+                      ]}
+                      onPress={() => fetchLeaveHistoryList(filter.value, "my")}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[
+                        styles.historyStatusPillText,
+                        leaveHistoryPeriod === filter.value && styles.historyStatusPillTextActive,
+                      ]}>
+                        {filter.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Advanced Filters Section */}
             <View style={styles.historyFilterSection}>
+              {/* Date Filter Row */}
               <View style={styles.historyDateFilterRow}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.historyDateFilterBtn}
-                  onPress={() => setShowHistoryStartDatePicker(true)}
+                  onPress={() => setShowHistoryDatePicker("start")}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="calendar-outline" size={16} color="#7c3aed" />
+                  <Ionicons name="calendar-outline" size={16} color={leaveHistoryMode === "team" ? "#0ea5e9" : "#7c3aed"} />
                   <Text style={styles.historyDateFilterText}>
-                    {historyFilterStartDate ? format(historyFilterStartDate, 'dd MMM yyyy') : 'Start Date'}
+                    {historyStartDate ? format(historyStartDate, 'dd MMM yyyy') : 'Start Date'}
                   </Text>
                 </TouchableOpacity>
                 <Ionicons name="arrow-forward" size={16} color="#9ca3af" />
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.historyDateFilterBtn}
-                  onPress={() => setShowHistoryEndDatePicker(true)}
+                  onPress={() => setShowHistoryDatePicker("end")}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="calendar-outline" size={16} color="#7c3aed" />
+                  <Ionicons name="calendar-outline" size={16} color={leaveHistoryMode === "team" ? "#0ea5e9" : "#7c3aed"} />
                   <Text style={styles.historyDateFilterText}>
-                    {historyFilterEndDate ? format(historyFilterEndDate, 'dd MMM yyyy') : 'End Date'}
+                    {historyEndDate ? format(historyEndDate, 'dd MMM yyyy') : 'End Date'}
                   </Text>
                 </TouchableOpacity>
               </View>
-              
+
               {/* Status Filter Pills */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.historyStatusFilterRow}>
-                {["All", "Pending", "Approved", "Rejected", "Cancelled"].map((status) => (
+                {["All", "Pending", "Approved", "Rejected", ...(leaveHistoryMode === "my" ? ["Cancelled"] : [])].map((status) => (
                   <TouchableOpacity
                     key={status}
                     style={[
@@ -2508,109 +2458,101 @@ export default function LeaveManagement() {
             </View>
 
             {/* Date Pickers */}
-            {showHistoryStartDatePicker && (
+            {showHistoryDatePicker === "start" && (
               <DateTimePicker
-                value={historyFilterStartDate || new Date()}
+                value={historyStartDate || new Date()}
                 mode="date"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                 onChange={(event, date) => {
-                  setShowHistoryStartDatePicker(Platform.OS === 'ios');
-                  if (date) setHistoryFilterStartDate(date);
+                  if (Platform.OS !== 'ios') setShowHistoryDatePicker(null);
+                  if (date) setHistoryStartDate(date);
                 }}
-                maximumDate={historyFilterEndDate || new Date()}
+                maximumDate={historyEndDate || new Date()}
               />
             )}
-            {showHistoryEndDatePicker && (
+            {showHistoryDatePicker === "end" && (
               <DateTimePicker
-                value={historyFilterEndDate || new Date()}
+                value={historyEndDate || new Date()}
                 mode="date"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                 onChange={(event, date) => {
-                  setShowHistoryEndDatePicker(Platform.OS === 'ios');
-                  if (date) setHistoryFilterEndDate(date);
+                  if (Platform.OS !== 'ios') setShowHistoryDatePicker(null);
+                  if (date) setHistoryEndDate(date);
                 }}
-                minimumDate={historyFilterStartDate || undefined}
+                minimumDate={historyStartDate || undefined}
                 maximumDate={new Date()}
               />
             )}
 
-            {/* Stats Summary */}
-            <View style={styles.viewAllHistoryStatsRow}>
-              <View style={[styles.viewAllHistoryStat, { backgroundColor: '#fef3c7' }]}>
-                <Ionicons name="time" size={16} color="#d97706" />
-                <Text style={[styles.viewAllHistoryStatValue, { color: '#d97706' }]}>
-                  {myLeaves.filter(l => l.status === 'Pending').length}
-                </Text>
-                <Text style={styles.viewAllHistoryStatLabel}>Pending</Text>
-              </View>
-              <View style={[styles.viewAllHistoryStat, { backgroundColor: '#d1fae5' }]}>
-                <Ionicons name="checkmark-circle" size={16} color="#059669" />
-                <Text style={[styles.viewAllHistoryStatValue, { color: '#059669' }]}>
-                  {myLeaves.filter(l => l.status === 'Approved').length}
-                </Text>
-                <Text style={styles.viewAllHistoryStatLabel}>Approved</Text>
-              </View>
-              <View style={[styles.viewAllHistoryStat, { backgroundColor: '#fee2e2' }]}>
-                <Ionicons name="close-circle" size={16} color="#dc2626" />
-                <Text style={[styles.viewAllHistoryStatValue, { color: '#dc2626' }]}>
-                  {myLeaves.filter(l => l.status === 'Rejected').length}
-                </Text>
-                <Text style={styles.viewAllHistoryStatLabel}>Rejected</Text>
-              </View>
-            </View>
+            {Platform.OS === 'ios' && showHistoryDatePicker && (
+              <TouchableOpacity
+                style={{ backgroundColor: '#f8fafc', padding: 12, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#e2e8f0' }}
+                onPress={() => setShowHistoryDatePicker(null)}
+              >
+                <Text style={{ color: '#7c3aed', fontWeight: '700' }}>Done Selecting Date</Text>
+              </TouchableOpacity>
+            )}
 
-            {/* Leave History List - with filters applied */}
-            <FlatList
-              data={myLeaves.filter(leave => {
-                // Apply status filter
-                if (historyStatusFilter !== "All" && leave.status !== historyStatusFilter) {
-                  return false;
-                }
-                // Apply date filter
-                if (historyFilterStartDate || historyFilterEndDate) {
-                  const leaveDate = new Date(leave.start_date);
-                  leaveDate.setHours(0, 0, 0, 0);
-                  if (historyFilterStartDate) {
-                    const startDate = new Date(historyFilterStartDate);
-                    startDate.setHours(0, 0, 0, 0);
-                    if (leaveDate < startDate) return false;
+            {/* Main Content */}
+            {leaveHistoryLoading ? (
+              <View style={styles.loadingState}>
+                <ActivityIndicator size="large" color={leaveHistoryMode === "team" ? "#0ea5e9" : "#7c3aed"} />
+                <Text style={styles.loadingText}>Loading history...</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={leaveHistoryList.filter(leave => {
+                  // status filter
+                  if (historyStatusFilter !== "All" && leave.status !== historyStatusFilter) return false;
+
+                  // If in team mode, exclude cancelled leaves entirely from the view
+                  if (leaveHistoryMode === "team" && leave.status === "Cancelled") return false;
+
+                  // date filter
+                  if (historyStartDate || historyEndDate) {
+                    const lDate = new Date(leave.start_date);
+                    lDate.setHours(0, 0, 0, 0);
+                    if (historyStartDate) {
+                      const sDate = new Date(historyStartDate);
+                      sDate.setHours(0, 0, 0, 0);
+                      if (lDate < sDate) return false;
+                    }
+                    if (historyEndDate) {
+                      const eDate = new Date(historyEndDate);
+                      eDate.setHours(23, 59, 59, 999);
+                      if (lDate > eDate) return false;
+                    }
                   }
-                  if (historyFilterEndDate) {
-                    const endDate = new Date(historyFilterEndDate);
-                    endDate.setHours(23, 59, 59, 999);
-                    if (leaveDate > endDate) return false;
-                  }
-                }
-                return true;
-              })}
-              keyExtractor={(item) => item.leave_id.toString()}
-              contentContainerStyle={styles.viewAllHistoryList}
-              showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
-                <View style={styles.viewAllHistoryItem}>
-                  <LeaveHistoryCard
-                    leave={item}
-                    onEdit={handleEditLeave}
-                    onDelete={handleDeleteLeave}
-                    getTypeColor={getTypeColor}
-                    getStatusColor={getStatusColor}
-                  />
-                </View>
-              )}
-              ListEmptyComponent={
-                <View style={styles.viewAllHistoryEmpty}>
-                  <View style={styles.viewAllHistoryEmptyIcon}>
-                    <Ionicons name="document-text-outline" size={48} color="#d1d5db" />
+                  return true;
+                })}
+                keyExtractor={(item) => item.leave_id.toString()}
+                contentContainerStyle={styles.viewAllHistoryList}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item: leave }) => (
+                  <View style={styles.viewAllHistoryItem}>
+                    {/* Reusing LeaveHistoryCard for personal, but maybe a differently styled card for Team? 
+                        For now, LeaveHistoryCard is robust enough. */}
+                    <LeaveHistoryCard
+                      leave={leave}
+                      onEdit={leaveHistoryMode === "my" ? handleEditLeave : undefined}
+                      onDelete={leaveHistoryMode === "my" ? handleDeleteLeave : undefined}
+                      getTypeColor={getTypeColor}
+                      getStatusColor={getStatusColor}
+                      showEmployeeName={leaveHistoryMode === "team"} // Assuming LeaveHistoryCard can show name if prop passed
+                    />
                   </View>
-                  <Text style={styles.viewAllHistoryEmptyTitle}>No Leave History</Text>
-                  <Text style={styles.viewAllHistoryEmptySubtitle}>
-                    {historyStatusFilter !== "All" || historyFilterStartDate || historyFilterEndDate 
-                      ? "No leaves match your filter criteria" 
-                      : "You haven't applied for any leaves yet"}
-                  </Text>
-                </View>
-              }
-            />
+                )}
+                ListEmptyComponent={
+                  <View style={styles.viewAllHistoryEmpty}>
+                    <View style={styles.viewAllHistoryEmptyIcon}>
+                      <Ionicons name="document-text-outline" size={48} color="#d1d5db" />
+                    </View>
+                    <Text style={styles.viewAllHistoryEmptyTitle}>No matching records found</Text>
+                    <Text style={styles.viewAllHistoryEmptySubtitle}>Try adjusting your filters or search period.</Text>
+                  </View>
+                }
+              />
+            )}
           </SafeAreaView>
         </Modal>
 
@@ -3046,6 +2988,66 @@ export default function LeaveManagement() {
             </TouchableOpacity>
           </Modal>
         )}
+
+        {/* Notification Modal */}
+        <Modal visible={notificationModalVisible} animationType="slide" presentationStyle="pageSheet">
+          <SafeAreaView style={{ flex: 1, backgroundColor: "#f8fafc" }}>
+            <View style={styles.viewAllHistoryModalHeader}>
+              <View style={styles.viewAllHistoryModalHeaderContent}>
+                <TouchableOpacity
+                  style={styles.viewAllHistoryModalBackBtn}
+                  onPress={() => setNotificationModalVisible(false)}
+                >
+                  <Ionicons name="chevron-back" size={24} color="#fff" />
+                </TouchableOpacity>
+                <View style={styles.viewAllHistoryModalHeaderText}>
+                  <Text style={styles.viewAllHistoryModalTitle}>Notifications</Text>
+                  <Text style={styles.viewAllHistoryModalSubtitle}>
+                    {unreadCount} unread
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <FlatList
+              data={notifications}
+              keyExtractor={(item) => item.notification_id.toString()}
+              contentContainerStyle={{ padding: 20 }}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.notificationCard,
+                    !item.is_read && styles.notificationCardUnread
+                  ]}
+                  onPress={() => handleMarkNotificationRead(item.notification_id)}
+                >
+                  <View style={[styles.notificationIconBg, !item.is_read && { backgroundColor: "#fffbeb" }]}>
+                    <Ionicons
+                      name={item.is_read ? "notifications-outline" : "notifications"}
+                      size={24}
+                      color={item.is_read ? "#9ca3af" : "#f59e0b"}
+                    />
+                  </View>
+                  <View style={styles.notificationContent}>
+                    <Text style={[styles.notificationTitle, !item.is_read && styles.notificationTitleUnread]}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.notificationMessage}>{item.message}</Text>
+                    <Text style={styles.notificationTime}>{formatDateWithDayIST(new Date(item.created_at))}</Text>
+                  </View>
+                  {!item.is_read && <View style={styles.unreadDot} />}
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Ionicons name="notifications-off-outline" size={48} color="#d1d5db" />
+                  <Text style={styles.emptyStateTitle}>No Notifications</Text>
+                  <Text style={styles.emptyStateSubtitle}>You're all caught up!</Text>
+                </View>
+              }
+            />
+          </SafeAreaView>
+        </Modal>
       </SafeAreaView>
     </View>
   );
@@ -3055,7 +3057,7 @@ export default function LeaveManagement() {
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: Colors.background },
   safeArea: { flex: 1 },
-  
+
   // Modern White Header
   headerContainer: {
     backgroundColor: Colors.surface,
@@ -3065,12 +3067,12 @@ const styles = StyleSheet.create({
   },
   headerContent: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.sm },
   headerTop: { flexDirection: "row", alignItems: "center", marginBottom: Spacing.xl },
-  backButton: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: BorderRadius.md, 
-    backgroundColor: Colors.surface, 
-    alignItems: "center", 
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#e2e8f0",
@@ -3079,15 +3081,91 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: "700", color: Colors.headerText },
   headerSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
   headerActions: { flexDirection: "row", gap: Spacing.sm },
-  headerIconBtn: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: BorderRadius.md, 
-    backgroundColor: Colors.primaryLight, 
-    alignItems: "center", 
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primaryLight,
+    alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#bfdbfe",
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#ef4444',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  notificationCard: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 12,
+    alignItems: 'flex-start',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  notificationCardUnread: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#fcd34d',
+  },
+  notificationIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  notificationContent: {
+    flex: 1,
+  },
+  notificationTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  notificationTitleUnread: {
+    color: '#1e293b',
+    fontWeight: '700',
+  },
+  notificationMessage: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 6,
+    lineHeight: 18,
+  },
+  notificationTime: {
+    fontSize: 11,
+    color: '#9ca3af',
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ef4444',
+    marginLeft: 8,
+    marginTop: 6,
   },
 
   statsRow: { flexDirection: "row", gap: 8, marginTop: 8 },

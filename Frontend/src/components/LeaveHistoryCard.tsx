@@ -17,6 +17,7 @@ interface LeaveHistoryCardProps {
   onDelete?: (leaveId: number) => void;
   getTypeColor: (type: string) => string;
   getStatusColor: (status: string) => string;
+  showEmployeeName?: boolean;
 }
 
 const getStatusIcon = (status: string): any => {
@@ -39,9 +40,9 @@ const formatApprovalDate = (dateStr: string | null | undefined): string => {
   if (!dateStr) return '';
   try {
     const date = new Date(dateStr);
-    return date.toLocaleDateString('en-IN', { 
-      day: '2-digit', 
-      month: 'short', 
+    return date.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
@@ -57,6 +58,7 @@ export const LeaveHistoryCard: React.FC<LeaveHistoryCardProps> = ({
   onDelete,
   getTypeColor,
   getStatusColor,
+  showEmployeeName = false,
 }) => {
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
   const isPending = leave.status === 'Pending';
@@ -111,6 +113,16 @@ export const LeaveHistoryCard: React.FC<LeaveHistoryCardProps> = ({
           {/* Header Row: Type & Status */}
           <View style={styles.headerRow}>
             <View style={styles.typeSection}>
+              {showEmployeeName && leave.employee_name && (
+                <View style={styles.employeeNameRow}>
+                  <View style={styles.employeeAvatarMini}>
+                    <Text style={styles.employeeInitialsMini}>
+                      {leave.employee_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={styles.employeeNameText}>{leave.employee_name}</Text>
+                </View>
+              )}
               <View
                 style={[
                   styles.typeBadge,
@@ -203,10 +215,10 @@ export const LeaveHistoryCard: React.FC<LeaveHistoryCardProps> = ({
               isApproved ? styles.approverSectionApproved : styles.approverSectionRejected
             ]}>
               <View style={styles.approverHeader}>
-                <Ionicons 
-                  name={isApproved ? "person-circle" : "person-circle-outline"} 
-                  size={18} 
-                  color={isApproved ? "#059669" : "#dc2626"} 
+                <Ionicons
+                  name={isApproved ? "person-circle" : "person-circle-outline"}
+                  size={18}
+                  color={isApproved ? "#059669" : "#dc2626"}
                 />
                 <Text style={[
                   styles.approverLabel,
@@ -519,5 +531,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#ef4444',
+  },
+  employeeNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+    backgroundColor: '#f8fafc',
+    padding: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  employeeAvatarMini: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  employeeInitialsMini: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  employeeNameText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1e293b',
   },
 });

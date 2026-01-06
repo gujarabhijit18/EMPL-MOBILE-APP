@@ -29,6 +29,7 @@ interface SelectProps {
   chevronColor?: string;
   error?: string;
   containerStyle?: any;
+  leftIcon?: React.ReactNode;
 }
 
 export const Select: React.FC<SelectProps> = ({
@@ -45,6 +46,7 @@ export const Select: React.FC<SelectProps> = ({
   textStyle,
   error,
   containerStyle,
+  leftIcon,
 }) => {
   const [open, setOpen] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
@@ -114,6 +116,7 @@ export const Select: React.FC<SelectProps> = ({
           activeOpacity={0.7}
           disabled={disabled}
         >
+          {leftIcon && <View style={styles.leftIconContainer}>{leftIcon}</View>}
           <Text
             numberOfLines={1}
             style={[styles.triggerText, !value && styles.placeholderText, textStyle]}
@@ -308,6 +311,11 @@ const styles = StyleSheet.create({
     color: "#EF4444",
     marginTop: 4,
     paddingHorizontal: 2,
+  },
+  leftIconContainer: {
+    paddingLeft: 12,
+    justifyContent: "center",
+    alignItems: "center",
   },
 });
 

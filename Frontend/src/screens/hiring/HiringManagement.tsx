@@ -92,7 +92,7 @@ export default function HiringManagement() {
 
         {/* Header */}
         <LinearGradient
-          colors={["#4F46E5", "#6366F1", "#818CF8"]}
+          colors={["#4F46E5", "#6366F1", "#818CF8"] as const}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.headerGradient}
@@ -139,7 +139,7 @@ export default function HiringManagement() {
               ]}
             >
               <LinearGradient
-                colors={["#4F46E5", "#6366F1"]}
+                colors={["#4F46E5", "#6366F1"] as const}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.iconGradient}
